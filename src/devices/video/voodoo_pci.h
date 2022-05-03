@@ -2,58 +2,138 @@
 // copyright-holders:Ted Green
 // 3dfx Voodoo Graphics SST-1/2 emulator.
 
-#ifndef VOODOO_PCI_H
-#define VOODOO_PCI_H
+#ifndef MAME_VIDEO_VOODOO_PCI_H
+#define MAME_VIDEO_VOODOO_PCI_H
+
+#pragma once
 
 #include "machine/pci.h"
 #include "voodoo.h"
+#include "voodoo_banshee.h"
 
-#define MCFG_VOODOO_PCI_ADD(_tag,  _type, _cpu_tag) \
-	voodoo_pci_device::set_type(_type); \
-	MCFG_PCI_DEVICE_ADD(_tag, VOODOO_PCI, 0, 0, 0, 0) \
-	downcast<voodoo_pci_device *>(device)->set_cpu_tag(_cpu_tag);
-
-#define MCFG_VOODOO_PCI_FBMEM(_value) \
-	downcast<voodoo_pci_device *>(device)->set_fbmem(_value);
-
-#define MCFG_VOODOO_PCI_TMUMEM(_value1, _value2) \
-	downcast<voodoo_pci_device *>(device)->set_tmumem(_value1, _value2);
-
-class voodoo_pci_device : public pci_device {
+class voodoo_pci_device : public pci_device
+{
 public:
-	voodoo_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
-	virtual void map_extra(UINT64 memory_window_start, UINT64 memory_window_end, UINT64 memory_offset, address_space *memory_space,
-							UINT64 io_window_start, UINT64 io_window_end, UINT64 io_offset, address_space *io_space) override;
-	// optional information overrides
-	virtual machine_config_constructor device_mconfig_additions() const override;
-	UINT32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
-	virtual DECLARE_ADDRESS_MAP(config_map, 32) override;
+	template <typename T> void set_cpu(T &&tag) { m_cpu.set_tag(std::forward<T>(tag)); }
+	template <typename T> void set_screen(T &&tag) { m_screen.set_tag(std::forward<T>(tag)); }
+	void set_fbmem(int fbmem) { m_fbmem = fbmem; }
+	void set_tmumem(int tmumem0, int tmumem1) { m_tmumem0 = tmumem0; m_tmumem1 = tmumem1; }
+	void set_status_cycles(u32 cycles) { m_status_cycles = cycles; }
+	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
-	void set_cpu_tag(const char *tag);
-	static void set_type(const int type) {m_type = type;}
-	void set_fbmem(const int fbmem) {m_fbmem = fbmem;}
-	void set_tmumem(const int tmumem0, const int tmumem1) {m_tmumem0 = tmumem0; m_tmumem1 = tmumem1;}
-
-	DECLARE_READ32_MEMBER(  pcictrl_r);
-	DECLARE_WRITE32_MEMBER( pcictrl_w);
+	u32 vga_r(offs_t offset, u32 mem_mask = ~0);
+	void vga_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 
 protected:
+	voodoo_pci_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock);
+
+	virtual void map_extra(u64 memory_window_start, u64 memory_window_end, u64 memory_offset, address_space *memory_space,
+							u64 io_window_start, u64 io_window_end, u64 io_offset, address_space *io_space) override;
+
+	virtual void config_map(address_map &map) override;
+
+	void postload(void);
+
 	virtual void device_start() override;
 	virtual void device_reset() override;
 
-private:
-	required_device<voodoo_device> m_voodoo;
-	static int m_type;
+	required_device<generic_voodoo_device> m_generic_voodoo;
+	optional_device<cpu_device> m_cpu;
+	optional_device<screen_device> m_screen;
 	int m_fbmem, m_tmumem0, m_tmumem1;
-	const char *m_cpu_tag;
+	u32 m_status_cycles;
 
-	UINT32 m_pcictrl_reg[0x10];
-	DECLARE_ADDRESS_MAP(voodoo_reg_map, 32);
-	DECLARE_ADDRESS_MAP(banshee_reg_map, 32);
-	DECLARE_ADDRESS_MAP(lfb_map, 32);
-	DECLARE_ADDRESS_MAP(io_map, 32);
+	u32 m_pcictrl_reg[0x20];
+
+	u32 pcictrl_r(offs_t offset, u32 mem_mask = ~0);
+	void pcictrl_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 };
 
-extern const device_type VOODOO_PCI;
+class voodoo_1_pci_device : public voodoo_pci_device
+{
+public:
+	template <typename T, typename U>
+	voodoo_1_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock, T &&cpu_tag, U &&screen_tag)
+		: voodoo_1_pci_device(mconfig, tag, owner, clock)
+	{
+		set_cpu(std::forward<T>(cpu_tag));
+		set_screen(std::forward<U>(screen_tag));
+	}
 
-#endif
+	voodoo_1_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
+
+protected:
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+	required_device<voodoo_1_device> m_voodoo;
+};
+
+class voodoo_2_pci_device : public voodoo_pci_device
+{
+public:
+	template <typename T, typename U>
+	voodoo_2_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock, T &&cpu_tag, U &&screen_tag)
+		: voodoo_2_pci_device(mconfig, tag, owner, clock)
+	{
+		set_cpu(std::forward<T>(cpu_tag));
+		set_screen(std::forward<U>(screen_tag));
+	}
+
+	voodoo_2_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
+
+protected:
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+	required_device<voodoo_2_device> m_voodoo;
+};
+
+class voodoo_banshee_pci_device : public voodoo_pci_device
+{
+public:
+	template <typename T, typename U>
+	voodoo_banshee_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock, T &&cpu_tag, U &&screen_tag)
+		: voodoo_banshee_pci_device(mconfig, tag, owner, clock)
+	{
+		set_cpu(std::forward<T>(cpu_tag));
+		set_screen(std::forward<U>(screen_tag));
+	}
+
+	voodoo_banshee_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
+
+protected:
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+
+	virtual void map_extra(u64 memory_window_start, u64 memory_window_end, u64 memory_offset, address_space *memory_space,
+							u64 io_window_start, u64 io_window_end, u64 io_offset, address_space *io_space) override;
+	required_device<voodoo_banshee_device> m_voodoo;
+};
+
+class voodoo_3_pci_device : public voodoo_pci_device
+{
+public:
+	template <typename T, typename U>
+	voodoo_3_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock, T &&cpu_tag, U &&screen_tag)
+		: voodoo_3_pci_device(mconfig, tag, owner, clock)
+	{
+		set_cpu(std::forward<T>(cpu_tag));
+		set_screen(std::forward<U>(screen_tag));
+	}
+
+	voodoo_3_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
+
+protected:
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+
+	virtual void map_extra(u64 memory_window_start, u64 memory_window_end, u64 memory_offset, address_space *memory_space,
+							u64 io_window_start, u64 io_window_end, u64 io_offset, address_space *io_space) override;
+	required_device<voodoo_3_device> m_voodoo;
+};
+
+DECLARE_DEVICE_TYPE(VOODOO_1_PCI, voodoo_1_pci_device)
+DECLARE_DEVICE_TYPE(VOODOO_2_PCI, voodoo_2_pci_device)
+DECLARE_DEVICE_TYPE(VOODOO_BANSHEE_PCI, voodoo_banshee_pci_device)
+DECLARE_DEVICE_TYPE(VOODOO_3_PCI, voodoo_3_pci_device)
+
+#endif // MAME_VIDEO_VOODOO_PCI_H

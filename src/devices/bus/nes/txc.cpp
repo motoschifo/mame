@@ -37,40 +37,40 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_TXC_22211 = &device_creator<nes_txc_22211_device>;
-const device_type NES_TXC_DUMARACING = &device_creator<nes_txc_dumarc_device>;
-const device_type NES_TXC_MJBLOCK = &device_creator<nes_txc_mjblock_device>;
-const device_type NES_TXC_STRIKEW = &device_creator<nes_txc_strikew_device>;
-const device_type NES_TXC_COMMANDOS = &device_creator<nes_txc_commandos_device>;
+DEFINE_DEVICE_TYPE(NES_TXC_22211,      nes_txc_22211_device,     "nes_txc_22211",   "NES Cart TXC 22211 PCB")
+DEFINE_DEVICE_TYPE(NES_TXC_DUMARACING, nes_txc_dumarc_device,    "nes_txc_dumarc",  "NES Cart TXC Du Ma Racing PCB")
+DEFINE_DEVICE_TYPE(NES_TXC_MJBLOCK,    nes_txc_mjblock_device,   "nes_txc_mjblock", "NES Cart TXC Mahjong Block PCB")
+DEFINE_DEVICE_TYPE(NES_TXC_STRIKEW,    nes_txc_strikew_device,   "nes_txc_strikew", "NES Cart TXC Strike Wolf PCB")
+DEFINE_DEVICE_TYPE(NES_TXC_COMMANDOS,  nes_txc_commandos_device, "nes_txc_comm",    "NES Cart TXC Cart Commandos PCB") // and others
 
 
-nes_txc_22211_device::nes_txc_22211_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source)
+nes_txc_22211_device::nes_txc_22211_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
 {
 }
 
-nes_txc_22211_device::nes_txc_22211_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_TXC_22211, "NES Cart TXC 22211 PCB", tag, owner, clock, "nes_txc_22211", __FILE__)
+nes_txc_22211_device::nes_txc_22211_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_TXC_22211, tag, owner, clock)
 {
 }
 
-nes_txc_dumarc_device::nes_txc_dumarc_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txc_22211_device(mconfig, NES_TXC_DUMARACING, "NES Cart TXC Du Ma Racing PCB", tag, owner, clock, "nes_dumarc", __FILE__)
+nes_txc_dumarc_device::nes_txc_dumarc_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_txc_22211_device(mconfig, NES_TXC_DUMARACING, tag, owner, clock)
 {
 }
 
-nes_txc_mjblock_device::nes_txc_mjblock_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txc_22211_device(mconfig, NES_TXC_MJBLOCK, "NES Cart TXC Mahjong Block PCB", tag, owner, clock, "nes_mjblock", __FILE__)
+nes_txc_mjblock_device::nes_txc_mjblock_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_txc_22211_device(mconfig, NES_TXC_MJBLOCK, tag, owner, clock)
 {
 }
 
-nes_txc_strikew_device::nes_txc_strikew_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_TXC_STRIKEW, "NES Cart Strike Wolf PCB", tag, owner, clock, "nes_txc_strikew", __FILE__)
+nes_txc_strikew_device::nes_txc_strikew_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_TXC_STRIKEW, tag, owner, clock)
 {
 }
 
-nes_txc_commandos_device::nes_txc_commandos_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_TXC_COMMANDOS, "NES Cart Commandos (and others) PCB", tag, owner, clock, "nes_txc_comm", __FILE__)
+nes_txc_commandos_device::nes_txc_commandos_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_TXC_COMMANDOS, tag, owner, clock)
 {
 }
 
@@ -90,31 +90,6 @@ void nes_txc_22211_device::pcb_reset()
 	chr8(0, m_chr_source);
 	m_reg[0] = m_reg[1] = m_reg[2] = m_reg[3] = 0;
 }
-
-void nes_txc_strikew_device::device_start()
-{
-	common_start();
-}
-
-void nes_txc_strikew_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
-}
-
-void nes_txc_commandos_device::device_start()
-{
-	common_start();
-}
-
-void nes_txc_commandos_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
-}
-
 
 
 
@@ -139,7 +114,7 @@ void nes_txc_commandos_device::pcb_reset()
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_txc_22211_device::write_l)
+void nes_txc_22211_device::write_l(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("TXC 22111 write_l, offset: %04x, data: %02x\n", offset, data));
 
@@ -147,7 +122,7 @@ WRITE8_MEMBER(nes_txc_22211_device::write_l)
 		m_reg[offset & 0x03] = data;
 }
 
-READ8_MEMBER(nes_txc_22211_device::read_l)
+uint8_t nes_txc_22211_device::read_l(offs_t offset)
 {
 	LOG_MMC(("TXC 22111 read_l, offset: %04x\n", offset));
 
@@ -157,7 +132,7 @@ READ8_MEMBER(nes_txc_22211_device::read_l)
 		return 0x00;
 }
 
-WRITE8_MEMBER(nes_txc_22211_device::write_h)
+void nes_txc_22211_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("TXC 22111 write_h, offset: %04x, data: %02x\n", offset, data));
 
@@ -180,12 +155,12 @@ WRITE8_MEMBER(nes_txc_22211_device::write_h)
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_txc_dumarc_device::write_h)
+void nes_txc_dumarc_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("TXC Du Ma Racing write_h, offset: %04x, data: %02x\n", offset, data));
 
 	prg32(m_reg[2] >> 2);
-	chr8((((data ^ m_reg[2]) >> 3) & 0x02) | (((data ^ m_reg[2]) >> 5) & 0x01), CHRROM);
+	chr8(bitswap<2>(data ^ m_reg[2], 4, 5), CHRROM);
 }
 
 /*-------------------------------------------------
@@ -203,7 +178,7 @@ WRITE8_MEMBER(nes_txc_dumarc_device::write_h)
 
  -------------------------------------------------*/
 
-READ8_MEMBER(nes_txc_mjblock_device::read_l)
+uint8_t nes_txc_mjblock_device::read_l(offs_t offset)
 {
 	LOG_MMC(("TXC mjblock read_l, offset: %04x\n", offset));
 
@@ -221,11 +196,12 @@ READ8_MEMBER(nes_txc_mjblock_device::read_l)
 
  iNES: mapper 36
 
- In MESS: Partially Supported (Policeman has glitches)
+ In MESS: Supported (Policeman requires no bus conflict
+          though, or it has glitches)
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_txc_strikew_device::write_h)
+void nes_txc_strikew_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("TXC Strike Wolf write_h, offset: %04x, data: %02x\n", offset, data));
 
@@ -255,12 +231,12 @@ WRITE8_MEMBER(nes_txc_strikew_device::write_h)
 
  -------------------------------------------------*/
 
-READ8_MEMBER(nes_txc_commandos_device::read_l)
+uint8_t nes_txc_commandos_device::read_l(offs_t offset)
 {
 	return 0x50;
 }
 
-WRITE8_MEMBER(nes_txc_commandos_device::write_h)
+void nes_txc_commandos_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("TXC Commandos write_h, offset: %04x, data: %02x\n", offset, data));
 

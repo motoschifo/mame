@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:Aaron Giles
+// copyright-holders:Andrew Gardner, Vas Crabb
 /*********************************************************************
 
     dvwpoints.h
@@ -7,17 +7,13 @@
     Watchpoint debugger view.
 
 ***************************************************************************/
+#ifndef MAME_EMU_DEBUG_DVWPOINTS_H
+#define MAME_EMU_DEBUG_DVWPOINTS_H
 
-#ifndef __DVWPOINTS_H__
-#define __DVWPOINTS_H__
+#pragma once
 
-#include "debugvw.h"
 #include "debugcpu.h"
-
-
-//**************************************************************************
-//  CONSTANTS
-//**************************************************************************
+#include "debugvw.h"
 
 
 //**************************************************************************
@@ -27,7 +23,6 @@
 // debug view for watchpoints
 class debug_view_watchpoints : public debug_view
 {
-	friend resource_pool_object<debug_view_watchpoints>::~resource_pool_object();
 	friend class debug_view_manager;
 
 	// construction/destruction
@@ -47,9 +42,8 @@ private:
 
 
 	// internal state
-	int (*m_sortType)(void const *, void const *);
-	std::vector<device_debug::watchpoint *> m_buffer;
+	bool (*m_sortType)(const debug_watchpoint *, const debug_watchpoint *);
+	std::vector<debug_watchpoint *> m_buffer;
 };
 
-
-#endif
+#endif // MAME_EMU_DEBUG_DVWPOINTS_H

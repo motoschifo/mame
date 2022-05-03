@@ -7,17 +7,13 @@
     PC disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_PC_DSK_H
+#define MAME_FORMATS_PC_DSK_H
 
-#ifndef PC_DSK_H
-#define PC_DSK_H
+#pragma once
 
 #include "flopimg.h"
 #include "upd765_dsk.h"
-
-/**************************************************************************/
-
-LEGACY_FLOPPY_OPTIONS_EXTERN(pc);
-
 
 class pc_format : public upd765_format
 {
@@ -32,6 +28,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_PC_FORMAT;
+extern const pc_format FLOPPY_PC_FORMAT;
 
-#endif /* PC_DSK_H */
+#endif // MAME_FORMATS_PC_DSK_H

@@ -15,35 +15,67 @@
 
 #include <string>
 #include <vector>
-#include <map>
 
-#include "uniform.h"
+struct slider_state;
 
 class bgfx_slider
 {
 public:
 	enum slider_type
 	{
-		SLIDER_BOOL,
+		SLIDER_INT_ENUM,
 		SLIDER_FLOAT,
 		SLIDER_INT,
 		SLIDER_COLOR,
 		SLIDER_VEC2
 	};
 
-	bgfx_slider(slider_type type, std::string name, std::string description, void *defaults, void *min, void *max);
-	~bgfx_slider();
+	enum screen_type
+	{
+		SLIDER_SCREEN_TYPE_NONE = 0,
+		SLIDER_SCREEN_TYPE_RASTER = 1,
+		SLIDER_SCREEN_TYPE_VECTOR = 2,
+		SLIDER_SCREEN_TYPE_VECTOR_OR_RASTER = SLIDER_SCREEN_TYPE_VECTOR | SLIDER_SCREEN_TYPE_RASTER,
+		SLIDER_SCREEN_TYPE_LCD = 4,
+		SLIDER_SCREEN_TYPE_LCD_OR_RASTER = SLIDER_SCREEN_TYPE_LCD | SLIDER_SCREEN_TYPE_RASTER,
+		SLIDER_SCREEN_TYPE_LCD_OR_VECTOR = SLIDER_SCREEN_TYPE_LCD | SLIDER_SCREEN_TYPE_VECTOR,
+		SLIDER_SCREEN_TYPE_ANY = SLIDER_SCREEN_TYPE_RASTER | SLIDER_SCREEN_TYPE_VECTOR | SLIDER_SCREEN_TYPE_LCD
+	};
 
-	static size_t size(slider_type type);
-	static size_t storage_size(slider_type type);
+	bgfx_slider(running_machine& machine, std::string name, float min, float def, float max, float step, slider_type type, screen_type screen, std::string format, std::string description, std::vector<std::string>& strings);
+	virtual ~bgfx_slider();
+
+	int32_t update(std::string *str, int32_t newval);
+
+	// Getters
+	std::string name() const { return m_name; }
+	slider_type type() const { return m_type; }
+	float value() const { return m_value; }
+	float uniform_value() const { return float(m_value); }
+	slider_state *core_slider() const { return m_slider_state.get(); }
+	size_t size() const { return get_size_for_type(m_type); }
+	static size_t get_size_for_type(slider_type type);
+
+	// Setters
+	void import(float val);
+
 protected:
+	std::unique_ptr<slider_state> create_core_slider();
+	int32_t as_int() const { return int32_t(floor(m_value / m_step + 0.5f)); }
 
-	slider_type m_type;
-	std::string m_name;
-	std::string m_description;
-	char*   m_data;
-	char*   m_min;
-	char*   m_max;
+	std::string     m_name;
+	float           m_min;
+	float           m_default;
+	float           m_max;
+	float           m_step;
+	slider_type     m_type;
+	screen_type     m_screen_type;
+	std::string     m_format;
+	std::string     m_description;
+	std::vector<std::string> m_strings;
+	float           m_value;
+	std::unique_ptr<slider_state> m_slider_state;
+	running_machine&m_machine;
 };
 
 #endif // __DRAWBGFX_SLIDER__

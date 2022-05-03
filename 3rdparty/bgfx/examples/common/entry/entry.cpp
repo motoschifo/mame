@@ -1,12 +1,12 @@
 /*
- * Copyright 2011-2016 Branimir Karadzic. All rights reserved.
+ * Copyright 2011-2021 Branimir Karadzic. All rights reserved.
  * License: https://github.com/bkaradzic/bgfx#license-bsd-2-clause
  */
 
 #include <bx/bx.h>
+#include <bx/file.h>
+#include <bx/sort.h>
 #include <bgfx/bgfx.h>
-#include <bx/string.h>
-#include <bx/crtimpl.h>
 
 #include <time.h>
 
@@ -18,38 +18,55 @@
 #include "cmd.h"
 #include "input.h"
 
-#define RMT_ENABLED ENTRY_CONFIG_PROFILER
-#include <remotery/lib/Remotery.h>
-
-extern "C" int _main_(int _argc, char** _argv);
+extern "C" int32_t _main_(int32_t _argc, char** _argv);
 
 namespace entry
 {
 	static uint32_t s_debug = BGFX_DEBUG_NONE;
 	static uint32_t s_reset = BGFX_RESET_NONE;
+	static uint32_t s_width = ENTRY_DEFAULT_WIDTH;
+	static uint32_t s_height = ENTRY_DEFAULT_HEIGHT;
 	static bool s_exit = false;
-
-	static Remotery* s_rmt = NULL;
 
 	static bx::FileReaderI* s_fileReader = NULL;
 	static bx::FileWriterI* s_fileWriter = NULL;
 
 	extern bx::AllocatorI* getDefaultAllocator();
-	static bx::AllocatorI* s_allocator = getDefaultAllocator();
+	bx::AllocatorI* g_allocator = getDefaultAllocator();
 
-	void* rmtMalloc(void* /*_context*/, rmtU32 _size)
-	{
-		return BX_ALLOC(s_allocator, _size);
-	}
+	typedef bx::StringT<&g_allocator> String;
 
-	void* rmtRealloc(void* /*_context*/, void* _ptr, rmtU32 _size)
-	{
-		return BX_REALLOC(s_allocator, _ptr, _size);
-	}
+	static String s_currentDir;
 
-	void rmtFree(void* /*_context*/, void* _ptr)
+	class FileReader : public bx::FileReader
 	{
-		BX_FREE(s_allocator, _ptr);
+		typedef bx::FileReader super;
+
+	public:
+		virtual bool open(const bx::FilePath& _filePath, bx::Error* _err) override
+		{
+			String filePath(s_currentDir);
+			filePath.append(_filePath);
+			return super::open(filePath.getPtr(), _err);
+		}
+	};
+
+	class FileWriter : public bx::FileWriter
+	{
+		typedef bx::FileWriter super;
+
+	public:
+		virtual bool open(const bx::FilePath& _filePath, bool _append, bx::Error* _err) override
+		{
+			String filePath(s_currentDir);
+			filePath.append(_filePath);
+			return super::open(filePath.getPtr(), _append, _err);
+		}
+	};
+
+	void setCurrentDir(const char* _dir)
+	{
+		s_currentDir.set(_dir);
 	}
 
 #if ENTRY_CONFIG_IMPLEMENT_DEFAULT_ALLOCATOR
@@ -58,7 +75,7 @@ namespace entry
 BX_PRAGMA_DIAGNOSTIC_PUSH();
 BX_PRAGMA_DIAGNOSTIC_IGNORED_MSVC(4459); // warning C4459: declaration of 's_allocator' hides global declaration
 BX_PRAGMA_DIAGNOSTIC_IGNORED_CLANG_GCC("-Wshadow");
-		static bx::CrtAllocator s_allocator;
+		static bx::DefaultAllocator s_allocator;
 		return &s_allocator;
 BX_PRAGMA_DIAGNOSTIC_POP();
 	}
@@ -172,7 +189,7 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 	const char* getName(Key::Enum _key)
 	{
-		BX_CHECK(_key < Key::Count, "Invalid key %d.", _key);
+		BX_ASSERT(_key < Key::Count, "Invalid key %d.", _key);
 		return s_keyName[_key];
 	}
 
@@ -188,7 +205,7 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 		const bool isNumber = (Key::Key0 <= _key && _key <= Key::Key9);
 		if (isNumber)
 		{
-			return '0' + (_key - Key::Key0);
+			return '0' + char(_key - Key::Key0);
 		}
 
 		const bool isChar = (Key::KeyA <= _key && _key <= Key::KeyZ);
@@ -197,7 +214,7 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 			enum { ShiftMask = Modifier::LeftShift|Modifier::RightShift };
 
 			const bool shift = !!(_modifiers&ShiftMask);
-			return (shift ? 'A' : 'a') + (_key - Key::KeyA);
+			return (shift ? 'A' : 'a') + char(_key - Key::KeyA);
 		}
 
 		switch (_key)
@@ -217,13 +234,17 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 	bool setOrToggle(uint32_t& _flags, const char* _name, uint32_t _bit, int _first, int _argc, char const* const* _argv)
 	{
-		if (0 == strcmp(_argv[_first], _name) )
+		if (0 == bx::strCmp(_argv[_first], _name) )
 		{
 			int arg = _first+1;
 			if (_argc > arg)
 			{
 				_flags &= ~_bit;
-				_flags |= bx::toBool(_argv[arg]) ? _bit : 0;
+
+				bool set = false;
+				bx::fromString(&set, _argv[arg]);
+
+				_flags |= set ? _bit : 0;
 			}
 			else
 			{
@@ -238,13 +259,23 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 	int cmdMouseLock(CmdContext* /*_context*/, void* /*_userData*/, int _argc, char const* const* _argv)
 	{
-		if (_argc > 1)
+		if (1 < _argc)
 		{
-			inputSetMouseLock(_argc > 1 ? bx::toBool(_argv[1]) : !inputIsMouseLocked() );
-			return 0;
+			bool set = false;
+			if (2 < _argc)
+			{
+				bx::fromString(&set, _argv[1]);
+				inputSetMouseLock(set);
+			}
+			else
+			{
+				inputSetMouseLock(!inputIsMouseLocked() );
+			}
+
+			return bx::kExitSuccess;
 		}
 
-		return 1;
+		return bx::kExitFailure;
 	}
 
 	int cmdGraphics(CmdContext* /*_context*/, void* /*_userData*/, int _argc, char const* const* _argv)
@@ -253,9 +284,6 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 		{
 			if (setOrToggle(s_reset, "vsync",       BGFX_RESET_VSYNC,              1, _argc, _argv)
 			||  setOrToggle(s_reset, "maxaniso",    BGFX_RESET_MAXANISOTROPY,      1, _argc, _argv)
-			||  setOrToggle(s_reset, "hmd",         BGFX_RESET_HMD,                1, _argc, _argv)
-			||  setOrToggle(s_reset, "hmddbg",      BGFX_RESET_HMD_DEBUG,          1, _argc, _argv)
-			||  setOrToggle(s_reset, "hmdrecenter", BGFX_RESET_HMD_RECENTER,       1, _argc, _argv)
 			||  setOrToggle(s_reset, "msaa",        BGFX_RESET_MSAA_X16,           1, _argc, _argv)
 			||  setOrToggle(s_reset, "flush",       BGFX_RESET_FLUSH_AFTER_RENDER, 1, _argc, _argv)
 			||  setOrToggle(s_reset, "flip",        BGFX_RESET_FLIP_AFTER_RENDER,  1, _argc, _argv)
@@ -263,21 +291,25 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 			||  setOrToggle(s_reset, "depthclamp",  BGFX_RESET_DEPTH_CLAMP,        1, _argc, _argv)
 			   )
 			{
-				return 0;
+				return bx::kExitSuccess;
 			}
 			else if (setOrToggle(s_debug, "stats",     BGFX_DEBUG_STATS,     1, _argc, _argv)
 				 ||  setOrToggle(s_debug, "ifh",       BGFX_DEBUG_IFH,       1, _argc, _argv)
 				 ||  setOrToggle(s_debug, "text",      BGFX_DEBUG_TEXT,      1, _argc, _argv)
-				 ||  setOrToggle(s_debug, "wireframe", BGFX_DEBUG_WIREFRAME, 1, _argc, _argv) )
+				 ||  setOrToggle(s_debug, "wireframe", BGFX_DEBUG_WIREFRAME, 1, _argc, _argv)
+				 ||  setOrToggle(s_debug, "profiler",  BGFX_DEBUG_PROFILER,  1, _argc, _argv)
+				    )
 			{
 				bgfx::setDebug(s_debug);
-				return 0;
+				return bx::kExitSuccess;
 			}
-			else if (0 == strcmp(_argv[1], "screenshot") )
+			else if (0 == bx::strCmp(_argv[1], "screenshot") )
 			{
+				bgfx::FrameBufferHandle fbh = BGFX_INVALID_HANDLE;
+
 				if (_argc > 2)
 				{
-					bgfx::saveScreenShot(_argv[2]);
+					bgfx::requestScreenShot(fbh, _argv[2]);
 				}
 				else
 				{
@@ -286,26 +318,26 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 					char filePath[256];
 					bx::snprintf(filePath, sizeof(filePath), "temp/screenshot-%d", tt);
-					bgfx::saveScreenShot(filePath);
+					bgfx::requestScreenShot(fbh, filePath);
 				}
 
-				return 0;
+				return bx::kExitSuccess;
 			}
-			else if (0 == strcmp(_argv[1], "fullscreen") )
+			else if (0 == bx::strCmp(_argv[1], "fullscreen") )
 			{
 				WindowHandle window = { 0 };
 				toggleFullscreen(window);
-				return 0;
+				return bx::kExitSuccess;
 			}
 		}
 
-		return 1;
+		return bx::kExitFailure;
 	}
 
 	int cmdExit(CmdContext* /*_context*/, void* /*_userData*/, int /*_argc*/, char const* const* /*_argv*/)
 	{
 		s_exit = true;
-		return 0;
+		return bx::kExitSuccess;
 	}
 
 	static const InputBinding s_bindings[] =
@@ -316,17 +348,17 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 		{ entry::Key::KeyF,         entry::Modifier::RightCtrl, 1, NULL, "graphics fullscreen"               },
 		{ entry::Key::Return,       entry::Modifier::RightAlt,  1, NULL, "graphics fullscreen"               },
 		{ entry::Key::F1,           entry::Modifier::None,      1, NULL, "graphics stats"                    },
+		{ entry::Key::F1,           entry::Modifier::LeftCtrl,  1, NULL, "graphics ifh"                      },
 		{ entry::Key::GamepadStart, entry::Modifier::None,      1, NULL, "graphics stats"                    },
 		{ entry::Key::F1,           entry::Modifier::LeftShift, 1, NULL, "graphics stats 0\ngraphics text 0" },
 		{ entry::Key::F3,           entry::Modifier::None,      1, NULL, "graphics wireframe"                },
-		{ entry::Key::F4,           entry::Modifier::None,      1, NULL, "graphics hmd"                      },
-		{ entry::Key::F4,           entry::Modifier::LeftShift, 1, NULL, "graphics hmdrecenter"              },
-		{ entry::Key::F4,           entry::Modifier::LeftCtrl,  1, NULL, "graphics hmddbg"                   },
+		{ entry::Key::F6,           entry::Modifier::None,      1, NULL, "graphics profiler"                 },
 		{ entry::Key::F7,           entry::Modifier::None,      1, NULL, "graphics vsync"                    },
 		{ entry::Key::F8,           entry::Modifier::None,      1, NULL, "graphics msaa"                     },
 		{ entry::Key::F9,           entry::Modifier::None,      1, NULL, "graphics flush"                    },
 		{ entry::Key::F10,          entry::Modifier::None,      1, NULL, "graphics hidpi"                    },
 		{ entry::Key::Print,        entry::Modifier::None,      1, NULL, "graphics screenshot"               },
+		{ entry::Key::KeyP,         entry::Modifier::LeftCtrl,  1, NULL, "graphics screenshot"               },
 
 		INPUT_BINDING_END
 	};
@@ -339,94 +371,293 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 	}
 #endif // BX_PLATFORM_EMSCRIPTEN
 
-	int runApp(AppI* _app, int _argc, char** _argv)
+	static AppI*    s_currentApp = NULL;
+	static AppI*    s_apps       = NULL;
+	static uint32_t s_numApps    = 0;
+
+	static char s_restartArgs[1024] = { '\0' };
+
+	static AppI* getCurrentApp(AppI* _set = NULL)
 	{
-		_app->init(_argc, _argv);
+		if (NULL != _set)
+		{
+			s_currentApp = _set;
+		}
+		else if (NULL == s_currentApp)
+		{
+			s_currentApp = getFirstApp();
+		}
+
+		return s_currentApp;
+	}
+
+	static AppI* getNextWrap(AppI* _app)
+	{
+		AppI* next = _app->getNext();
+		if (NULL != next)
+		{
+			return next;
+		}
+
+		return getFirstApp();
+	}
+
+	int cmdApp(CmdContext* /*_context*/, void* /*_userData*/, int _argc, char const* const* _argv)
+	{
+		if (0 == bx::strCmp(_argv[1], "restart") )
+		{
+			if (2 == _argc)
+			{
+				bx::strCopy(s_restartArgs, BX_COUNTOF(s_restartArgs), getCurrentApp()->getName() );
+				return bx::kExitSuccess;
+			}
+
+			if (0 == bx::strCmp(_argv[2], "next") )
+			{
+				AppI* next = getNextWrap(getCurrentApp() );
+				bx::strCopy(s_restartArgs, BX_COUNTOF(s_restartArgs), next->getName() );
+				return bx::kExitSuccess;
+			}
+			else if (0 == bx::strCmp(_argv[2], "prev") )
+			{
+				AppI* prev = getCurrentApp();
+				for (AppI* app = getNextWrap(prev); app != getCurrentApp(); app = getNextWrap(app) )
+				{
+					prev = app;
+				}
+
+				bx::strCopy(s_restartArgs, BX_COUNTOF(s_restartArgs), prev->getName() );
+				return bx::kExitSuccess;
+			}
+
+			for (AppI* app = getFirstApp(); NULL != app; app = app->getNext() )
+			{
+				if (0 == bx::strCmp(_argv[2], app->getName() ) )
+				{
+					bx::strCopy(s_restartArgs, BX_COUNTOF(s_restartArgs), app->getName() );
+					return bx::kExitSuccess;
+				}
+			}
+		}
+
+		return bx::kExitFailure;
+	}
+
+	AppI::AppI(const char* _name, const char* _description, const char* _url)
+	{
+		m_name        = _name;
+		m_description = _description;
+		m_url         = _url;
+		m_next        = s_apps;
+
+		s_apps = this;
+		s_numApps++;
+	}
+
+	AppI::~AppI()
+	{
+		for (AppI* prev = NULL, *app = s_apps, *next = app->getNext()
+			; NULL != app
+			; prev = app, app = next, next = app->getNext() )
+		{
+			if (app == this)
+			{
+				if (NULL != prev)
+				{
+					prev->m_next = next;
+				}
+				else
+				{
+					s_apps = next;
+				}
+
+				--s_numApps;
+
+				break;
+			}
+		}
+	}
+
+	const char* AppI::getName() const
+	{
+		return m_name;
+	}
+
+	const char* AppI::getDescription() const
+	{
+		return m_description;
+	}
+
+	const char* AppI::getUrl() const
+	{
+		return m_url;
+	}
+
+	AppI* AppI::getNext()
+	{
+		return m_next;
+	}
+
+	AppI* getFirstApp()
+	{
+		return s_apps;
+	}
+
+	uint32_t getNumApps()
+	{
+		return s_numApps;
+	}
+
+	int runApp(AppI* _app, int _argc, const char* const* _argv)
+	{
+		_app->init(_argc, _argv, s_width, s_height);
 		bgfx::frame();
 
 		WindowHandle defaultWindow = { 0 };
-		setWindowSize(defaultWindow, ENTRY_DEFAULT_WIDTH, ENTRY_DEFAULT_HEIGHT);
+		setWindowSize(defaultWindow, s_width, s_height);
 
 #if BX_PLATFORM_EMSCRIPTEN
 		s_app = _app;
 		emscripten_set_main_loop(&updateApp, -1, 1);
 #else
-		while (_app->update() );
+		while (_app->update() )
+		{
+			if (0 != bx::strLen(s_restartArgs) )
+			{
+				break;
+			}
+		}
 #endif // BX_PLATFORM_EMSCRIPTEN
 
 		return _app->shutdown();
 	}
 
-	int main(int _argc, char** _argv)
+	static int32_t sortApp(const void* _lhs, const void* _rhs)
+	{
+		const AppI* lhs = *(const AppI**)_lhs;
+		const AppI* rhs = *(const AppI**)_rhs;
+
+		return bx::strCmpI(lhs->getName(), rhs->getName() );
+	}
+
+	static void sortApps()
+	{
+		if (2 > s_numApps)
+		{
+			return;
+		}
+
+		AppI** apps = (AppI**)BX_ALLOC(g_allocator, s_numApps*sizeof(AppI*) );
+
+		uint32_t ii = 0;
+		for (AppI* app = getFirstApp(); NULL != app; app = app->getNext() )
+		{
+			apps[ii++] = app;
+		}
+		bx::quickSort(apps, s_numApps, sizeof(AppI*), sortApp);
+
+		s_apps = apps[0];
+		for (ii = 1; ii < s_numApps; ++ii)
+		{
+			AppI* app = apps[ii-1];
+			app->m_next = apps[ii];
+		}
+		apps[s_numApps-1]->m_next = NULL;
+
+		BX_FREE(g_allocator, apps);
+	}
+
+	int main(int _argc, const char* const* _argv)
 	{
 		//DBG(BX_COMPILER_NAME " / " BX_CPU_NAME " / " BX_ARCH_NAME " / " BX_PLATFORM_NAME);
 
-		if (BX_ENABLED(ENTRY_CONFIG_PROFILER) )
-		{
-			rmtSettings* settings = rmt_Settings();
-			BX_WARN(NULL != settings, "Remotery is not enabled.");
-			if (NULL != settings)
-			{
-				settings->malloc  = rmtMalloc;
-				settings->realloc = rmtRealloc;
-				settings->free    = rmtFree;
-
-				rmtError err = rmt_CreateGlobalInstance(&s_rmt);
-				BX_WARN(RMT_ERROR_NONE != err, "Remotery failed to create global instance.");
-				if (RMT_ERROR_NONE == err)
-				{
-					rmt_SetCurrentThreadName("Main");
-				}
-				else
-				{
-					s_rmt = NULL;
-				}
-			}
-		}
-
-#if BX_CONFIG_CRT_FILE_READER_WRITER
-		s_fileReader = new bx::CrtFileReader;
-		s_fileWriter = new bx::CrtFileWriter;
-#endif // BX_CONFIG_CRT_FILE_READER_WRITER
+		s_fileReader = BX_NEW(g_allocator, FileReader);
+		s_fileWriter = BX_NEW(g_allocator, FileWriter);
 
 		cmdInit();
 		cmdAdd("mouselock", cmdMouseLock);
 		cmdAdd("graphics",  cmdGraphics );
 		cmdAdd("exit",      cmdExit     );
+		cmdAdd("app",       cmdApp      );
 
 		inputInit();
 		inputAddBindings("bindings", s_bindings);
 
 		entry::WindowHandle defaultWindow = { 0 };
-		entry::setWindowTitle(defaultWindow, bx::baseName(_argv[0]) );
+
+		bx::FilePath fp(_argv[0]);
+		char title[bx::kMaxFilePath];
+		bx::strCopy(title, BX_COUNTOF(title), fp.getBaseName() );
+
+		entry::setWindowTitle(defaultWindow, title);
 		setWindowSize(defaultWindow, ENTRY_DEFAULT_WIDTH, ENTRY_DEFAULT_HEIGHT);
 
-		int32_t result = ::_main_(_argc, _argv);
+		sortApps();
+
+		const char* find = "";
+		if (1 < _argc)
+		{
+			find = _argv[_argc-1];
+		}
+
+restart:
+		AppI* selected = NULL;
+
+		for (AppI* app = getFirstApp(); NULL != app; app = app->getNext() )
+		{
+			if (NULL == selected
+			&&  !bx::strFindI(app->getName(), find).isEmpty() )
+			{
+				selected = app;
+			}
+#if 0
+			DBG("%c %s, %s"
+				, app == selected ? '>' : ' '
+				, app->getName()
+				, app->getDescription()
+				);
+#endif // 0
+		}
+
+		int32_t result = bx::kExitSuccess;
+		s_restartArgs[0] = '\0';
+		if (0 == s_numApps)
+		{
+			result = ::_main_(_argc, (char**)_argv);
+		}
+		else
+		{
+			result = runApp(getCurrentApp(selected), _argc, _argv);
+		}
+
+		if (0 != bx::strLen(s_restartArgs) )
+		{
+			find = s_restartArgs;
+			goto restart;
+		}
+
+		setCurrentDir("");
 
 		inputRemoveBindings("bindings");
 		inputShutdown();
 
 		cmdShutdown();
 
-#if BX_CONFIG_CRT_FILE_READER_WRITER
-		delete s_fileReader;
+		BX_DELETE(g_allocator, s_fileReader);
 		s_fileReader = NULL;
 
-		delete s_fileWriter;
+		BX_DELETE(g_allocator, s_fileWriter);
 		s_fileWriter = NULL;
-#endif // BX_CONFIG_CRT_FILE_READER_WRITER
-
-		if (BX_ENABLED(ENTRY_CONFIG_PROFILER)
-		&&  NULL != s_rmt)
-		{
-			rmt_DestroyGlobalInstance(s_rmt);
-		}
 
 		return result;
 	}
 
+	WindowState s_window[ENTRY_CONFIG_MAX_WINDOWS];
+
 	bool processEvents(uint32_t& _width, uint32_t& _height, uint32_t& _debug, uint32_t& _reset, MouseState* _mouse)
 	{
+		bool needReset = s_reset != _reset;
+
 		s_debug = _debug;
 		s_reset = _reset;
 
@@ -463,8 +694,8 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 				case Event::Gamepad:
 					{
-						const GamepadEvent* gev = static_cast<const GamepadEvent*>(ev);
-						DBG("gamepad %d, %d", gev->m_gamepad.idx, gev->m_connected);
+//						const GamepadEvent* gev = static_cast<const GamepadEvent*>(ev);
+//						DBG("gamepad %d, %d", gev->m_gamepad.idx, gev->m_connected);
 					}
 					break;
 
@@ -473,11 +704,8 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 						const MouseEvent* mouse = static_cast<const MouseEvent*>(ev);
 						handle = mouse->m_handle;
 
-						if (mouse->m_move)
-						{
-							inputSetMousePos(mouse->m_mx, mouse->m_my, mouse->m_mz);
-						}
-						else
+						inputSetMousePos(mouse->m_mx, mouse->m_my, mouse->m_mz);
+						if (!mouse->m_move)
 						{
 							inputSetMouseButtonState(mouse->m_button, mouse->m_down);
 						}
@@ -485,13 +713,10 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 						if (NULL != _mouse
 						&&  !mouseLock)
 						{
-							if (mouse->m_move)
-							{
-								_mouse->m_mx = mouse->m_mx;
-								_mouse->m_my = mouse->m_my;
-								_mouse->m_mz = mouse->m_mz;
-							}
-							else
+							_mouse->m_mx = mouse->m_mx;
+							_mouse->m_my = mouse->m_my;
+							_mouse->m_mz = mouse->m_mz;
+							if (!mouse->m_move)
 							{
 								_mouse->m_buttons[mouse->m_button] = mouse->m_down;
 							}
@@ -511,10 +736,16 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 				case Event::Size:
 					{
 						const SizeEvent* size = static_cast<const SizeEvent*>(ev);
+						WindowState& win = s_window[0];
+						win.m_handle = size->m_handle;
+						win.m_width  = size->m_width;
+						win.m_height = size->m_height;
+
 						handle  = size->m_handle;
 						_width  = size->m_width;
 						_height = size->m_height;
-						_reset  = !s_reset; // force reset
+
+						needReset = true;
 					}
 					break;
 
@@ -522,6 +753,13 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 					break;
 
 				case Event::Suspend:
+					break;
+
+				case Event::DropFile:
+					{
+						const DropFileEvent* drop = static_cast<const DropFileEvent*>(ev);
+						DBG("%s", drop->m_filePath.getCPtr() );
+					}
 					break;
 
 				default:
@@ -533,29 +771,35 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 		} while (NULL != ev);
 
+		needReset |= _reset != s_reset;
+
 		if (handle.idx == 0
-		&&  _reset != s_reset)
+		&&  needReset)
 		{
 			_reset = s_reset;
 			bgfx::reset(_width, _height, _reset);
-			inputSetMouseResolution(_width, _height);
+			inputSetMouseResolution(uint16_t(_width), uint16_t(_height) );
 		}
 
 		_debug = s_debug;
 
+		s_width = _width;
+		s_height = _height;
+
 		return s_exit;
 	}
 
-	WindowState s_window[ENTRY_CONFIG_MAX_WINDOWS];
-
 	bool processWindowEvents(WindowState& _state, uint32_t& _debug, uint32_t& _reset)
 	{
+		bool needReset = s_reset != _reset;
+
 		s_debug = _debug;
 		s_reset = _reset;
 
 		WindowHandle handle = { UINT16_MAX };
 
 		bool mouseLock = inputIsMouseLocked();
+		bool clearDropFile = true;
 
 		const Event* ev;
 		do
@@ -657,10 +901,8 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 						win.m_handle = size->m_handle;
 						win.m_width  = size->m_width;
 						win.m_height = size->m_height;
-						_reset  = win.m_handle.idx == 0
-								? !s_reset
-								: _reset
-								; // force reset
+
+						needReset = win.m_handle.idx == 0 ? true : needReset;
 					}
 					break;
 
@@ -676,6 +918,14 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 				case Event::Suspend:
 					break;
 
+				case Event::DropFile:
+					{
+						const DropFileEvent* drop = static_cast<const DropFileEvent*>(ev);
+						win.m_dropFile = drop->m_filePath;
+						clearDropFile = false;
+					}
+					break;
+
 				default:
 					break;
 				}
@@ -687,20 +937,27 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 		if (isValid(handle) )
 		{
-			const WindowState& win = s_window[handle.idx];
+			WindowState& win = s_window[handle.idx];
+			if (clearDropFile)
+			{
+				win.m_dropFile.clear();
+			}
+
 			_state = win;
 
 			if (handle.idx == 0)
 			{
-				inputSetMouseResolution(win.m_width, win.m_height);
+				inputSetMouseResolution(uint16_t(win.m_width), uint16_t(win.m_height) );
 			}
 		}
 
-		if (_reset != s_reset)
+		needReset |= _reset != s_reset;
+
+		if (needReset)
 		{
 			_reset = s_reset;
 			bgfx::reset(s_window[0].m_width, s_window[0].m_height, _reset);
-			inputSetMouseResolution(s_window[0].m_width, s_window[0].m_height);
+			inputSetMouseResolution(uint16_t(s_window[0].m_width), uint16_t(s_window[0].m_height) );
 		}
 
 		_debug = s_debug;
@@ -720,7 +977,12 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 	bx::AllocatorI* getAllocator()
 	{
-		return s_allocator;
+		if (NULL == g_allocator)
+		{
+			g_allocator = getDefaultAllocator();
+		}
+
+		return g_allocator;
 	}
 
 	void* TinyStlAllocator::static_allocate(size_t _bytes)

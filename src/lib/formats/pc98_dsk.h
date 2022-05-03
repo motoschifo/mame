@@ -7,9 +7,10 @@
     PC disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_PC98_DSK_H
+#define MAME_FORMATS_PC98_DSK_H
 
-#ifndef PC98_DSK_H
-#define PC98_DSK_H
+#pragma once
 
 #include "flopimg.h"
 #include "upd765_dsk.h"
@@ -30,6 +31,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_PC98_FORMAT;
+extern const pc98_format FLOPPY_PC98_FORMAT;
 
-#endif /* PC_DSK_H */
+#endif // MAME_FORMATS_PC98_DSK_H

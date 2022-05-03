@@ -7,14 +7,22 @@
 //  SDLMAME by Olivier Galibert and R. Belmont
 //
 //============================================================
+#ifndef MAME_OSD_INPUT_INPUT_COMMON_H
+#define MAME_OSD_INPUT_INPUT_COMMON_H
 
-#ifndef INPUT_COMMON_H_
-#define INPUT_COMMON_H_
+#pragma once
 
-#include <memory>
+#include "input_module.h"
+
+#include "inputdev.h"
+
+#include <algorithm>
 #include <chrono>
-#include <string>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <queue>
+
 
 //============================================================
 //  PARAMETERS
@@ -194,7 +202,8 @@ class device_info
 	friend input_device_list;
 
 private:
-	std::string             m_name;
+	const std::string       m_name;
+	const std::string       m_id;
 	input_device *          m_device;
 	running_machine &       m_machine;
 	input_module &          m_module;
@@ -202,8 +211,9 @@ private:
 
 public:
 	// Constructor
-	device_info(running_machine &machine, const char *name, input_device_class deviceclass, input_module &module)
-		: m_name(name),
+	device_info(running_machine &machine, std::string &&name, std::string &&id, input_device_class deviceclass, input_module &module) :
+		m_name(std::move(name)),
+		m_id(std::move(id)),
 		m_device(nullptr),
 		m_machine(machine),
 		m_module(module),
@@ -212,17 +222,18 @@ public:
 	}
 
 	// Destructor
-	virtual ~device_info() {}
+	virtual ~device_info() { }
 
 	// Getters
 	running_machine &         machine() const { return m_machine; }
-	const char *              name() { return m_name.c_str(); }
-	input_device *            device() { return m_device; }
+	const std::string &       name() const { return m_name; }
+	const std::string &       id() const { return m_id; }
+	input_device *            device() const { return m_device; }
 	input_module &            module() const { return m_module; }
-	input_device_class        deviceclass() { return m_deviceclass; }
+	input_device_class        deviceclass() const { return m_deviceclass; }
 
 	// Poll and reset methods
-	virtual void poll() {};
+	virtual void poll() { }
 	virtual void reset() = 0;
 };
 
@@ -244,8 +255,8 @@ protected:
 	virtual void process_event(TEvent &ev) = 0;
 
 public:
-	event_based_device(running_machine &machine, const char *name, input_device_class deviceclass, input_module &module)
-		: device_info(machine, name, deviceclass, module)
+	event_based_device(running_machine &machine, std::string &&name, std::string &&id, input_device_class deviceclass, input_module &module)
+		: device_info(machine, std::move(name), std::move(id), deviceclass, module)
 	{
 	}
 
@@ -280,55 +291,39 @@ public:
 
 class input_device_list
 {
-protected:
+private:
 	std::vector<std::unique_ptr<device_info>> m_list;
 
 public:
-	input_device_list()
-	{
-	}
+	auto size() const { return m_list.size(); }
+	auto empty() const { return m_list.empty(); }
+	auto begin() { return m_list.begin(); }
+	auto end() { return m_list.end(); }
 
 	void poll_devices()
 	{
-		for (auto iter = m_list.begin(); iter != m_list.end(); iter++)
-			iter->get()->poll();
+		for (auto &device: m_list)
+			device->poll();
 	}
 
 	void reset_devices()
 	{
-		for (auto iter = m_list.begin(); iter != m_list.end(); iter++)
-			iter->get()->reset();
+		for (auto &device: m_list)
+			device->reset();
 	}
 
-	void free_device(device_info * devinfo)
+	void free_device(device_info &devinfo)
 	{
-		// remove us from the list
-		for (auto iter = m_list.begin(); iter != m_list.end(); iter++)
-		{
-			if (iter->get() == devinfo)
-			{
-				m_list.erase(iter);
-				break;
-			}
-		}
+		// find the device to remove
+		const auto device_matches = [&devinfo] (std::unique_ptr<device_info> &device) { return &devinfo == device.get(); };
+		m_list.erase(std::remove_if(std::begin(m_list), std::end(m_list), device_matches), m_list.end());
 	}
 
-	int find_index(device_info* devinfo)
+	template <typename T>
+	void for_each_device(T &&action)
 	{
-		// remove us from the list
-		int i = 0;
-		for (auto iter = m_list.begin(); iter != m_list.end(); iter++)
-		{
-			if (iter->get() == devinfo)
-			{
-				break;
-			}
-
-			i++;
-		}
-
-		// return the index or -1 if we couldn't find it
-		return i == m_list.size() ? -1 : i;
+		for (auto &device: m_list)
+			action(device.get());
 	}
 
 	void free_all_devices()
@@ -337,35 +332,23 @@ public:
 			m_list.pop_back();
 	}
 
-	int size()
+	template <typename TActual, typename... TArgs>
+	TActual &create_device(running_machine &machine, std::string &&name, std::string &&id, input_module &module, TArgs&&... args)
 	{
-		return m_list.size();
-	}
+		// allocate the device object
+		auto devinfo = std::make_unique<TActual>(machine, std::move(name), std::move(id), module, std::forward<TArgs>(args)...);
 
-	device_info* at(int index)
-	{
-		return m_list.at(index).get();
+		return add_device(machine, std::move(devinfo));
 	}
 
 	template <typename TActual>
-	TActual* create_device(running_machine &machine, const char *name, input_module &module)
+	TActual &add_device(running_machine &machine, std::unique_ptr<TActual> devinfo)
 	{
-		// allocate the device object
-		auto devinfo = std::make_unique<TActual>(machine, name, module);
-
 		// Add the device to the machine
-		devinfo->m_device = machine.input().device_class(devinfo->deviceclass()).add_device(devinfo->name(), devinfo.get());
+		devinfo->m_device = &machine.input().device_class(devinfo->deviceclass()).add_device(devinfo->name(), devinfo->id(), devinfo.get());
 
 		// append us to the list
-		m_list.push_back(std::move(devinfo));
-
-		return (TActual*)m_list.back().get();
-	}
-
-	template <class TActual>
-	TActual* at(int index)
-	{
-		return (TActual*)m_list.at(index).get();
+		return *static_cast<TActual *>(m_list.emplace_back(std::move(devinfo)).get());
 	}
 };
 
@@ -374,10 +357,9 @@ public:
 struct key_trans_entry {
 	input_item_id   mame_key;
 
-#if !defined(OSD_WINDOWS)
-	int				sdl_scancode;
-	int             sdl_key;
-#else
+#if defined(OSD_SDL)
+	int             sdl_scancode;
+#elif defined(OSD_WINDOWS)
 	int             scan_code;
 	unsigned char   virtual_key;
 #endif
@@ -396,23 +378,23 @@ private:
 	static key_trans_entry              s_default_table[];
 	std::unique_ptr<key_trans_entry[]>  m_custom_table;
 
-	key_trans_entry *			        m_table;
-	UINT32                              m_table_size;
+	key_trans_entry *                   m_table;
+	uint32_t                              m_table_size;
 
 public:
 	// constructor
 	keyboard_trans_table(std::unique_ptr<key_trans_entry[]> table, unsigned int size);
 
 	// getters/setters
-	UINT32 size() { return m_table_size; }
-	
+	uint32_t size() const { return m_table_size; }
+
 	// public methods
-	input_item_id lookup_mame_code(const char * scode);
-	int lookup_mame_index(const char * scode);
+	input_item_id lookup_mame_code(const char * scode) const;
+	int lookup_mame_index(const char * scode) const;
 
 #if defined(OSD_WINDOWS)
-	input_item_id map_di_scancode_to_itemid(int di_scancode);
-	int vkey_for_mame_code(input_code code);
+	input_item_id map_di_scancode_to_itemid(int di_scancode) const;
+	int vkey_for_mame_code(input_code code) const;
 #endif
 
 	static keyboard_trans_table& instance()
@@ -421,7 +403,7 @@ public:
 		return s_instance;
 	}
 
-	key_trans_entry & operator [](int i) { return m_table[i]; }
+	key_trans_entry & operator [](int i) const { return m_table[i]; }
 };
 
 //============================================================
@@ -439,12 +421,13 @@ typedef std::chrono::time_point<std::chrono::high_resolution_clock> timepoint_ty
 class input_module_base : public input_module
 {
 public:
-	input_module_base(const char *type, const char* name)
-		: input_module(type, name),
-		m_input_enabled(FALSE),
-		m_mouse_enabled(FALSE),
-		m_lightgun_enabled(FALSE),
-		m_input_paused(FALSE)
+	input_module_base(const char *type, const char* name) :
+		input_module(type, name),
+		m_input_enabled(false),
+		m_mouse_enabled(false),
+		m_lightgun_enabled(false),
+		m_input_paused(false),
+		m_options(nullptr)
 	{
 	}
 
@@ -463,12 +446,12 @@ protected:
 
 public:
 
-	const osd_options *   options() { return m_options; }
-	input_device_list *   devicelist() { return &m_devicelist; }
-	bool                  input_enabled() { return m_input_enabled; }
-	bool                  input_paused() { return m_input_paused; }
-	bool                  mouse_enabled() { return m_mouse_enabled; }
-	bool                  lightgun_enabled() { return m_lightgun_enabled; }
+	const osd_options *   options() const { return m_options; }
+	input_device_list &   devicelist() { return m_devicelist; }
+	bool                  input_enabled() const { return m_input_enabled; }
+	bool                  input_paused() const { return m_input_paused; }
+	bool                  mouse_enabled() const { return m_mouse_enabled; }
+	bool                  lightgun_enabled() const { return m_lightgun_enabled; }
 
 	int init(const osd_options &options) override;
 
@@ -521,7 +504,7 @@ public:
 
 	virtual void exit() override
 	{
-		devicelist()->free_all_devices();
+		devicelist().free_all_devices();
 	}
 
 protected:
@@ -530,20 +513,22 @@ protected:
 	virtual void before_poll(running_machine &machine) {}
 };
 
-inline static int generic_button_get_state(void *device_internal, void *item_internal)
+template <class TItem>
+int generic_button_get_state(void *device_internal, void *item_internal)
 {
-	device_info *devinfo = (device_info *)device_internal;
-	unsigned char *itemdata = (unsigned char*)item_internal;
+	device_info *devinfo = static_cast<device_info *>(device_internal);
+	TItem *itemdata = static_cast<TItem*>(item_internal);
 
 	// return the current state
 	devinfo->module().poll_if_necessary(devinfo->machine());
 	return *itemdata >> 7;
 }
 
-inline static int generic_axis_get_state(void *device_internal, void *item_internal)
+template <class TItem>
+int generic_axis_get_state(void *device_internal, void *item_internal)
 {
-	device_info *devinfo = (device_info *)device_internal;
-	int *axisdata = (int*)item_internal;
+	device_info *devinfo = static_cast<device_info *>(device_internal);
+	TItem *axisdata = static_cast<TItem*>(item_internal);
 
 	// return the current state
 	devinfo->module().poll_if_necessary(devinfo->machine());
@@ -554,10 +539,10 @@ inline static int generic_axis_get_state(void *device_internal, void *item_inter
 //  default_button_name
 //============================================================
 
-inline static const char *default_button_name(int which)
+inline const char *default_button_name(int which)
 {
 	static char buffer[20];
-	snprintf(buffer, ARRAY_LENGTH(buffer), "B%d", which);
+	snprintf(buffer, std::size(buffer), "B%d", which);
 	return buffer;
 }
 
@@ -565,10 +550,10 @@ inline static const char *default_button_name(int which)
 //  default_pov_name
 //============================================================
 
-inline static const char *default_pov_name(int which)
+inline const char *default_pov_name(int which)
 {
 	static char buffer[20];
-	snprintf(buffer, ARRAY_LENGTH(buffer), "POV%d", which);
+	snprintf(buffer, std::size(buffer), "POV%d", which);
 	return buffer;
 }
 
@@ -579,27 +564,26 @@ const char *const default_axis_name[] =
 	"RY", "RZ", "SL1", "SL2"
 };
 
-inline static INT32 normalize_absolute_axis(INT32 raw, INT32 rawmin, INT32 rawmax)
+inline int32_t normalize_absolute_axis(double raw, double rawmin, double rawmax)
 {
-	INT32 center = (rawmax + rawmin) / 2;
+	double center = (rawmax + rawmin) / 2.0;
 
 	// make sure we have valid data
 	if (rawmin >= rawmax)
-		return raw;
+		return int32_t(raw);
 
-	// above center
 	if (raw >= center)
 	{
-		INT32 result = (INT64)(raw - center) * (INT64)INPUT_ABSOLUTE_MAX / (INT64)(rawmax - center);
-		return MIN(result, INPUT_ABSOLUTE_MAX);
+		// above center
+		double result = (raw - center) * INPUT_ABSOLUTE_MAX / (rawmax - center);
+		return std::min(result, (double)INPUT_ABSOLUTE_MAX);
 	}
-
-	// below center
 	else
 	{
-		INT32 result = -((INT64)(center - raw) * (INT64)-INPUT_ABSOLUTE_MIN / (INT64)(center - rawmin));
-		return MAX(result, INPUT_ABSOLUTE_MIN);
+		// below center
+		double result = -((center - raw) * (double)-INPUT_ABSOLUTE_MIN / (center - rawmin));
+		return std::max(result, (double)INPUT_ABSOLUTE_MIN);
 	}
 }
 
-#endif
+#endif // MAME_OSD_INPUT_INPUT_COMMON_H

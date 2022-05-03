@@ -13,7 +13,7 @@
     KTR    1      1 x x x   1 1 0 0    Transfer Keyboard Return
     KTS    1      1 x x x   1 0 1 0    Transfer Keyboard Strobe
     KLA    1      1 x x x   1 1 1 0    Load Display Register A
-    KLB    1      1 x x x   1 1 0 1    Load Display Register A
+    KLB    1      1 x x x   1 1 0 1    Load Display Register B
     KDN    1      1 x x x   0 0 1 1    Turn On Display
     KAF    1      1 x x x   1 0 1 1    Turn Off A
     KBF    1      1 x x x   0 1 1 1    Turn Off B
@@ -34,17 +34,17 @@
     7.) KER takes a maximum of 10-bit times to complete (= 80 clocks)
         Therefore, there must be at least 10 bit times between KER
         and the next KTS instruction.
+    8.) This device has only been tested on the gts1 driver. It does
+        not use the keyboard. The digit data is inverted (so it stores
+        6 when we want to display 9).
 **********************************************************************/
 
 #include "emu.h"
 #include "machine/r10788.h"
 
-#define VERBOSE 0
-#if VERBOSE
-#define LOG(x) logerror x
-#else
-#define LOG(x)
-#endif
+//#define VERBOSE 1
+#include "logmacro.h"
+
 
 /*************************************
  *
@@ -52,13 +52,13 @@
  *
  *************************************/
 
-const device_type R10788 = &device_creator<r10788_device>;
+DEFINE_DEVICE_TYPE(R10788, r10788_device, "r10788", "Rockwell 10788 KDC")
 
-r10788_device::r10788_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, R10788, "Rockwell 10788", tag, owner, clock, "r10788", __FILE__),
-		m_ktr(0), m_kts(0), m_kla(0), m_klb(0), m_mask_a(15), m_mask_b(15), m_ker(0),
-		m_io_counter(0), m_scan_counter(0),
-		m_display(*this)
+r10788_device::r10788_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, R10788, tag, owner, clock)
+	, m_ktr(0), m_kts(0), m_kla(0), m_klb(0), m_mask_a(15), m_mask_b(15), m_ker(0)
+	, m_io_counter(0), m_scan_counter(0)
+	, m_display(*this)
 {
 }
 
@@ -109,19 +109,19 @@ void r10788_device::device_reset()
  * @param param parameter
  * @param ptr pointer parameter
  */
-void r10788_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void r10788_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
-	UINT8 data;
+	uint8_t data;
 	switch (id)
 	{
 		case TIMER_DISPLAY:
 			data = (m_reg[0][m_scan_counter] & m_mask_a) +
 					16 * (m_reg[1][m_scan_counter] & m_mask_b);
-			LOG(("%s: scan counter:%2d data:%02x\n", __FUNCTION__, m_scan_counter, data));
+			LOG("%s: scan counter:%2d data:%02x\n", __FUNCTION__, m_scan_counter, data);
 			m_display(m_scan_counter, data, 0xff);
 			break;
 		default:
-			LOG(("%s: invalid timer id:%d\n", __FUNCTION__, id));
+			LOG("%s: invalid timer id:%d\n", __FUNCTION__, id);
 	}
 	m_scan_counter = (m_scan_counter + 1) % 16;
 }
@@ -138,88 +138,88 @@ void r10788_device::device_timer(emu_timer &timer, device_timer_id id, int param
  *
  *************************************/
 
-WRITE8_MEMBER( r10788_device::io_w )
+void r10788_device::io_w(offs_t offset, uint8_t data)
 {
-	assert(offset < 16);
+	offset &= 15;
 	switch (offset)
 	{
 		case KTR:  // Transfer Keyboard Return
-			LOG(("%s: KTR data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KTR data:%02x\n", __FUNCTION__, data);
 			m_ktr = data;
 			break;
 		case KTS:  // Transfer Keyboard Strobe
-			LOG(("%s: KTS data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KTS data:%02x\n", __FUNCTION__, data);
 			m_kts = data;
 			break;
 		case KLA:  // Load Display Register A
-			LOG(("%s: KLA [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data));
+			m_io_counter = (m_io_counter + 1) % 16;
+			LOG("%s: KLA [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data);
 			m_kla = data;
 			m_reg[0][m_io_counter] = m_kla;
 			break;
 		case KLB:  // Load Display Register B
-			LOG(("%s: KLB [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data));
+			LOG("%s: KLB [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data);
 			m_klb = data;
-			m_reg[1][m_io_counter] = m_kla;
+			m_reg[1][m_io_counter] = m_klb;
 			break;
 		case KDN:  // Turn On Display
-			LOG(("%s: KDN data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KDN data:%02x\n", __FUNCTION__, data);
 			m_mask_a = 15;
 			m_mask_b = 15;
+			m_io_counter = 15;
 			break;
 		case KAF:  // Turn Off A
-			LOG(("%s: KAF data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KAF data:%02x\n", __FUNCTION__, data);
 			m_mask_a = 0;
-			m_mask_b &= ~3;
+			m_mask_b &= 12;
 			break;
 		case KBF:  // Turn Off B
-			LOG(("%s: KBF data:%02x\n", __FUNCTION__, data));
-			m_mask_b &= ~12;
+			LOG("%s: KBF data:%02x\n", __FUNCTION__, data);
+			m_mask_b &= 3;
 			break;
 		case KER:  // Reset Keyboard Error
-			LOG(("%s: KER data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KER data:%02x\n", __FUNCTION__, data);
 			m_ker = 10;
 			break;
 	}
 }
 
 
-READ8_MEMBER( r10788_device::io_r )
+uint8_t r10788_device::io_r(offs_t offset)
 {
-	assert(offset < 16);
-	UINT8 data = 0xf;
+	offset &= 15;
+	uint8_t data = 0xf;
 	switch (offset)
 	{
 		case KTR:  // Transfer Keyboard Return
 			data = m_ktr;
-			LOG(("%s: KTR data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KTR data:%02x\n", __FUNCTION__, data);
 			break;
 		case KTS:  // Transfer Keyboard Strobe
 			data = m_kts;
-			LOG(("%s: KTS data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KTS data:%02x\n", __FUNCTION__, data);
 			break;
 		case KLA:  // Load Display Register A
 			m_kla = m_reg[0][m_io_counter];
 			data = m_kla;
-			LOG(("%s: KLA [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data));
+			LOG("%s: KLA [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data);
 			break;
 		case KLB:  // Load Display Register B
 			m_klb = m_reg[1][m_io_counter];
 			data = m_klb;
-			LOG(("%s: KLB [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data));
-			// FIXME: does it automagically increment at KLB write?
-			m_io_counter = (m_io_counter + 1) % 16;
+			LOG("%s: KLB [%2d] data:%02x\n", __FUNCTION__, m_io_counter, data);
 			break;
 		case KDN:  // Turn On Display
-			LOG(("%s: KDN data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KDN data:%02x\n", __FUNCTION__, data);
 			break;
 		case KAF:  // Turn Off A
-			LOG(("%s: KAF data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KAF data:%02x\n", __FUNCTION__, data);
 			break;
 		case KBF:  // Turn Off B
-			LOG(("%s: KBF data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KBF data:%02x\n", __FUNCTION__, data);
 			break;
 		case KER:  // Reset Keyboard Error
-			LOG(("%s: KER data:%02x\n", __FUNCTION__, data));
+			LOG("%s: KER data:%02x\n", __FUNCTION__, data);
 			break;
 	}
 	return data;

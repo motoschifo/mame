@@ -7,13 +7,15 @@
     a5105 format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_A5105_DSK_H
+#define MAME_FORMATS_A5105_DSK_H
 
-#ifndef A5105_DSK_H_
-#define A5105_DSK_H_
+#pragma once
 
 #include "upd765_dsk.h"
 
-class a5105_format : public upd765_format {
+class a5105_format : public upd765_format
+{
 public:
 	a5105_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_A5105_FORMAT;
+extern const a5105_format FLOPPY_A5105_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_A5105_DSK_H

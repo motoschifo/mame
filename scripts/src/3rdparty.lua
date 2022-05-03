@@ -13,29 +13,85 @@
 -- expat library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-expat"] then
+if not _OPTIONS["with-system-expat"] then
 project "expat"
 	uuid "f4cd40b1-c37c-452d-9785-640f26f0bf54"
 	kind "StaticLib"
+
+	-- fake out the enough of expat_config.h to get by
+	-- could possibly add more defines here for specific targets
+	defines {
+		"HAVE_MEMMOVE",
+		"HAVE_STDINT_H",
+		"HAVE_STDLIB_H",
+		"HAVE_STRING_H",
+		"PACKAGE=\"expat\"",
+		"PACKAGE_BUGREPORT=\"expat-bugs@libexpat.org\"",
+		"PACKAGE_NAME=\"expat\"",
+		"PACKAGE_STRING=\"expat 2.2.10\"",
+		"PACKAGE_TARNAME=\"expat\"",
+		"PACKAGE_URL=\"\"",
+		"PACKAGE_VERSION=\"2.2.10\"",
+		"STDC_HEADERS",
+		"VERSION=\"2.2.10\"",
+		"XML_CONTEXT_BYTES=1024",
+		"XML_DTD",
+		"XML_NS",
+	}
+if _OPTIONS["BIGENDIAN"]=="1" then
+	defines {
+		"BYTEORDER=4321",
+		"WORDS_BIGENDIAN",
+	}
+else
+	defines {
+		"BYTEORDER=1234",
+	}
+end
+if _OPTIONS["targetos"]=="macosx" or _OPTIONS["targetos"]=="freebsd" then
+	defines {
+		"HAVE_ARC4RANDOM",
+	}
+end
+if BASE_TARGETOS=="unix" then
+	defines {
+		"HAVE_DLFCN_H",
+		"HAVE_FCNTL_H",
+		"HAVE_MMAP",
+		"HAVE_SYS_STAT_H",
+		"HAVE_SYS_TYPES_H",
+		"HAVE_UNISTD_H",
+		"XML_DEV_URANDOM",
+	}
+end
 
 	configuration { "vs*" }
 		buildoptions {
 			"/wd4100", -- warning C4100: 'xxx' : unreferenced formal parameter
 			"/wd4127", -- warning C4127: conditional expression is constant
 			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
+			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd111",  			-- remark #111: statement is unreachable
-			"/Qwd1879", 			-- warning #1879: unimplemented pragma ignored
-			"/Qwd2557", 			-- remark #2557: comparison between signed and unsigned operands
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
+			"/Qwd111",              -- remark #111: statement is unreachable
+			"/Qwd1879",             -- warning #1879: unimplemented pragma ignored
+			"/Qwd2557",             -- remark #2557: comparison between signed and unsigned operands
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
 		}
 end
-	configuration { "vs2015" }
-		buildoptions {
-			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
+
+	configuration { "gmake or ninja" }
+if _OPTIONS["gcc"]~=nil then
+	if string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "asmjs") or string.find(_OPTIONS["gcc"], "android") then
+
+	else
+		buildoptions_c {
+			"-Wno-maybe-uninitialized", -- expat in GCC 11.1
 		}
+	end
+end
+
 	configuration { }
 
 	files {
@@ -45,22 +101,23 @@ end
 	}
 else
 links {
-	"expat",
+	ext_lib("expat"),
 }
 end
+
 
 --------------------------------------------------
 -- zlib library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-zlib"] then
+if not _OPTIONS["with-system-zlib"] then
 project "zlib"
 	uuid "3d78bd2a-2bd0-4449-8087-42ddfaef7ec9"
 	kind "StaticLib"
 
 	local version = str_to_version(_OPTIONS["gcc_version"])
-	if _OPTIONS["gcc"]~=nil and ((string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "asmjs") or string.find(_OPTIONS["gcc"], "android"))) then
-		configuration { "gmake" }
+	if _OPTIONS["gcc"]~=nil and (string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "asmjs") or string.find(_OPTIONS["gcc"], "android")) then
+		configuration { "gmake or ninja" }
 		if (version >= 30700) then
 			buildoptions {
 				"-Wno-shift-negative-value",
@@ -76,8 +133,8 @@ project "zlib"
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd111",  			-- remark #111: statement is unreachable
-			"/Qwd280",  			-- remark #280: selector expression is constant
+			"/Qwd111",              -- remark #111: statement is unreachable
+			"/Qwd280",              -- remark #280: selector expression is constant
 		}
 end
 	configuration "Debug"
@@ -85,7 +142,7 @@ end
 			"verbose=-1",
 		}
 
-	configuration { "gmake" }
+	configuration { "gmake or ninja" }
 		buildoptions_c {
 			"-Wno-strict-prototypes",
 		}
@@ -110,9 +167,10 @@ end
 	}
 else
 links {
-	"z",
+	ext_lib("zlib"),
 }
 end
+
 
 --------------------------------------------------
 -- SoftFloat library objects
@@ -129,6 +187,12 @@ project "softfloat"
 	includedirs {
 		MAME_DIR .. "src/osd",
 	}
+
+	configuration { "gmake or ninja" }
+		buildoptions_cpp {
+			"-x c++",
+		}
+
 	configuration { "vs*" }
 		buildoptions {
 			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
@@ -137,7 +201,7 @@ project "softfloat"
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd2557", 			-- remark #2557: comparison between signed and unsigned operands
+			"/Qwd2557",             -- remark #2557: comparison between signed and unsigned operands
 		}
 end
 	configuration { }
@@ -145,14 +209,366 @@ end
 	files {
 		MAME_DIR .. "3rdparty/softfloat/softfloat.c",
 		MAME_DIR .. "3rdparty/softfloat/fsincos.c",
+		MAME_DIR .. "3rdparty/softfloat/fpatan.c",
 		MAME_DIR .. "3rdparty/softfloat/fyl2x.c",
 	}
 
+
 --------------------------------------------------
+-- SoftFloat 3 library objects
+--------------------------------------------------
+
+project "softfloat3"
+uuid "9c22fc90-53fd-11e8-b566-0800200c9a66"
+kind "StaticLib"
+
+options {
+	"ForceCPP",
+}
+
+includedirs {
+	MAME_DIR .. "src/osd",
+	MAME_DIR .. "3rdparty/softfloat3/build/MAME",
+	MAME_DIR .. "3rdparty/softfloat3/source",
+	MAME_DIR .. "3rdparty/softfloat3/source/include",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086",
+}
+
+configuration { "gmake or ninja" }
+buildoptions_cpp {
+	"-x c++",
+}
+if _OPTIONS["gcc"]~=nil and not string.find(_OPTIONS["gcc"], "clang") then
+	buildoptions_cpp {
+		"-Wno-error=implicit-fallthrough",
+	}
+end
+
+configuration { "vs*" }
+buildoptions {
+	"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
+	"/wd4703", -- warning C4703: potentially uninitialized local pointer variable 'xxx' used
+}
+
+configuration { }
+defines {
+	"SOFTFLOAT_ROUND_ODD",
+	"INLINE_LEVEL=5",
+	"SOFTFLOAT_FAST_DIV32TO16",
+	"SOFTFLOAT_FAST_DIV64TO32",
+	"SOFTFLOAT_FAST_INT64"
+}
+
+files {
+	MAME_DIR .. "3rdparty/softfloat3/source/s_eq128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_le128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_lt128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftLeft128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftRight128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftRightJam64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftRightJam64Extra.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftRightJam128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shortShiftRightJam128Extra.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam64Extra.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam128Extra.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_shiftRightJam256M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_countLeadingZeros8.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_countLeadingZeros16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_countLeadingZeros32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_countLeadingZeros64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_add128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_add256M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_sub128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_sub256M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mul64ByShifted32To128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mul64To128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mul128By32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mul128To256M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_approxRecip_1Ks.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_approxRecip32_1.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_approxRecipSqrt_1Ks.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_approxRecipSqrt32_1.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/softfloat_raiseFlags.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_commonNaNToF16UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_propagateNaNF16UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_f32UIToCommonNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_commonNaNToF32UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_propagateNaNF32UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_f64UIToCommonNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_commonNaNToF64UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_propagateNaNF64UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/extF80M_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_extF80UIToCommonNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_commonNaNToExtF80UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_propagateNaNExtF80UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/f128M_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_f128UIToCommonNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_commonNaNToF128UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/8086/s_propagateNaNF128UI.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundToUI32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundToUI64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundToI32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundToI64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normSubnormalF16Sig.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundPackToF16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normRoundPackToF16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_addMagsF16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_subMagsF16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mulAddF16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normSubnormalF32Sig.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundPackToF32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normRoundPackToF32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_addMagsF32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_subMagsF32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mulAddF32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normSubnormalF64Sig.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundPackToF64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normRoundPackToF64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_addMagsF64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_subMagsF64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mulAddF64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normSubnormalExtF80Sig.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundPackToExtF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normRoundPackToExtF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_addMagsExtF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_subMagsExtF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normSubnormalF128Sig.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_roundPackToF128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_normRoundPackToF128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_addMagsF128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_subMagsF128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/s_mulAddF128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/softfloat_state.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui32_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/ui64_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i32_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/i64_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_mulAdd.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f16_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_mulAdd.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f32_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_mulAdd.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f64_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_to_f128.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_to_f128M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/extF80M_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_extF80.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_mulAdd.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_lt_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128_isSignalingNaN.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_ui32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_ui64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_i32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_i64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_ui32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_ui64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_i32_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_i64_r_minMag.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_f16.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_f32.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_extF80M.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_to_f64.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_roundToInt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_add.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_sub.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_mul.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_mulAdd.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_div.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_rem.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_sqrt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_eq.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_le.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_lt.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_eq_signaling.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_le_quiet.c",
+	MAME_DIR .. "3rdparty/softfloat3/source/f128M_lt_quiet.c",
+}
+
+
+-------------------------------------------------
 -- libJPEG library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-jpeg"] then
+if not _OPTIONS["with-system-jpeg"] then
 project "jpeg"
 	uuid "447c6800-dcfd-4c48-b72a-a8223bb409ca"
 	kind "StaticLib"
@@ -165,7 +581,7 @@ project "jpeg"
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
 		}
 end
 
@@ -221,15 +637,16 @@ end
 	}
 else
 links {
-	"jpeg",
+	ext_lib("jpeg"),
 }
 end
+
 
 --------------------------------------------------
 -- libflac library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-flac"] then
+if not _OPTIONS["with-system-flac"] then
 project "flac"
 	uuid "b6fc19e8-073a-4541-bb7b-d24b548d424a"
 	kind "StaticLib"
@@ -239,26 +656,22 @@ project "flac"
 			"/wd4127", -- warning C4127: conditional expression is constant
 			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
 			"/wd4100", -- warning C4100: 'xxx' : unreferenced formal parameter
+			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
 			"/wd4702", -- warning C4702: unreachable code
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd111",  			-- remark #111: statement is unreachable
-			"/Qwd177",  			-- remark #177: function "xxx" was declared but never referenced
-			"/Qwd181",  			-- remark #181: argument of type "UINT32={unsigned int}" is incompatible with format "%d", expecting argument of type "int"
-			"/Qwd188",  			-- error #188: enumerated type mixed with another type
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
+			"/Qwd111",              -- remark #111: statement is unreachable
+			"/Qwd177",              -- remark #177: function "xxx" was declared but never referenced
+			"/Qwd181",              -- remark #181: argument of type "UINT32={unsigned int}" is incompatible with format "%d", expecting argument of type "int"
+			"/Qwd188",              -- error #188: enumerated type mixed with another type
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
 		}
 end
 
 	configuration { "mingw-clang" }
 		buildoptions {
 			"-include stdint.h"
-		}
-
-	configuration { "vs2015" }
-		buildoptions {
-			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
 		}
 
 	configuration { }
@@ -271,7 +684,7 @@ end
 			"HAVE_CONFIG_H=1",
 		}
 
-	configuration { "gmake"}
+	configuration { "gmake or ninja" }
 		buildoptions_c {
 			"-Wno-unused-function",
 			"-O0",
@@ -312,9 +725,10 @@ end
 	}
 else
 links {
-	"FLAC",
+	ext_lib("flac"),
 }
 end
+
 
 --------------------------------------------------
 -- lib7z library objects
@@ -324,21 +738,43 @@ project "7z"
 	uuid "ad573d62-e76a-4b11-ae34-5110a6789a42"
 	kind "StaticLib"
 
+	configuration { "gmake or ninja" }
+		buildoptions_c {
+			"-Wno-strict-prototypes",
+			"-Wno-undef",
+		}
+if _OPTIONS["gcc"]~=nil and string.find(_OPTIONS["gcc"], "clang") and str_to_version(_OPTIONS["gcc_version"]) >= 100000 then
+		buildoptions_c {
+			"-Wno-misleading-indentation",
+		}
+end
+
+	configuration { "asmjs" }
+		buildoptions {
+			"-Wno-misleading-indentation",
+		}
+
+	configuration { "mingw*" }
+		buildoptions_c {
+			"-Wno-strict-prototypes",
+		}
+
 	configuration { "vs*" }
 		buildoptions {
 			"/wd4100", -- warning C4100: 'xxx' : unreferenced formal parameter
-		}
-if _OPTIONS["vs"]=="intel-15" then
-		buildoptions {
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
-		}
-end
-	configuration { "vs2015" }
-		buildoptions {
 			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
 			"/wd4457", -- warning C4457: declaration of 'xxx' hides function parameter
 		}
-
+if _OPTIONS["vs"]=="clangcl" then
+		buildoptions {
+			"-Wno-misleading-indentation",
+		}
+end
+if _OPTIONS["vs"]=="intel-15" then
+		buildoptions {
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
+		}
+end
 	configuration { }
 		defines {
 			"_7ZIP_PPMD_SUPPPORT",
@@ -346,45 +782,71 @@ end
 		}
 
 	files {
+			MAME_DIR .. "3rdparty/lzma/C/7zAlloc.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zArcIn.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zBuf.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zBuf2.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zCrc.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zCrcOpt.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zDec.c",
-			MAME_DIR .. "3rdparty/lzma/C/7zIn.c",
-			MAME_DIR .. "3rdparty/lzma/C/CpuArch.c",
-			MAME_DIR .. "3rdparty/lzma/C/LzmaDec.c",
-			MAME_DIR .. "3rdparty/lzma/C/Lzma2Dec.c",
-			MAME_DIR .. "3rdparty/lzma/C/LzmaEnc.c",
-			MAME_DIR .. "3rdparty/lzma/C/Lzma2Enc.c",
-			MAME_DIR .. "3rdparty/lzma/C/LzFind.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zFile.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zStream.c",
+			MAME_DIR .. "3rdparty/lzma/C/Aes.c",
+			MAME_DIR .. "3rdparty/lzma/C/AesOpt.c",
+			MAME_DIR .. "3rdparty/lzma/C/Alloc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Bcj2.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Bcj2Enc.c",
 			MAME_DIR .. "3rdparty/lzma/C/Bra.c",
 			MAME_DIR .. "3rdparty/lzma/C/Bra86.c",
-			MAME_DIR .. "3rdparty/lzma/C/Bcj2.c",
+			MAME_DIR .. "3rdparty/lzma/C/BraIA64.c",
+			MAME_DIR .. "3rdparty/lzma/C/CpuArch.c",
+			MAME_DIR .. "3rdparty/lzma/C/Delta.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/DllSecur.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzFind.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/LzFindMt.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma2Dec.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma2Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma86Dec.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma86Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzmaDec.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzmaEnc.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/LzmaLib.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/MtCoder.c",
 			MAME_DIR .. "3rdparty/lzma/C/Ppmd7.c",
 			MAME_DIR .. "3rdparty/lzma/C/Ppmd7Dec.c",
-			MAME_DIR .. "3rdparty/lzma/C/7zStream.c",
+			MAME_DIR .. "3rdparty/lzma/C/Ppmd7Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Sha256.c",
+			MAME_DIR .. "3rdparty/lzma/C/Sort.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Threads.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Xz.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzCrc64.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzCrc64Opt.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzDec.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzEnc.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzIn.c",
 		}
+
 
 --------------------------------------------------
 -- LUA library objects
 --------------------------------------------------
+if (STANDALONE~=true) then
 
-if _OPTIONS["with-bundled-lua"] then
+if not _OPTIONS["with-system-lua"] then
 project "lua"
 	uuid "d9e2eed1-f1ab-4737-a6ac-863700b1a5a9"
 	kind "StaticLib"
 
 	-- uncomment the options below to
 	-- compile using c++. Do the same
-	-- in lsqlite3.
+	-- in lualibs.
 	-- In addition comment out the "extern "C""
 	-- in lua.hpp and do the same in luaengine.c line 47
 	--options {
-	--	"ForceCPP",
+	--  "ForceCPP",
 	--}
 
-	configuration { "gmake" }
+	configuration { "gmake or ninja" }
 		buildoptions_c {
 			"-Wno-bad-function-cast"
 		}
@@ -400,20 +862,16 @@ if _OPTIONS["vs"]=="intel-15" then
 			"/Qwd592", -- error #592: variable "xxx" is used before its value is set
 		}
 end
+
 	configuration { }
 		defines {
 			"LUA_COMPAT_ALL",
 			"LUA_COMPAT_5_1",
 			"LUA_COMPAT_5_2",
 		}
-	if not (_OPTIONS["targetos"]=="windows") and not (_OPTIONS["targetos"]=="asmjs") and not (_OPTIONS["targetos"]=="pnacl") then
+	if not (_OPTIONS["targetos"]=="windows") and not (_OPTIONS["targetos"]=="asmjs") then
 		defines {
 			"LUA_USE_POSIX",
-		}
-	end
-	if ("pnacl" == _OPTIONS["gcc"]) then
-		defines {
-			"LUA_32BITS",
 		}
 	end
 
@@ -460,9 +918,10 @@ end
 	}
 else
 links {
-	"lua",
+	ext_lib("lua"),
 }
 end
+
 
 --------------------------------------------------
 -- small lua library objects
@@ -480,11 +939,6 @@ project "lualibs"
 			"/wd4130", -- warning C4130: '==': logical operation on address of string constant
 		}
 
-	configuration { "pnacl"}
-		buildoptions {
-			"-Wno-char-subscripts",
-		}
-
 	configuration { }
 		defines {
 			"LUA_COMPAT_ALL",
@@ -492,71 +946,58 @@ project "lualibs"
 
 	includedirs {
 		MAME_DIR .. "3rdparty",
+		MAME_DIR .. "3rdparty/linenoise",
 	}
-	if _OPTIONS["with-bundled-lua"] then
-		includedirs {
-			MAME_DIR .. "3rdparty/lua/src",
-		}
-	end
-	if _OPTIONS["with-bundled-zlib"] then
-		includedirs {
-			MAME_DIR .. "3rdparty/zlib",
-		}
-	end	
+
+	includedirs {
+		ext_includedir("lua"),
+		ext_includedir("zlib"),
+		ext_includedir("sqlite3"),
+	}
+
+	configuration {}
 
 	files {
 		MAME_DIR .. "3rdparty/lsqlite3/lsqlite3.c",
 		MAME_DIR .. "3rdparty/lua-zlib/lua_zlib.c",
 		MAME_DIR .. "3rdparty/luafilesystem/src/lfs.c",
+		MAME_DIR .. "3rdparty/lua-linenoise/linenoise.c",
 	}
 
 --------------------------------------------------
 -- SQLite3 library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-sqlite3"] then
-project "sqllite3"
+if not _OPTIONS["with-system-sqlite3"] then
+project "sqlite3"
 	uuid "5cb3d495-57ed-461c-81e5-80dc0857517d"
 	kind "StaticLib"
 
-	configuration { "vs*" }
-		buildoptions {
-			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
-			"/wd4127", -- warning C4127: conditional expression is constant
-			"/wd4232", -- warning C4232: nonstandard extension used : 'xxx' : address of dllimport 'xxx' is not static, identity not guaranteed
-			"/wd4100", -- warning C4100: 'xxx' : unreferenced formal parameter
-			"/wd4706", -- warning C4706: assignment within conditional expression
-		}
-if _OPTIONS["vs"]=="intel-15" then
-		buildoptions {
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
-			"/Qwd2557", 			-- remark #2557: comparison between signed and unsigned operands
-		}
-end
-	configuration { "pnacl" }
-		defines {
-			"SQLITE_OMIT_LOAD_EXTENSION",
-		}
-	configuration { "vs2015" }
-		buildoptions {
-			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
-		}
-
-
-	configuration { "gmake" }
+	configuration { "gmake or ninja" }
 		buildoptions_c {
 			"-Wno-bad-function-cast",
+			"-Wno-discarded-qualifiers",
 			"-Wno-undef",
+			"-Wno-unused-but-set-variable",
 		}
-
-	local version = str_to_version(_OPTIONS["gcc_version"])
-	if _OPTIONS["gcc"]~=nil and not string.find(_OPTIONS["gcc"], "clang") then
-		if (version >= 40800) then
-			buildoptions_c {
-				"-Wno-array-bounds",
-			}
-		end
+if _OPTIONS["gcc"]~=nil then
+	if string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "asmjs") or string.find(_OPTIONS["gcc"], "android") then
+		buildoptions_c {
+			"-Wno-incompatible-pointer-types-discards-qualifiers",
+		}
+	else
+		buildoptions_c {
+			"-Wno-return-local-addr", -- sqlite3.c in GCC 10
+			"-Wno-misleading-indentation",  -- sqlite3.c in GCC 11.1
+		}
 	end
+end
+	configuration { "vs*" }
+if _OPTIONS["vs"]=="clangcl" then
+		buildoptions {
+			"-Wno-implicit-int-float-conversion",
+		}
+end
 
 	configuration { }
 
@@ -565,15 +1006,19 @@ end
 	}
 else
 links {
-	"sqlite3",
+	ext_lib("sqlite3"),
 }
 end
+
+end
+
 
 --------------------------------------------------
 -- portmidi library objects
 --------------------------------------------------
+
 if _OPTIONS["NO_USE_MIDI"]~="1" then
-if _OPTIONS["with-bundled-portmidi"] then
+if not _OPTIONS["with-system-portmidi"] then
 project "portmidi"
 	uuid "587f2da6-3274-4a65-86a2-f13ea315bb98"
 	kind "StaticLib"
@@ -588,21 +1033,17 @@ project "portmidi"
 			"/wd4100", -- warning C4100: 'xxx' : unreferenced formal parameter
 			"/wd4127", -- warning C4127: conditional expression is constant
 			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
+			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
 			"/wd4706", -- warning C4706: assignment within conditional expression
 		}
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd188",  			-- error #188: enumerated type mixed with another type
-			"/Qwd344",  			-- remark #344: typedef name has already been declared (with same type)
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
-			"/Qwd2557", 			-- remark #2557: comparison between signed and unsigned operands
+			"/Qwd188",              -- error #188: enumerated type mixed with another type
+			"/Qwd344",              -- remark #344: typedef name has already been declared (with same type)
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
+			"/Qwd2557",             -- remark #2557: comparison between signed and unsigned operands
 		}
 end
-
-	configuration { "vs2015" }
-		buildoptions {
-			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
-		}
 
 	configuration { "linux*" }
 		defines {
@@ -652,10 +1093,163 @@ end
 	end
 else
 links {
-	"portmidi",
+	ext_lib("portmidi"),
 }
 end
 end
+
+
+--------------------------------------------------
+-- BX library objects
+--------------------------------------------------
+
+project "bx"
+	uuid "238318fe-49f5-4eb4-88be-0618900f5eac"
+	kind "StaticLib"
+
+	defines {
+		"__STDC_LIMIT_MACROS",
+		"__STDC_FORMAT_MACROS",
+		"__STDC_CONSTANT_MACROS",
+	}
+
+	configuration { "vs*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/msvc",
+		}
+	configuration { "mingw*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/mingw",
+		}
+
+	configuration { "osx*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/osx",
+		}
+
+	configuration { "freebsd" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/freebsd",
+		}
+
+	configuration { "netbsd" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/freebsd",
+		}
+
+	configuration { }
+
+	includedirs {
+		MAME_DIR .. "3rdparty/bx/include",
+		MAME_DIR .. "3rdparty/bx/3rdparty",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/bx/src/allocator.cpp",
+		MAME_DIR .. "3rdparty/bx/src/bx.cpp",
+		MAME_DIR .. "3rdparty/bx/src/commandline.cpp",
+		MAME_DIR .. "3rdparty/bx/src/crtnone.cpp",
+		MAME_DIR .. "3rdparty/bx/src/debug.cpp",
+		MAME_DIR .. "3rdparty/bx/src/dtoa.cpp",
+		MAME_DIR .. "3rdparty/bx/src/easing.cpp",
+		MAME_DIR .. "3rdparty/bx/src/file.cpp",
+		MAME_DIR .. "3rdparty/bx/src/filepath.cpp",
+		MAME_DIR .. "3rdparty/bx/src/hash.cpp",
+		MAME_DIR .. "3rdparty/bx/src/math.cpp",
+		MAME_DIR .. "3rdparty/bx/src/mutex.cpp",
+		MAME_DIR .. "3rdparty/bx/src/os.cpp",
+		MAME_DIR .. "3rdparty/bx/src/process.cpp",
+		MAME_DIR .. "3rdparty/bx/src/semaphore.cpp",
+		MAME_DIR .. "3rdparty/bx/src/settings.cpp",
+		MAME_DIR .. "3rdparty/bx/src/sort.cpp",
+		MAME_DIR .. "3rdparty/bx/src/string.cpp",
+		MAME_DIR .. "3rdparty/bx/src/thread.cpp",
+		MAME_DIR .. "3rdparty/bx/src/timer.cpp",
+		MAME_DIR .. "3rdparty/bx/src/url.cpp",
+	}
+
+
+--------------------------------------------------
+-- BIMG library objects
+--------------------------------------------------
+
+project "bimg"
+	uuid "5603611b-8bf8-4ffd-85bc-76858cd7df39"
+	kind "StaticLib"
+
+	includedirs {
+		MAME_DIR .. "3rdparty/bx/include",
+	}
+
+	configuration { "vs*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/msvc",
+		}
+	configuration { "mingw*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/mingw",
+		}
+
+	configuration { "osx*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/osx",
+		}
+
+	configuration { "freebsd" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/freebsd",
+		}
+
+	configuration { "netbsd" }
+		includedirs {
+			MAME_DIR .. "3rdparty/bx/include/compat/freebsd",
+		}
+
+	configuration { "gmake or ninja" }
+		buildoptions {
+			"-Wno-unused-but-set-variable",
+		}
+
+	configuration { }
+
+	if _OPTIONS["targetos"]=="macosx" or _OPTIONS["targetos"]=="linux" or _OPTIONS["targetos"]=="windows" or _OPTIONS["targetos"]=="asmjs" then
+		if _OPTIONS["gcc"]~=nil and (string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "asmjs")) then
+			buildoptions_cpp {
+				"-Wno-unused-const-variable",
+			}
+		end
+	end
+
+	defines {
+		"__STDC_LIMIT_MACROS",
+		"__STDC_FORMAT_MACROS",
+		"__STDC_CONSTANT_MACROS",
+	}
+
+	includedirs {
+		MAME_DIR .. "3rdparty/bimg/include",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/include",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/bimg/src/image.cpp",
+		MAME_DIR .. "3rdparty/bimg/src/image_gnf.cpp",
+
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/astc_file.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/codec.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/endpoint_codec.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/footprint.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/integer_sequence_codec.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/intermediate_astc_block.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/logical_astc_block.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/partition.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/physical_astc_block.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/quantization.cc",
+		MAME_DIR .. "3rdparty/bimg/3rdparty/astc-codec/src/decoder/weight_infill.cc",
+	}
+
+
 --------------------------------------------------
 -- BGFX library objects
 --------------------------------------------------
@@ -670,12 +1264,14 @@ project "bgfx"
 			"/wd4244", -- warning C4244: 'argument' : conversion from 'xxx' to 'xxx', possible loss of data
 			"/wd4611", -- warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable
 			"/wd4310", -- warning C4310: cast truncates constant value
+			"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
 		}
+
 if _OPTIONS["vs"]=="intel-15" then
 		buildoptions {
-			"/Qwd906",  			-- message #906: effect of this "#pragma pack" directive is local to function "xxx"
-			"/Qwd1879", 			-- warning #1879: unimplemented pragma ignored
-			"/Qwd82",   			-- remark #82: storage class is not first
+			"/Qwd906",              -- message #906: effect of this "#pragma pack" directive is local to function "xxx"
+			"/Qwd1879",             -- warning #1879: unimplemented pragma ignored
+			"/Qwd82",               -- remark #82: storage class is not first
 		}
 end
 	configuration { }
@@ -684,13 +1280,10 @@ end
 		MAME_DIR .. "3rdparty/bgfx/include",
 		MAME_DIR .. "3rdparty/bgfx/3rdparty",
 		MAME_DIR .. "3rdparty/bx/include",
+		MAME_DIR .. "3rdparty/bimg/include",
 		MAME_DIR .. "3rdparty/bgfx/3rdparty/dxsdk/include",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/khronos",
 	}
-
-	configuration { "not steamlink"}
-		includedirs {
-			MAME_DIR .. "3rdparty/bgfx/3rdparty/khronos",
-		}
 
 	configuration { "android-*"}
 		buildoptions {
@@ -706,7 +1299,7 @@ end
 			MAME_DIR .. "3rdparty/bx/include/compat/mingw",
 		}
 
-	configuration { "osx* or xcode4" }
+	configuration { "osx*" }
 		includedirs {
 			MAME_DIR .. "3rdparty/bx/include/compat/osx",
 		}
@@ -721,70 +1314,109 @@ end
 			MAME_DIR .. "3rdparty/bx/include/compat/freebsd",
 		}
 
-	configuration { "gmake" }
+	configuration { "gmake or ninja" }
 		buildoptions {
 			"-Wno-uninitialized",
+			"-Wno-unused-but-set-variable",
 			"-Wno-unused-function",
+			"-Wno-unused-variable",
 		}
 
 	configuration { }
 
+	local version = str_to_version(_OPTIONS["gcc_version"])
+	if _OPTIONS["gcc"]~=nil and string.find(_OPTIONS["gcc"], "gcc") then
+		if version >= 60000 then
+			buildoptions_cpp {
+				"-Wno-misleading-indentation",
+			}
+		end
+	end
+
 	if _OPTIONS["targetos"]=="windows" then
-		local version = str_to_version(_OPTIONS["gcc_version"])
 		if _OPTIONS["gcc"]~=nil and string.find(_OPTIONS["gcc"], "clang") then
 			buildoptions {
 				"-Wno-unknown-attributes",
 				"-Wno-missing-braces",
 				"-Wno-int-to-pointer-cast",
+				"-Wno-ignored-attributes", -- many instances in ImGui
 			}
 		end
 	end
 
-	if _OPTIONS["targetos"]=="macosx" then
-		local version = str_to_version(_OPTIONS["gcc_version"])
+	if _OPTIONS["targetos"]=="macosx" or  _OPTIONS["targetos"]=="linux" then
 		if _OPTIONS["gcc"]~=nil and string.find(_OPTIONS["gcc"], "clang") then
 			buildoptions {
 				"-Wno-switch",
 			}
+			buildoptions_cpp {
+				"-Wno-unknown-pragmas",
+			}
 		end
+	end
+
+	if _OPTIONS["targetos"]=="freebsd" then
+		buildoptions {
+			backtick(pkgconfigcmd() .. " --cflags gl")
+		}
 	end
 
 	defines {
 		"__STDC_LIMIT_MACROS",
 		"__STDC_FORMAT_MACROS",
 		"__STDC_CONSTANT_MACROS",
+		"BGFX_CONFIG_MAX_FRAME_BUFFERS=128",
 	}
+
+	if _OPTIONS["targetos"]=="linux" or _OPTIONS["targetos"]=="netbsd" or _OPTIONS["targetos"]=="openbsd" then
+		if _OPTIONS["NO_X11"]=="1" then
+			defines {
+				"BGFX_CONFIG_RENDERER_OPENGLES=1",
+				"BGFX_CONFIG_RENDERER_OPENGL=0",
+			}
+		end
+	end
+
+	if _OPTIONS["targetos"]=="macosx" and _OPTIONS["gcc"]~=nil then
+		if string.find(_OPTIONS["gcc"], "clang") and (version < 80000) then
+			defines {
+				"TARGET_OS_OSX=1",
+			}
+		end
+	end
+
 	files {
 		MAME_DIR .. "3rdparty/bgfx/src/bgfx.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/debug_renderdoc.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/dxgi.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/glcontext_egl.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/glcontext_glx.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/glcontext_ppapi.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/glcontext_html5.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/glcontext_wgl.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/image.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/ovr.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/renderer_d3d12.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/nvapi.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_agc.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/renderer_d3d11.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_d3d12.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/renderer_d3d9.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/renderer_gl.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/renderer_null.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_gnm.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_noop.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_nvn.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/renderer_vk.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/renderdoc.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/shader_dxbc.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/renderer_webgpu.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/shader.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/shader_dx9bc.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/shader_dxbc.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/shader_spirv.cpp",
 		MAME_DIR .. "3rdparty/bgfx/src/topology.cpp",
-		MAME_DIR .. "3rdparty/bgfx/src/vertexdecl.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/bgfx_utils.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/bounds.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/camera.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/cube_atlas.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/font/font_manager.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/font/text_buffer_manager.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/font/text_metrics.cpp",
-		MAME_DIR .. "3rdparty/bgfx/examples/common/font/utf8.cpp",
+		MAME_DIR .. "3rdparty/bgfx/src/vertexlayout.cpp",
 		MAME_DIR .. "3rdparty/bgfx/examples/common/imgui/imgui.cpp",
 		MAME_DIR .. "3rdparty/bgfx/examples/common/nanovg/nanovg.cpp",
 		MAME_DIR .. "3rdparty/bgfx/examples/common/nanovg/nanovg_bgfx.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/dear-imgui/imgui.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/dear-imgui/imgui_draw.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/dear-imgui/imgui_tables.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/dear-imgui/imgui_widgets.cpp",
 	}
 	if _OPTIONS["targetos"]=="macosx" then
 		files {
@@ -792,13 +1424,19 @@ end
 			MAME_DIR .. "3rdparty/bgfx/src/glcontext_nsgl.mm",
 			MAME_DIR .. "3rdparty/bgfx/src/renderer_mtl.mm",
 		}
+		buildoptions {
+			"-x objective-c++",
+			"-D BGFX_CONFIG_MULTITHREADED=0",
+		}
 	end
+
 
 --------------------------------------------------
 -- PortAudio library objects
 --------------------------------------------------
 
-if _OPTIONS["with-bundled-portaudio"] then
+if _OPTIONS["NO_USE_PORTAUDIO"]~="1" then
+if not _OPTIONS["with-system-portaudio"] then
 project "portaudio"
 	uuid "0755c5f5-eccf-47f3-98a9-df67018a94d4"
 	kind "StaticLib"
@@ -811,30 +1449,28 @@ project "portaudio"
 			"/wd4389", -- warning C4389: 'operator' : signed/unsigned mismatch
 			"/wd4189", -- warning C4189: 'xxx' : local variable is initialized but not referenced
 			"/wd4127", -- warning C4127: conditional expression is constant
-		}
-if _OPTIONS["vs"]=="intel-15" then
-		buildoptions {
-			"/Qwd869",  			-- remark #869: parameter "xxx" was never referenced
-			"/Qwd1478", 			-- warning #1478: function "xxx" (declared at line yyy of "zzz") was declared deprecated
-			"/Qwd2544", 			-- message #2544: empty dependent statement in if-statement
-			"/Qwd1879", 			-- warning #1879: unimplemented pragma ignored
-		}
-end
-	configuration { "vs2015" }
-		buildoptions {
 			"/wd4456", -- warning C4456: declaration of 'xxx' hides previous local declaration
+			"/wd4312", -- warning C4312: 'type cast': conversion from 'UINT' to 'HWAVEIN' of greater size
 		}
+	if _OPTIONS["vs"]=="intel-15" then
+		buildoptions {
+			"/Qwd869",              -- remark #869: parameter "xxx" was never referenced
+			"/Qwd1478",             -- warning #1478: function "xxx" (declared at line yyy of "zzz") was declared deprecated
+			"/Qwd2544",             -- message #2544: empty dependent statement in if-statement
+			"/Qwd1879",             -- warning #1879: unimplemented pragma ignored
+		}
+	end
 
-	configuration { "gmake" }
+	configuration { "gmake or ninja" }
 		buildoptions_c {
-			"-Wno-strict-prototypes",
 			"-Wno-bad-function-cast",
-			"-Wno-undef",
 			"-Wno-missing-braces",
-			"-Wno-unused-variable",
-			"-Wno-unused-value",
-			"-Wno-unused-function",
+			"-Wno-strict-prototypes",
+			"-Wno-undef",
 			"-Wno-unknown-pragmas",
+			"-Wno-unused-function",
+			"-Wno-unused-value",
+			"-Wno-unused-variable",
 		}
 
 	local version = str_to_version(_OPTIONS["gcc_version"])
@@ -848,19 +1484,25 @@ end
 				"-Wno-sometimes-uninitialized",
 			}
 		else
-			if (version >= 40600) then
-				buildoptions_c {
-					"-Wno-unused-but-set-variable",
-					"-Wno-maybe-uninitialized",
-					"-Wno-sometimes-uninitialized",
-				}
-			end
+			buildoptions_c {
+				"-Wno-maybe-uninitialized",
+				"-Wno-sometimes-uninitialized",
+				"-Wno-unused-but-set-variable",
+				"-Wno-incompatible-pointer-types-discards-qualifiers",
+				"-w",
+			}
+		end
+		if string.find(_OPTIONS["gcc"], "clang") and version >= 100000 then
+			buildoptions_c {
+				"-Wno-misleading-indentation",
+			}
 		end
 	end
 	configuration { "vs*" }
 		buildoptions {
 			"/wd4204", -- warning C4204: nonstandard extension used : non-constant aggregate initializer
 			"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
+			"/wd4057", -- warning C4057: 'function': 'xxx' differs in indirection to slightly different base types from 'xxx'
 		}
 
 	configuration { }
@@ -886,6 +1528,7 @@ end
 	if _OPTIONS["targetos"]=="windows" then
 		defines {
 			"PA_USE_DS=1",
+			"PA_USE_WASAPI=1",
 			"PA_USE_WDMKS=1",
 			"PA_USE_WMME=1",
 		}
@@ -893,18 +1536,24 @@ end
 			MAME_DIR .. "3rdparty/portaudio/src/os/win",
 		}
 
+		configuration { "mingw*" }
+		includedirs {
+			MAME_DIR .. "3rdparty/portaudio/src/hostapi/wasapi/mingw-include",
+		}
+
 		configuration { }
 		files {
 			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_util.c",
 			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_waveformat.c",
 			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_hostapis.c",
-			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_wdmks_utils.c",
 			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_coinitialize.c",
 			MAME_DIR .. "3rdparty/portaudio/src/hostapi/dsound/pa_win_ds.c",
 			MAME_DIR .. "3rdparty/portaudio/src/hostapi/dsound/pa_win_ds_dynlink.c",
+			MAME_DIR .. "3rdparty/portaudio/src/os/win/pa_win_hostapis.c",
+			MAME_DIR .. "3rdparty/portaudio/src/hostapi/wasapi/pa_win_wasapi.c",
 			MAME_DIR .. "3rdparty/portaudio/src/hostapi/wdmks/pa_win_wdmks.c",
-			MAME_DIR .. "3rdparty/portaudio/src/common/pa_ringbuffer.c",
 			MAME_DIR .. "3rdparty/portaudio/src/hostapi/wmme/pa_win_wmme.c",
+			MAME_DIR .. "3rdparty/portaudio/src/common/pa_ringbuffer.c",
 		}
 
 	end
@@ -943,239 +1592,53 @@ end
 
 else
 links {
-	"portaudio",
+	ext_lib("portaudio"),
 }
 end
-
---------------------------------------------------
--- libuv library objects
---------------------------------------------------
-if _OPTIONS["USE_LIBUV"]=="1" then
-if _OPTIONS["with-bundled-libuv"] then
-project "uv"
-	uuid "cd2afe7f-139d-49c3-9000-fc9119f3cea0"
-	kind "StaticLib"
-
-	includedirs {
-		MAME_DIR .. "3rdparty/libuv/include",
-		MAME_DIR .. "3rdparty/libuv/src",
-		MAME_DIR .. "3rdparty/libuv/src/win",
-	}
-
-	configuration { "gmake" }
-		buildoptions_c {
-			"-Wno-strict-prototypes",
-			"-Wno-bad-function-cast",
-			"-Wno-write-strings",
-			"-Wno-missing-braces",
-			"-Wno-undef",
-			"-Wno-unused-variable",
-		}
-
-
-	local version = str_to_version(_OPTIONS["gcc_version"])
-	if (_OPTIONS["gcc"]~=nil) then
-		if string.find(_OPTIONS["gcc"], "clang") or string.find(_OPTIONS["gcc"], "android") then
-			buildoptions_c {
-				"-Wno-unknown-warning-option",
-				"-Wno-unknown-attributes",
-				"-Wno-null-dereference",
-				"-Wno-unused-but-set-variable",
-				"-Wno-maybe-uninitialized",
-			}
-		else
-			buildoptions_c {
-				"-Wno-unused-but-set-variable",
-				"-Wno-maybe-uninitialized",
-			}
-		end
-	end
-
-	configuration { "vs*" }
-		buildoptions {
-			"/wd4054", -- warning C4054: 'type cast' : from function pointer 'xxx' to data pointer 'void *'
-			"/wd4204", -- warning C4204: nonstandard extension used : non-constant aggregate initializer
-			"/wd4210", -- warning C4210: nonstandard extension used : function given file scope
-			"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
-			"/wd4703", -- warning C4703: potentially uninitialized local pointer variable 'xxx' used
-			"/wd4477", -- warning C4477: '<function>' : format string '<format-string>' requires an argument of type '<type>', but variadic argument <position> has type '<type>'
-		}
-
-	configuration { }
-
-	files {
-			MAME_DIR .. "3rdparty/libuv/src/fs-poll.c",
-			MAME_DIR .. "3rdparty/libuv/src/inet.c",
-			MAME_DIR .. "3rdparty/libuv/src/threadpool.c",
-			MAME_DIR .. "3rdparty/libuv/src/uv-common.c",
-			MAME_DIR .. "3rdparty/libuv/src/version.c",
-	}
-
-	if _OPTIONS["targetos"]=="windows" then
-		defines {
-			"WIN32_LEAN_AND_MEAN",
-			"_WIN32_WINNT=0x0502",
-		}
-        if _ACTION == "vs2013" then
-			files {
-				MAME_DIR .. "3rdparty/libuv/src/win/snprintf.c",
-			}
-		end
-		configuration { }
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/win/async.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/core.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/dl.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/error.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/fs-event.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/fs.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/getaddrinfo.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/getnameinfo.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/handle.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/loop-watcher.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/pipe.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/poll.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/process-stdio.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/process.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/req.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/signal.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/stream.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/tcp.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/thread.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/timer.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/tty.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/udp.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/util.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/winapi.c",
-			MAME_DIR .. "3rdparty/libuv/src/win/winsock.c",
-		}
-	end
-
-	if _OPTIONS["targetos"]~="windows" then
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/async.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/atomic-ops.h",
-			MAME_DIR .. "3rdparty/libuv/src/unix/core.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/dl.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/fs.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/getaddrinfo.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/getnameinfo.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/internal.h",
-			MAME_DIR .. "3rdparty/libuv/src/unix/loop-watcher.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/loop.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/pipe.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/poll.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/process.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/signal.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/spinlock.h",
-			MAME_DIR .. "3rdparty/libuv/src/unix/stream.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/tcp.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/thread.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/timer.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/tty.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/udp.c",
-		}
-	end
-	if _OPTIONS["targetos"]=="linux" then
-		defines {
-			"_GNU_SOURCE",
-		}
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-core.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-inotify.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-syscalls.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-syscalls.h",
-			MAME_DIR .. "3rdparty/libuv/src/unix/proctitle.c",
-		}
-	end
-	if _OPTIONS["targetos"]=="macosx" then
-		defines {
-			"_DARWIN_USE_64_BIT_INODE=1",
-			"_DARWIN_UNLIMITED_SELECT=1",
-		}
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/darwin.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/darwin-proctitle.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/fsevents.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/kqueue.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/proctitle.c",
-		}
-	end
-			
-	if _OPTIONS["targetos"]=="android" then
-		defines {
-			"_GNU_SOURCE",
-		}
-		buildoptions {
-			"-Wno-header-guard",
-		}
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/proctitle.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-core.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-inotify.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-syscalls.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/linux-syscalls.h",
-			MAME_DIR .. "3rdparty/libuv/src/unix/pthread-fixes.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/android-ifaddrs.c",
-		}
-	end
-			
-	if _OPTIONS["targetos"]=="solaris" then
-		defines {
-			"__EXTENSIONS__",
-			"_XOPEN_SOURCE=500",
-		}
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/sunos.c",
-		}
-	end
-	if _OPTIONS["targetos"]=="freebsd" then
-		files {
-			MAME_DIR .. "3rdparty/libuv/src/unix/freebsd.c",
-			MAME_DIR .. "3rdparty/libuv/src/unix/kqueue.c",
-		}
-	end
-
-	if (_OPTIONS["SHADOW_CHECK"]=="1") then
-		removebuildoptions {
-			"-Wshadow"
-		}
-	end
 end
---------------------------------------------------
--- HTTP parser library objects
---------------------------------------------------
 
-project "http-parser"
-	uuid "90c6ba59-bdb2-4fee-8b44-57601d690e14"
-	kind "StaticLib"
 
-	configuration {  }
-
-	files {
-		MAME_DIR .. "3rdparty/http-parser/http_parser.c",
-	}
-	if (_OPTIONS["SHADOW_CHECK"]=="1") then
-		removebuildoptions {
-			"-Wshadow"
-		}
-	end
-
-else
-links {
-	"libuv",
-}
-end
 --------------------------------------------------
 -- SDL2 library
 --------------------------------------------------
 if _OPTIONS["with-bundled-sdl2"] then
 project "SDL2"
 	uuid "caab3327-574f-4abf-b25b-74d5238ae59b"
-	kind "StaticLib"
+if _OPTIONS["targetos"]=="android" then
+	kind "SharedLib"
+	targetextension ".so"
+	targetprefix "lib"
+	links {
+		"GLESv1_CM",
+		"GLESv2",
+		"log",
+		"OpenSLES",
+		"c++_static"
+	}
+	linkoptions {
+		"-Wl,-soname,libSDL2.so",
+	}
 
-	configuration {  }
-	
+	if _OPTIONS["SEPARATE_BIN"]~="1" then
+		if _OPTIONS["PLATFORM"]=="arm" then
+			targetdir(MAME_DIR .. "android-project/app/src/main/libs/armeabi-v7a")
+		end
+		if _OPTIONS["PLATFORM"]=="arm64" then
+			targetdir(MAME_DIR .. "android-project/app/src/main/libs/arm64-v8a")
+		end
+		if _OPTIONS["PLATFORM"]=="x86" then
+			targetdir(MAME_DIR .. "android-project/app/src/main/libs/x86")
+		end
+		if _OPTIONS["PLATFORM"]=="x64" then
+			targetdir(MAME_DIR .. "android-project/app/src/main/libs/x86_64")
+		end
+	end
+
+	strip()
+else
+	kind "StaticLib"
+end
+
 	files {
 		MAME_DIR .. "3rdparty/SDL2/include/begin_code.h",
 		MAME_DIR .. "3rdparty/SDL2/include/close_code.h",
@@ -1249,8 +1712,8 @@ project "SDL2"
 		MAME_DIR .. "3rdparty/SDL2/include/SDL_types.h",
 		MAME_DIR .. "3rdparty/SDL2/include/SDL_version.h",
 		MAME_DIR .. "3rdparty/SDL2/include/SDL_video.h",
-		
-		
+
+
 		MAME_DIR .. "3rdparty/SDL2/src/atomic/SDL_atomic.c",
 		MAME_DIR .. "3rdparty/SDL2/src/atomic/SDL_spinlock.c",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/disk/SDL_diskaudio.c",
@@ -1262,7 +1725,6 @@ project "SDL2"
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_audiocvt.c",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_audiodev.c",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_audiodev_c.h",
-		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_audiomem.h",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_audiotypecvt.c",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_mixer.c",
 		MAME_DIR .. "3rdparty/SDL2/src/audio/SDL_sysaudio.h",
@@ -1346,7 +1808,6 @@ project "SDL2"
 		MAME_DIR .. "3rdparty/SDL2/src/stdlib/SDL_qsort.c",
 		MAME_DIR .. "3rdparty/SDL2/src/stdlib/SDL_stdlib.c",
 		MAME_DIR .. "3rdparty/SDL2/src/stdlib/SDL_string.c",
-		MAME_DIR .. "3rdparty/SDL2/src/thread/generic/SDL_syscond.c",
 		MAME_DIR .. "3rdparty/SDL2/src/thread/SDL_systhread.h",
 		MAME_DIR .. "3rdparty/SDL2/src/thread/SDL_thread.c",
 		MAME_DIR .. "3rdparty/SDL2/src/thread/SDL_thread_c.h",
@@ -1420,13 +1881,15 @@ project "SDL2"
 			MAME_DIR .. "3rdparty/SDL2/src/render/opengles/SDL_glesfuncs.h",
 		}
 	end
-	
+
 	if _OPTIONS["targetos"]=="android" then
 		files {
-			MAME_DIR .. "3rdparty/SDL2/src/audio/android/SDL_androidaudio.c",
+			MAME_DIR .. "3rdparty/SDL2/src/audio/android/opensl_io.h",
+			MAME_DIR .. "3rdparty/SDL2/src/audio/android/opensl_io.c",
 			MAME_DIR .. "3rdparty/SDL2/src/audio/android/SDL_androidaudio.h",
-			MAME_DIR .. "3rdparty/SDL2/src/core/android/SDL_android.c",	
-			MAME_DIR .. "3rdparty/SDL2/src/core/android/SDL_android.h",	
+			MAME_DIR .. "3rdparty/SDL2/src/audio/android/SDL_androidaudio.c",
+			MAME_DIR .. "3rdparty/SDL2/src/core/android/SDL_android.c",
+			MAME_DIR .. "3rdparty/SDL2/src/core/android/SDL_android.h",
 			MAME_DIR .. "3rdparty/SDL2/src/filesystem/android/SDL_sysfilesystem.c",
 			MAME_DIR .. "3rdparty/SDL2/src/haptic/dummy/SDL_syshaptic.c",
 			MAME_DIR .. "3rdparty/SDL2/src/joystick/android/SDL_sysjoystick.c",
@@ -1460,10 +1923,10 @@ project "SDL2"
 			MAME_DIR .. "3rdparty/SDL2/src/video/android/SDL_androidwindow.h",
 		}
 	end
-	
+
 	if _OPTIONS["targetos"]=="macosx" then
 		files {
-			MAME_DIR .. "3rdparty/SDL2/src/audio/coreaudio/SDL_coreaudio.c",
+			MAME_DIR .. "3rdparty/SDL2/src/audio/coreaudio/SDL_coreaudio.m",
 			MAME_DIR .. "3rdparty/SDL2/src/audio/coreaudio/SDL_coreaudio.h",
 			MAME_DIR .. "3rdparty/SDL2/src/file/cocoa/SDL_rwopsbundlesupport.m",
 			MAME_DIR .. "3rdparty/SDL2/src/file/cocoa/SDL_rwopsbundlesupport.h",
@@ -1473,7 +1936,7 @@ project "SDL2"
 			MAME_DIR .. "3rdparty/SDL2/src/joystick/darwin/SDL_sysjoystick.c",
 			MAME_DIR .. "3rdparty/SDL2/src/joystick/darwin/SDL_sysjoystick_c.h",
 			MAME_DIR .. "3rdparty/SDL2/src/loadso/dlopen/SDL_sysloadso.c",
-			MAME_DIR .. "3rdparty/SDL2/src/power/macosx/SDL_syspower.c",			
+			MAME_DIR .. "3rdparty/SDL2/src/power/macosx/SDL_syspower.c",
 			MAME_DIR .. "3rdparty/SDL2/src/thread/pthread/SDL_syscond.c",
 			MAME_DIR .. "3rdparty/SDL2/src/thread/pthread/SDL_sysmutex.c",
 			MAME_DIR .. "3rdparty/SDL2/src/thread/pthread/SDL_sysmutex_c.h",
@@ -1510,6 +1973,7 @@ project "SDL2"
 
 	if _OPTIONS["targetos"]=="windows" then
 		files {
+			MAME_DIR .. "3rdparty/SDL2/src/thread/generic/SDL_syscond.c",
 			MAME_DIR .. "3rdparty/SDL2/src/audio/directsound/SDL_directsound.c",
 			MAME_DIR .. "3rdparty/SDL2/src/audio/directsound/SDL_directsound.h",
 			MAME_DIR .. "3rdparty/SDL2/src/audio/winmm/SDL_winmm.c",
@@ -1567,51 +2031,60 @@ project "SDL2"
 			MAME_DIR .. "3rdparty/SDL2/src/main/windows/version.rc",
 		}
 	end
-		
+
 	configuration { "vs*" }
 		files {
 			MAME_DIR .. "3rdparty/SDL2/src/audio/xaudio2/SDL_xaudio2.c",
 		}
-	
+
 		buildoptions {
 			"/wd4200", -- warning C4200: nonstandard extension used: zero-sized array in struct/union
 			"/wd4055", -- warning C4055: 'type cast': from data pointer 'void *' to function pointer 'xxx'
 			"/wd4152", -- warning C4152: nonstandard extension, function/data pointer conversion in expression
 			"/wd4057", -- warning C4057: 'function': 'xxx' differs in indirection to slightly different base types from 'xxx'
 			"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
-			"/wd4204", -- warning C4204: nonstandard extension used: non-constant aggregate initializer	
+			"/wd4204", -- warning C4204: nonstandard extension used: non-constant aggregate initializer
 			"/wd4054", -- warning C4054: 'type cast': from function pointer 'xxx' to data pointer 'xxx'
 		}
 		defines {
 			"HAVE_LIBC",
 		}
-        
+
 	configuration { "mingw*"}
 		includedirs {
 			MAME_DIR .. "3rdparty/SDL2-override/mingw",
 			MAME_DIR .. "3rdparty/bgfx/3rdparty/khronos",
 		}
 		buildoptions_c {
-			"-Wno-undef",
-			"-Wno-strict-prototypes",
 			"-Wno-bad-function-cast",
 			"-Wno-discarded-qualifiers",
+			"-Wno-format",
+			"-Wno-format-security",
+			"-Wno-pointer-to-int-cast",
+			"-Wno-strict-prototypes",
+			"-Wno-undef",
 			"-Wno-unused-but-set-variable",
-		}		
+		}
+
+	configuration { "mingw-clang"}
+		buildoptions_c {
+			"-Wno-incompatible-pointer-types-discards-qualifiers"
+		}
 
 	configuration { "osx*"}
 		buildoptions {
 			"-Wno-undef",
-        }
-    	buildoptions_objc {
-    		"-x objective-c",
-	       	"-std=c99",
-    	}
-        
+		}
+		buildoptions_objc {
+			"-x objective-c",
+			"-std=c99",
+		}
+
 		buildoptions_c {
 			"-Wno-bad-function-cast",
-		}		
-		
+			"-Wno-strict-prototypes",
+		}
+
 	configuration { "android-*"}
 		defines {
 			"GL_GLEXT_PROTOTYPES",
@@ -1621,11 +2094,310 @@ project "SDL2"
 			"-Wno-incompatible-pointer-types-discards-qualifiers",
 			"-Wno-unneeded-internal-declaration",
 			"-Wno-unused-const-variable",
-		}		
-		
+		}
+
 	configuration { }
 		includedirs {
 			MAME_DIR .. "3rdparty/SDL2/include",
 		}
 
+end
+
+
+--------------------------------------------------
+-- linenoise library
+--------------------------------------------------
+
+project "linenoise"
+	uuid "7320ffc8-2748-4add-8864-ae29b72a8511"
+	kind (LIBTYPE)
+
+	addprojectflags()
+
+	configuration { "vs*" }
+		buildoptions {
+			"/wd4701", -- warning C4701: potentially uninitialized local variable 'xxx' used
+		}
+
+	configuration { }
+
+	includedirs {
+		MAME_DIR .. "3rdparty/linenoise",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/linenoise/utf8.c",
+		MAME_DIR .. "3rdparty/linenoise/linenoise.c",
+	}
+
+
+--------------------------------------------------
+-- utf8proc library objects
+--------------------------------------------------
+
+if not _OPTIONS["with-system-utf8proc"] then
+project "utf8proc"
+	uuid "1f881f09-0395-4483-ac37-2935fb092187"
+	kind "StaticLib"
+
+	defines {
+		"UTF8PROC_STATIC",
+	}
+
+	configuration "Debug"
+		defines {
+			"verbose=-1",
+		}
+
+	configuration { "gmake or ninja" }
+		buildoptions_c {
+			"-Wno-strict-prototypes",
+		}
+
+	configuration { }
+
+	files {
+		MAME_DIR .. "3rdparty/utf8proc/utf8proc.c"
+	}
+else
+links {
+	ext_lib("utf8proc"),
+}
+end
+
+
+--------------------------------------------------
+-- wdlfft library objects (from Cockos WDL)
+--------------------------------------------------
+
+project "wdlfft"
+	uuid "74ca017e-fa0d-48b8-81d6-8081a37be14c"
+	kind "StaticLib"
+
+	configuration { "gmake or ninja" }
+		buildoptions_c {
+			"-Wno-strict-prototypes",
+		}
+
+	configuration { }
+
+	files {
+		MAME_DIR .. "3rdparty/wdlfft/fft.c",
+		MAME_DIR .. "3rdparty/wdlfft/fft.h"
+	}
+
+
+--------------------------------------------------
+-- ymfm library objects
+--------------------------------------------------
+
+project "ymfm"
+	uuid "2403a536-cb0a-4b50-b41f-10c17917689b"
+	kind "StaticLib"
+
+	configuration { }
+		defines {
+			"YMFM_MAME",
+		}
+
+	files {
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_adpcm.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_adpcm.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_fm.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_fm.ipp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_misc.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_misc.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opl.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opl.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opm.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opm.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opn.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opn.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opq.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opq.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opz.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_opz.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_pcm.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_pcm.h",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_ssg.cpp",
+		MAME_DIR .. "3rdparty/ymfm/src/ymfm_ssg.h",
+	}
+
+
+--------------------------------------------------
+-- asmjit library
+--------------------------------------------------
+
+if not _OPTIONS["FORCE_DRC_C_BACKEND"] then
+project "asmjit"
+	uuid "4539757c-6e99-4bae-b3d0-b342a7c49539"
+	kind "StaticLib"
+
+	configuration { "gmake or ninja" }
+	if (_OPTIONS["gcc"] ~= nil) and (not string.find(_OPTIONS["gcc"], "clang")) and (str_to_version(_OPTIONS["gcc_version"]) < 80000) then
+		buildoptions {
+			"-Wno-maybe-uninitialized",
+		}
+	end	
+
+	configuration { }
+
+	if _OPTIONS["targetos"]=="macosx" and _OPTIONS["gcc"]~=nil then
+		if string.find(_OPTIONS["gcc"], "clang") and (version < 80000) then
+			defines {
+				"TARGET_OS_OSX=1",
+			}
+		end
+	end
+
+	files {
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/a64.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/asmjit-scope-begin.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/asmjit-scope-end.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/asmjit.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64archtraits_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64assembler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64assembler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64builder.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64builder.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64compiler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64compiler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64emithelper.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64emithelper_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64emitter.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64formatter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64formatter_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64func.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64func_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64globals.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64instapi.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64instapi_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64instdb.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64instdb.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64instdb_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64operand.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64operand.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64rapass.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64rapass_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/a64utils.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/armformatter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/armformatter_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/armglobals.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/arm/armoperand.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/api-build_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/api-config.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/archcommons.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/archtraits.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/archtraits.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/assembler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/assembler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/builder.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/builder.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/codebuffer.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/codeholder.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/codeholder.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/codewriter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/codewriter_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/compiler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/compiler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/compilerdefs.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/constpool.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/constpool.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/cpuinfo.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/cpuinfo.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emithelper.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emithelper_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emitter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emitter.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emitterutils.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/emitterutils_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/environment.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/environment.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/errorhandler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/errorhandler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/formatter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/formatter.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/formatter_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/func.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/func.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/funcargscontext.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/funcargscontext_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/globals.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/globals.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/inst.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/inst.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/jitallocator.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/jitallocator.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/jitruntime.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/jitruntime.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/logger.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/logger.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/misc_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/operand.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/operand.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/osutils.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/osutils.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/osutils_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/raassignment_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/rabuilders_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/radefs_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/ralocal.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/ralocal_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/rapass.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/rapass_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/rastack.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/rastack_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/string.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/string.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/support.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/support.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/target.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/target.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/type.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/type.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/virtmem.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/virtmem.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zone.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zone.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonehash.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonehash.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonelist.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonelist.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonestack.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonestack.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonestring.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonetree.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonetree.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonevector.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/core/zonevector.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86archtraits_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86assembler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86assembler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86builder.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86builder.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86compiler.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86compiler.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86emithelper.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86emithelper_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86emitter.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86formatter.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86formatter_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86func.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86func_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86globals.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86instapi.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86instapi_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86instdb.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86instdb.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86instdb_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86opcode_p.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86operand.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86operand.h",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86rapass.cpp",
+		MAME_DIR .. "3rdparty/asmjit/src/asmjit/x86/x86rapass_p.h",
+	}
 end

@@ -2,7 +2,7 @@
 // copyright-holders:Curt Coder
 /***************************************************************************
 
-C-80
+C-80 Trainer (East Germany)
 
 Pasting:
     0-F : as is
@@ -50,25 +50,93 @@ or press 0 thru C to choose one directly:
 When MEM is chosen, enter the address, press UP, enter data, press UP, enter
 data of next byte, and so on.
 
+Cassette SAVE: Press F1 1 aaaa DOWN bbbb UP
+Cassette LOAD: Press F1 2 aaaa DOWN bbbb UP
+(where aaaa = 4-digit beginning address, bbbb = 4-digit ending address)
+
 ****************************************************************************/
 
-#include "includes/c80.h"
-#include "sound/wave.h"
+#include "emu.h"
+#include "cpu/z80/z80.h"
+#include "machine/z80daisy.h"
+#include "machine/z80pio.h"
+#include "imagedev/cassette.h"
+#include "speaker.h"
 #include "c80.lh"
+
+namespace {
+
+#define Z80_TAG         "d2"
+#define Z80PIO1_TAG     "d11"
+#define Z80PIO2_TAG     "d12"
+// You could use a piezo at 455 kHz, or a crystal 500 to 2500 kHz.
+// Cassette successfully tested at 455 kHz
+#define MASTER_CLOCK    455000
+
+class c80_state : public driver_device
+{
+public:
+	c80_state(const machine_config &mconfig, device_type type, const char *tag)
+		: driver_device(mconfig, type, tag)
+		, m_maincpu(*this, Z80_TAG)
+		, m_pio1(*this, Z80PIO1_TAG)
+		, m_pio2(*this, Z80PIO2_TAG)
+		, m_cassette(*this, "cassette")
+		, m_row0(*this, "ROW0")
+		, m_row1(*this, "ROW1")
+		, m_row2(*this, "ROW2")
+		, m_digits(*this, "digit%d", 0U)
+	{ }
+
+	DECLARE_INPUT_CHANGED_MEMBER( trigger_reset );
+	DECLARE_INPUT_CHANGED_MEMBER( trigger_nmi );
+	void c80(machine_config &config);
+
+private:
+	required_device<z80_device> m_maincpu;
+	required_device<z80pio_device> m_pio1;
+	required_device<z80pio_device> m_pio2;
+	required_device<cassette_image_device> m_cassette;
+	required_ioport m_row0;
+	required_ioport m_row1;
+	required_ioport m_row2;
+	output_finder<8> m_digits;
+
+	virtual void machine_start() override;
+
+	uint8_t pio1_pa_r();
+	void pio1_pa_w(uint8_t data);
+	void pio1_pb_w(uint8_t data);
+	DECLARE_WRITE_LINE_MEMBER( pio1_brdy_w );
+
+	/* keyboard state */
+	u8 m_keylatch = 0;
+
+	/* display state */
+	u8 m_digit = 0;
+	bool m_pio1_a5 = false;
+	u8 m_pio1_brdy = 0;
+	void c80_io(address_map &map);
+	void c80_mem(address_map &map);
+};
+
 
 /* Memory Maps */
 
-static ADDRESS_MAP_START( c80_mem, AS_PROGRAM, 8, c80_state )
-	ADDRESS_MAP_UNMAP_HIGH
-	AM_RANGE(0x0000, 0x07ff) AM_ROM
-	AM_RANGE(0x0800, 0x0bff) AM_MIRROR(0x400) AM_RAM
-ADDRESS_MAP_END
+void c80_state::c80_mem(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x0000, 0x07ff).rom();
+	map(0x0800, 0x0bff).mirror(0x400).ram();
+}
 
-static ADDRESS_MAP_START( c80_io, AS_IO, 8, c80_state )
-	ADDRESS_MAP_GLOBAL_MASK(0xff)
-	AM_RANGE(0x7c, 0x7f) AM_DEVREADWRITE(Z80PIO2_TAG, z80pio_device, read, write)
-	AM_RANGE(0xbc, 0xbf) AM_DEVREADWRITE(Z80PIO1_TAG, z80pio_device, read, write)
-ADDRESS_MAP_END
+void c80_state::c80_io(address_map &map)
+{
+	map.global_mask(0xff);
+	map.unmap_value_high();
+	map(0x7c, 0x7f).rw(m_pio2, FUNC(z80pio_device::read), FUNC(z80pio_device::write));
+	map(0xbc, 0xbf).rw(m_pio1, FUNC(z80pio_device::read), FUNC(z80pio_device::write));
+}
 
 /* Input Ports */
 
@@ -120,7 +188,7 @@ INPUT_PORTS_END
 
 /* Z80-PIO Interface */
 
-READ8_MEMBER( c80_state::pio1_pa_r )
+uint8_t c80_state::pio1_pa_r()
 {
 	/*
 
@@ -137,11 +205,9 @@ READ8_MEMBER( c80_state::pio1_pa_r )
 
 	*/
 
-	UINT8 data = !m_pio1_brdy << 4 | 0x07;
+	uint8_t data = m_pio1_brdy | 0x07;
 
-	int i;
-
-	for (i = 0; i < 8; i++)
+	for (u8 i = 0; i < 8; i++)
 	{
 		if (!BIT(m_keylatch, i))
 		{
@@ -156,7 +222,7 @@ READ8_MEMBER( c80_state::pio1_pa_r )
 	return data;
 }
 
-WRITE8_MEMBER( c80_state::pio1_pa_w )
+void c80_state::pio1_pa_w(uint8_t data)
 {
 	/*
 
@@ -183,7 +249,7 @@ WRITE8_MEMBER( c80_state::pio1_pa_w )
 	m_cassette->output(BIT(data, 6) ? +1.0 : -1.0);
 }
 
-WRITE8_MEMBER( c80_state::pio1_pb_w )
+void c80_state::pio1_pb_w(uint8_t data)
 {
 	/*
 
@@ -200,9 +266,9 @@ WRITE8_MEMBER( c80_state::pio1_pb_w )
 
 	*/
 
-	if (!m_pio1_a5)
+	if (!m_pio1_a5 && (m_digit < 8))
 	{
-		output().set_digit_value(m_digit, data);
+		m_digits[m_digit] = data;
 	}
 
 	m_keylatch = data;
@@ -210,7 +276,7 @@ WRITE8_MEMBER( c80_state::pio1_pb_w )
 
 WRITE_LINE_MEMBER( c80_state::pio1_brdy_w )
 {
-	m_pio1_brdy = state;
+	m_pio1_brdy = state ? 0 : 0x10;
 
 	if (state)
 	{
@@ -237,6 +303,7 @@ static const z80_daisy_config c80_daisy_chain[] =
 
 void c80_state::machine_start()
 {
+	m_digits.resolve();
 	/* register for state saving */
 	save_item(NAME(m_keylatch));
 	save_item(NAME(m_digit));
@@ -246,48 +313,43 @@ void c80_state::machine_start()
 
 /* Machine Driver */
 
-static MACHINE_CONFIG_START( c80, c80_state )
-	/* basic machine hardware */
-	MCFG_CPU_ADD(Z80_TAG, Z80, 2500000) /* U880D */
-	MCFG_CPU_PROGRAM_MAP(c80_mem)
-	MCFG_CPU_IO_MAP(c80_io)
-	MCFG_CPU_CONFIG(c80_daisy_chain)
+void c80_state::c80(machine_config &config)
+{
+	// CPU
+	Z80(config, m_maincpu, MASTER_CLOCK); // U880D
+	m_maincpu->set_addrmap(AS_PROGRAM, &c80_state::c80_mem);
+	m_maincpu->set_addrmap(AS_IO, &c80_state::c80_io);
+	m_maincpu->set_daisy_config(c80_daisy_chain);
 
-	/* video hardware */
-	MCFG_DEFAULT_LAYOUT( layout_c80 )
+	// video
+	config.set_default_layout(layout_c80);
 
-	/* devices */
-	MCFG_DEVICE_ADD(Z80PIO1_TAG, Z80PIO, 2500000)
-	MCFG_Z80PIO_OUT_INT_CB(INPUTLINE(Z80_TAG, INPUT_LINE_IRQ0))
-	MCFG_Z80PIO_IN_PA_CB(READ8(c80_state, pio1_pa_r))
-	MCFG_Z80PIO_OUT_PA_CB(WRITE8(c80_state, pio1_pa_w))
-	MCFG_Z80PIO_OUT_PB_CB(WRITE8(c80_state, pio1_pb_w))
-	MCFG_Z80PIO_OUT_BRDY_CB(WRITELINE(c80_state, pio1_brdy_w))
+	// devices
+	Z80PIO(config, m_pio1, MASTER_CLOCK); // U855D
+	m_pio1->out_int_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
+	m_pio1->in_pa_callback().set(FUNC(c80_state::pio1_pa_r));
+	m_pio1->out_pa_callback().set(FUNC(c80_state::pio1_pa_w));
+	m_pio1->out_pb_callback().set(FUNC(c80_state::pio1_pb_w));
+	m_pio1->out_brdy_callback().set(FUNC(c80_state::pio1_brdy_w));
 
-	MCFG_DEVICE_ADD(Z80PIO2_TAG, Z80PIO, 2500000)
-	MCFG_Z80PIO_OUT_INT_CB(INPUTLINE(Z80_TAG, INPUT_LINE_IRQ0))
+	Z80PIO(config, m_pio2, MASTER_CLOCK); // U855D
+	m_pio2->out_int_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
 
-	MCFG_CASSETTE_ADD("cassette")
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_ENABLED )
-
-	MCFG_SPEAKER_STANDARD_MONO("mono")
-	MCFG_SOUND_WAVE_ADD(WAVE_TAG, "cassette")
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.25)
-
-	/* internal ram */
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("1K")
-MACHINE_CONFIG_END
+	// cassette
+	SPEAKER(config, "mono").front_center();
+	CASSETTE(config, m_cassette);
+	m_cassette->set_default_state(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_ENABLED);
+	m_cassette->add_route(ALL_OUTPUTS, "mono", 0.05);
+}
 
 /* ROMs */
 
 ROM_START( c80 )
-	ROM_REGION( 0x10000, Z80_TAG, 0 )
+	ROM_REGION( 0x0800, Z80_TAG, ROMREGION_ERASEFF )
 	ROM_LOAD( "c80.d3", 0x0000, 0x0400, CRC(ad2b3296) SHA1(14f72cb73a4068b7a5d763cc0e254639c251ce2e) )
 ROM_END
 
+} // Anonymous namespace
 
-/* System Drivers */
-
-/*    YEAR  NAME    PARENT  COMPAT  MACHINE INPUT  CLASS            INIT  COMPANY      FULLNAME    FLAGS */
-COMP( 1986, c80,    0,      0,      c80,    c80,   driver_device,    0, "Joachim Czepa", "C-80", MACHINE_SUPPORTS_SAVE )
+/*    YEAR  NAME  PARENT  COMPAT  MACHINE  INPUT  CLASS      INIT        COMPANY          FULLNAME  FLAGS */
+COMP( 1986, c80,  0,      0,      c80,     c80,   c80_state, empty_init, "Joachim Czepa", "C-80",   MACHINE_SUPPORTS_SAVE )

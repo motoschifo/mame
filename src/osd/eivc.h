@@ -8,23 +8,15 @@
 //
 //============================================================
 
-#ifndef __EIVC__
-#define __EIVC__
+#ifndef MAME_OSD_EIVC_H
+#define MAME_OSD_EIVC_H
 
-#if (_MSC_VER >= 1400)
+#pragma once
 
-// need to ignore 'nonstandard extension used' warning in setjmp.h
-#pragma warning(push)
-#pragma warning(disable: 4987)
 #include <intrin.h>
-#pragma warning(pop)
-
-#else
-extern "C" unsigned char _BitScanReverse(unsigned long *Index, unsigned long Mask);
-#endif
-
-#if (_MSC_VER >= 1310)
 #pragma intrinsic(_BitScanReverse)
+#ifdef PTR64
+#pragma intrinsic(_BitScanReverse64)
 #endif
 
 
@@ -33,32 +25,70 @@ extern "C" unsigned char _BitScanReverse(unsigned long *Index, unsigned long Mas
 ***************************************************************************/
 
 /*-------------------------------------------------
-    count_leading_zeros - return the number of
+    count_leading_zeros_32 - return the number of
     leading zero bits in a 32-bit value
 -------------------------------------------------*/
 
-#ifndef count_leading_zeros
-#define count_leading_zeros _count_leading_zeros
-static inline UINT8 _count_leading_zeros(UINT32 value)
+#ifndef count_leading_zeros_32
+#define count_leading_zeros_32 _count_leading_zeros_32
+__forceinline uint8_t _count_leading_zeros_32(uint32_t value)
 {
-	UINT32 index;
-	return _BitScanReverse((unsigned long *)&index, value) ? (index ^ 31) : 32;
+	unsigned long index;
+	return _BitScanReverse(&index, value) ? (31U - index) : 32U;
 }
 #endif
 
 
 /*-------------------------------------------------
-    count_leading_ones - return the number of
+    count_leading_ones_32 - return the number of
     leading one bits in a 32-bit value
 -------------------------------------------------*/
 
-#ifndef count_leading_ones
-#define count_leading_ones _count_leading_ones
-static inline UINT8 _count_leading_ones(UINT32 value)
+#ifndef count_leading_ones_32
+#define count_leading_ones_32 _count_leading_ones_32
+__forceinline uint8_t _count_leading_ones_32(uint32_t value)
 {
-	UINT32 index;
-	return _BitScanReverse((unsigned long *)&index, ~value) ? (index ^ 31) : 32;
+	unsigned long index;
+	return _BitScanReverse(&index, ~value) ? (31U - index) : 32U;
 }
 #endif
 
-#endif /* __EIVC__ */
+
+/*-------------------------------------------------
+    count_leading_zeros_64 - return the number of
+    leading zero bits in a 64-bit value
+-------------------------------------------------*/
+
+#ifndef count_leading_zeros_64
+#define count_leading_zeros_64 _count_leading_zeros_64
+__forceinline uint8_t _count_leading_zeros_64(uint64_t value)
+{
+	unsigned long index;
+#ifdef PTR64
+	return _BitScanReverse64(&index, value) ? (63U - index) : 64U;
+#else
+	return _BitScanReverse(&index, uint32_t(value >> 32)) ? (31U - index) : _BitScanReverse(&index, uint32_t(value)) ? (63U - index) : 64U;
+#endif
+}
+#endif
+
+
+/*-------------------------------------------------
+    count_leading_ones_64 - return the number of
+    leading one bits in a 64-bit value
+-------------------------------------------------*/
+
+#ifndef count_leading_ones_64
+#define count_leading_ones_64 _count_leading_ones_64
+__forceinline uint8_t _count_leading_ones_64(uint64_t value)
+{
+	unsigned long index;
+#ifdef PTR64
+	return _BitScanReverse64(&index, ~value) ? (63U - index) : 64U;
+#else
+	return _BitScanReverse(&index, ~uint32_t(value >> 32)) ? (31U - index) : _BitScanReverse(&index, ~uint32_t(value)) ? (63U - index) : 64U;
+#endif
+}
+#endif
+
+#endif // MAME_OSD_EIVC_H

@@ -13,18 +13,22 @@
 //============================================================
 
 // standard C headers
-#include <math.h>
-#include <stdio.h>
+#include <cmath>
+#include <cstdio>
 
 // MAME headers
 #include "osdcomm.h"
 #include "emu.h"
 #include "emuopts.h"
 
-#ifndef OSD_WINDOWS
+#ifdef OSD_MAC
+#define GL_SILENCE_DEPRECATION (1)
+#endif
+
+#if !defined(OSD_WINDOWS) && !defined(OSD_MAC)
 // standard SDL headers
 #define TOBEMIGRATED 1
-#include "sdlinc.h"
+#include <SDL2/SDL.h>
 #endif
 
 #include "modules/lib/osdlib.h"
@@ -36,7 +40,12 @@
 #include "modules/opengl/gl_shader_tool.h"
 #include "modules/opengl/gl_shader_mgr.h"
 
-#if defined(SDLMAME_MACOSX)
+#if defined(SDLMAME_MACOSX) || defined(OSD_MAC)
+#include <cstring>
+#include <cstdio>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+
 #ifndef APIENTRY
 #define APIENTRY
 #endif
@@ -197,7 +206,7 @@ static const line_aa_step line_aa_4step[] =
 //  INLINES
 //============================================================
 
-HashT renderer_ogl::texture_compute_hash(const render_texinfo *texture, UINT32 flags)
+HashT renderer_ogl::texture_compute_hash(const render_texinfo *texture, uint32_t flags)
 {
 	HashT h = (HashT)texture->base ^ (flags & (PRIMFLAG_BLENDMODE_MASK | PRIMFLAG_TEXFORMAT_MASK));
 	//printf("hash %d\n", (int) h % HASH_SIZE);
@@ -237,7 +246,7 @@ void renderer_ogl::set_blendmode(int blendmode)
 //============================================================
 
 // OGL 1.3
-#ifdef GL_ARB_multitexture
+#if defined(GL_ARB_multitexture) && !defined(OSD_MAC)
 static PFNGLACTIVETEXTUREARBPROC pfn_glActiveTexture    = nullptr;
 #else
 static PFNGLACTIVETEXTUREPROC pfn_glActiveTexture   = nullptr;
@@ -268,7 +277,7 @@ static int glsl_shader_feature = GLSL_SHADER_FEAT_PLAIN;
 //  Textures
 //============================================================
 
-static void texture_set_data(ogl_texture_info *texture, const render_texinfo *texsource, UINT32 flags);
+static void texture_set_data(ogl_texture_info *texture, const render_texinfo *texsource, uint32_t flags);
 
 //============================================================
 //  Static Variables
@@ -277,7 +286,7 @@ static void texture_set_data(ogl_texture_info *texture, const render_texinfo *te
 bool renderer_ogl::s_shown_video_info = false;
 bool renderer_ogl::s_dll_loaded = false;
 
-bool renderer_ogl::init(running_machine &machine)
+void renderer_ogl::init(running_machine &machine)
 {
 	s_dll_loaded = false;
 
@@ -287,8 +296,6 @@ bool renderer_ogl::init(running_machine &machine)
 #else
 	osd_printf_verbose("Using SDL multi-window OpenGL driver (SDL 2.0+)\n");
 #endif
-
-	return false;
 }
 
 //============================================================
@@ -300,7 +307,7 @@ renderer_ogl::~renderer_ogl()
 	// free the memory in the window
 	destroy_all_textures();
 
-	global_free(m_gl_context);
+	delete m_gl_context;
 	m_gl_context = nullptr;
 }
 
@@ -359,20 +366,14 @@ static void loadgl_functions(osd_gl_context *context)
 //============================================================
 
 #ifdef USE_DISPATCH_GL
-osd_gl_dispatch *gl_dispatch;
-#endif
-
-#ifdef OSD_WINDOWS
-HMODULE win_gl_context::m_module;
+osd_gl_dispatch *gl_dispatch = nullptr;
 #endif
 
 void renderer_ogl::load_gl_lib(running_machine &machine)
 {
 	if (!s_dll_loaded)
 	{
-#ifdef OSD_WINDOWS
-		win_gl_context::load_library();
-#else
+#ifndef OSD_WINDOWS
 #ifdef USE_DISPATCH_GL
 		/*
 		 *  directfb and and x11 use this env var
@@ -382,7 +383,7 @@ void renderer_ogl::load_gl_lib(running_machine &machine)
 
 		stemp = downcast<sdl_options &>(machine.options()).gl_lib();
 		if (stemp != nullptr && strcmp(stemp, OSDOPTVAL_AUTO) == 0)
-			stemp = nullptrnullptr;
+			stemp = nullptr;
 
 		if (SDL_GL_LoadLibrary(stemp) != 0) // Load library (default for e==nullptr
 		{
@@ -393,7 +394,7 @@ void renderer_ogl::load_gl_lib(running_machine &machine)
 #endif
 #endif
 #ifdef USE_DISPATCH_GL
-		gl_dispatch = (osd_gl_dispatch *) osd_malloc(sizeof(osd_gl_dispatch));
+		gl_dispatch = new osd_gl_dispatch;
 #endif
 		s_dll_loaded = true;
 	}
@@ -561,11 +562,16 @@ void renderer_ogl::initialize_gl()
 
 int renderer_ogl::create()
 {
+	auto win = assert_window();
+
 	// create renderer
 #if defined(OSD_WINDOWS)
-	m_gl_context = global_alloc(win_gl_context(window().m_hwnd));
+	m_gl_context = new win_gl_context(std::static_pointer_cast<win_window_info>(win)->platform_window());
+#elif defined(OSD_MAC)
+// TODO
+//  m_gl_context = new mac_gl_context(std::static_pointer_cast<mac_window_info>(win)->platform_window());
 #else
-	m_gl_context = global_alloc(sdl_gl_context(window().sdl_window()));
+	m_gl_context = new sdl_gl_context(std::static_pointer_cast<sdl_window_info>(win)->platform_window());
 #endif
 	if  (m_gl_context->LastErrorMsg() != nullptr)
 	{
@@ -623,18 +629,25 @@ int renderer_ogl::xy_to_render_target(int x, int y, int *xt, int *yt)
 void renderer_ogl::destroy_all_textures()
 {
 	ogl_texture_info *texture = nullptr;
-	int lock=FALSE;
+	bool lock=false;
 	int i;
 
 	if ( !m_initialized )
 		return;
 
+	auto win = try_getwindow();
+
+	// During destroy this can get called
+	// and the window is no longer available
+	if (win == nullptr)
+		return;
+
 	m_gl_context->MakeCurrent();
 
-	if(window().m_primlist)
+	if(win->m_primlist)
 	{
-		lock=TRUE;
-		window().m_primlist->acquire_lock();
+		lock=true;
+		win->m_primlist->acquire_lock();
 	}
 
 	glFinish();
@@ -681,9 +694,9 @@ void renderer_ogl::destroy_all_textures()
 			{
 				free(texture->data);
 				texture->data=nullptr;
-				texture->data_own=FALSE;
+				texture->data_own=false;
 			}
-			global_free(texture);
+			delete texture;
 		}
 		i++;
 	}
@@ -696,7 +709,7 @@ void renderer_ogl::destroy_all_textures()
 	m_initialized = 0;
 
 	if (lock)
-		window().m_primlist->release_lock();
+		win->m_primlist->release_lock();
 }
 //============================================================
 //  loadGLExtensions
@@ -706,9 +719,9 @@ void renderer_ogl::loadGLExtensions()
 {
 	static int _once = 1;
 
-	// usevbo=FALSE; // You may want to switch VBO and PBO off, by uncommenting this statement
-	// usepbo=FALSE; // You may want to switch PBO off, by uncommenting this statement
-	// useglsl=FALSE; // You may want to switch GLSL off, by uncommenting this statement
+	// usevbo=false; // You may want to switch VBO and PBO off, by uncommenting this statement
+	// usepbo=false; // You may want to switch PBO off, by uncommenting this statement
+	// useglsl=false; // You may want to switch GLSL off, by uncommenting this statement
 
 	if (! m_usevbo)
 	{
@@ -718,7 +731,7 @@ void renderer_ogl::loadGLExtensions()
 			{
 				osd_printf_warning("OpenGL: PBO not supported, no VBO support. (sdlmame error)\n");
 			}
-			m_usepbo=FALSE;
+			m_usepbo=false;
 		}
 		if(m_useglsl) // should never ever happen ;-)
 		{
@@ -726,7 +739,7 @@ void renderer_ogl::loadGLExtensions()
 			{
 				osd_printf_warning("OpenGL: GLSL not supported, no VBO support. (sdlmame error)\n");
 			}
-			m_useglsl=FALSE;
+			m_useglsl=false;
 		}
 	}
 
@@ -762,7 +775,7 @@ void renderer_ogl::loadGLExtensions()
 			!pfn_glBindBuffer || !pfn_glBufferData || !pfn_glBufferSubData
 		) )
 	{
-		m_usepbo=FALSE;
+		m_usepbo=false;
 		if (_once)
 		{
 			osd_printf_warning("OpenGL: VBO not supported, missing: ");
@@ -794,13 +807,13 @@ void renderer_ogl::loadGLExtensions()
 			{
 				osd_printf_warning("OpenGL: PBO not supported, no VBO support.\n");
 			}
-			m_usepbo=FALSE;
+			m_usepbo=false;
 		}
 	}
 
 	if ( m_usepbo && ( !pfn_glMapBuffer || !pfn_glUnmapBuffer ) )
 	{
-		m_usepbo=FALSE;
+		m_usepbo=false;
 		if (_once)
 		{
 			osd_printf_warning("OpenGL: PBO not supported, missing: ");
@@ -821,7 +834,7 @@ void renderer_ogl::loadGLExtensions()
 			!pfn_glGenFramebuffers || !pfn_glCheckFramebufferStatus || !pfn_glFramebufferTexture2D
 		))
 	{
-		m_usefbo=FALSE;
+		m_usefbo=false;
 		if (_once)
 		{
 			osd_printf_warning("OpenGL: FBO not supported, missing: ");
@@ -885,7 +898,7 @@ void renderer_ogl::loadGLExtensions()
 
 	if ( m_useglsl )
 	{
-		#ifdef GL_ARB_multitexture
+		#if defined(GL_ARB_multitexture) && !defined(OSD_MAC)
 		pfn_glActiveTexture = (PFNGLACTIVETEXTUREARBPROC) m_gl_context->getProcAddress("glActiveTextureARB");
 		#else
 		pfn_glActiveTexture = (PFNGLACTIVETEXTUREPROC) m_gl_context->getProcAddress("glActiveTexture");
@@ -916,7 +929,7 @@ void renderer_ogl::loadGLExtensions()
 
 	if ( m_useglsl )
 	{
-		if ( window().prescale() != 1 )
+		if (assert_window()->prescale() != 1 )
 		{
 			m_useglsl = 0;
 			if (_once)
@@ -929,7 +942,7 @@ void renderer_ogl::loadGLExtensions()
 	if ( m_useglsl )
 	{
 		int i;
-		video_config.filter = FALSE;
+		video_config.filter = false;
 		glsl_shader_feature = GLSL_SHADER_FEAT_PLAIN;
 		m_glsl_program_num = 0;
 		m_glsl_program_mb2sc = 0;
@@ -1014,7 +1027,6 @@ void renderer_ogl::loadGLExtensions()
 
 int renderer_ogl::draw(const int update)
 {
-	render_primitive *prim;
 	ogl_texture_info *texture=nullptr;
 	float vofs, hofs;
 	int  pendingPrimitive=GL_NO_PRIMITIVE, curPrimitive=GL_NO_PRIMITIVE;
@@ -1026,7 +1038,9 @@ int renderer_ogl::draw(const int update)
 	}
 #endif
 
-	osd_dim wdim = window().get_size();
+	auto win = assert_window();
+
+	osd_dim wdim = win->get_size();
 
 	if (has_flags(FI_CHANGED) || (wdim.width() != m_width) || (wdim.height() != m_height))
 	{
@@ -1077,22 +1091,14 @@ int renderer_ogl::draw(const int update)
 		// we're doing nothing 3d, so the Z-buffer is currently not interesting
 		glDisable(GL_DEPTH_TEST);
 
-		if (window().machine().options().antialias())
-		{
-			// enable antialiasing for lines
-			glEnable(GL_LINE_SMOOTH);
-			// enable antialiasing for points
-			glEnable(GL_POINT_SMOOTH);
+		// enable antialiasing for lines
+		glEnable(GL_LINE_SMOOTH);
+		// enable antialiasing for points
+		glEnable(GL_POINT_SMOOTH);
 
-			// prefer quality to speed
-			glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
-			glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-		}
-		else
-		{
-			glDisable(GL_LINE_SMOOTH);
-			glDisable(GL_POINT_SMOOTH);
-		}
+		// prefer quality to speed
+		glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+		glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 
 		// enable blending
 		glEnable(GL_BLEND);
@@ -1115,7 +1121,42 @@ int renderer_ogl::draw(const int update)
 		//   |_________|
 		// (0,h)     (w,h)
 
-		glViewport(0.0, 0.0, (GLsizei) m_width, (GLsizei) m_height);
+		GLsizei iScale = 1;
+
+		/*
+		    Mac hack: macOS version 10.15 and later flipped from assuming you don't support Retina to
+		    assuming you do support Retina.  SDL 2.0.11 is scheduled to fix this, but it's not out yet.
+		    So we double-scale everything if you're on 10.15 or later and SDL is not at least version 2.0.11.
+		*/
+		#if defined(SDLMAME_MACOSX) && !defined(OSD_MAC)
+		SDL_version sdlVers;
+		SDL_GetVersion(&sdlVers);
+		// Only do this if SDL is not at least 2.0.11.
+		if ((sdlVers.major == 2) && (sdlVers.minor == 0) && (sdlVers.patch < 11))
+		#endif
+		#if defined(SDLMAME_MACOSX) || defined(OSD_MAC)
+		{
+			// now get the Darwin kernel version
+			int dMaj, dMin, dPatch;
+			char versStr[64];
+			dMaj = dMin = dPatch = 0;
+			size_t size = sizeof(versStr);
+			int retVal = sysctlbyname("kern.osrelease", versStr, &size, NULL, 0);
+			if (retVal == 0)
+			{
+			  sscanf(versStr, "%d.%d.%d", &dMaj, &dMin, &dPatch);
+			  // 10.15 Catalina is Darwin version 19
+			  if (dMaj >= 19)
+			  {
+				  // do the workaround for Retina being forced on
+				  osd_printf_verbose("OpenGL: enabling Retina workaround\n");
+				  iScale = 2;
+			  }
+			}
+		}
+		#endif
+
+		glViewport(0.0, 0.0, (GLsizei) m_width * iScale, (GLsizei) m_height * iScale);
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
 		glOrtho(0.0, (GLdouble) m_width, (GLdouble) m_height, 0.0, 0.0, -1.0);
@@ -1157,14 +1198,14 @@ int renderer_ogl::draw(const int update)
 	m_last_hofs = hofs;
 	m_last_vofs = vofs;
 
-	window().m_primlist->acquire_lock();
+	win->m_primlist->acquire_lock();
 
 	// now draw
-	for (prim = window().m_primlist->first(); prim != nullptr; prim = prim->next())
+	for (render_primitive &prim : *win->m_primlist)
 	{
 		int i;
 
-		switch (prim->type)
+		switch (prim.type)
 		{
 			/**
 			 * Try to stay in one Begin/End block as long as possible,
@@ -1173,7 +1214,7 @@ int renderer_ogl::draw(const int update)
 			case render_primitive::LINE:
 				#if !USE_WIN32_STYLE_LINES
 				// check if it's really a point
-				if (((prim->bounds.x1 - prim->bounds.x0) == 0) && ((prim->bounds.y1 - prim->bounds.y0) == 0))
+				if (((prim.bounds.x1 - prim.bounds.x0) == 0) && ((prim.bounds.y1 - prim.bounds.y0) == 0))
 				{
 					curPrimitive=GL_POINTS;
 				} else {
@@ -1188,13 +1229,14 @@ int renderer_ogl::draw(const int update)
 
 						if ( pendingPrimitive==GL_NO_PRIMITIVE )
 				{
-							set_blendmode(PRIMFLAG_GET_BLENDMODE(prim->flags));
+							set_blendmode(PRIMFLAG_GET_BLENDMODE(prim.flags));
 				}
 
-				glColor4f(prim->color.r, prim->color.g, prim->color.b, prim->color.a);
+				glColor4f(prim.color.r, prim.color.g, prim.color.b, prim.color.a);
 
 				if(pendingPrimitive!=curPrimitive)
 				{
+					glLineWidth(prim.width);
 					glBegin(curPrimitive);
 					pendingPrimitive=curPrimitive;
 				}
@@ -1202,20 +1244,15 @@ int renderer_ogl::draw(const int update)
 				// check if it's really a point
 				if (curPrimitive==GL_POINTS)
 				{
-					glVertex2f(prim->bounds.x0+hofs, prim->bounds.y0+vofs);
+					glVertex2f(prim.bounds.x0+hofs, prim.bounds.y0+vofs);
 				}
 				else
 				{
-					glVertex2f(prim->bounds.x0+hofs, prim->bounds.y0+vofs);
-					glVertex2f(prim->bounds.x1+hofs, prim->bounds.y1+vofs);
+					glVertex2f(prim.bounds.x0+hofs, prim.bounds.y0+vofs);
+					glVertex2f(prim.bounds.x1+hofs, prim.bounds.y1+vofs);
 				}
 				#else
 				{
-					const line_aa_step *step = line_aa_4step;
-					render_bounds b0, b1;
-					float r, g, b, a;
-					float effwidth;
-
 					// we're not gonna play fancy here.  close anything pending and let's go.
 					if (pendingPrimitive!=GL_NO_PRIMITIVE && pendingPrimitive!=curPrimitive)
 					{
@@ -1223,15 +1260,13 @@ int renderer_ogl::draw(const int update)
 						pendingPrimitive=GL_NO_PRIMITIVE;
 					}
 
-					set_blendmode(sdl, PRIMFLAG_GET_BLENDMODE(prim->flags));
+					set_blendmode(sdl, PRIMFLAG_GET_BLENDMODE(prim.flags));
 
 					// compute the effective width based on the direction of the line
-					effwidth = prim->width();
-					if (effwidth < 0.5f)
-						effwidth = 0.5f;
+					float effwidth = std::max(prim.width(), 0.5f);
 
 					// determine the bounds of a quad to draw this line
-					render_line_to_quad(&prim->bounds, effwidth, &b0, &b1);
+					auto [b0, b1] = render_line_to_quad(prim.bounds, effwidth, 0.0f);
 
 					// fix window position
 					b0.x0 += hofs;
@@ -1244,7 +1279,7 @@ int renderer_ogl::draw(const int update)
 					b1.y1 += vofs;
 
 					// iterate over AA steps
-					for (step = PRIMFLAG_GET_ANTIALIAS(prim->flags) ? line_aa_4step : line_aa_1step; step->weight != 0; step++)
+					for (const line_aa_step *step = PRIMFLAG_GET_ANTIALIAS(prim.flags) ? line_aa_4step : line_aa_1step; step->weight != 0; step++)
 					{
 						glBegin(GL_TRIANGLE_STRIP);
 
@@ -1261,17 +1296,13 @@ int renderer_ogl::draw(const int update)
 						glVertex2f(b1.x1 + step->xoffs, b1.y1 + step->yoffs);
 
 						// determine the color of the line
-						r = (prim->color.r * step->weight);
-						g = (prim->color.g * step->weight);
-						b = (prim->color.b * step->weight);
-						a = (prim->color.a * 255.0f);
-						if (r > 1.0) r = 1.0;
-						if (g > 1.0) g = 1.0;
-						if (b > 1.0) b = 1.0;
-						if (a > 1.0) a = 1.0;
+						float r = std::min(prim.color.r * step->weight, 1.0f);
+						float g = std::min(prim.color.g * step->weight, 1.0f);
+						float b = std::min(prim.color.b * step->weight, 1.0f);
+						float a = std::min(prim.color.a * 255.0f, 1.0f);
 						glColor4f(r, g, b, a);
 
-//                      texture = texture_update(window, prim, 0);
+//                      texture = texture_update(window, &prim, 0);
 //                      if (texture) printf("line has texture!\n");
 
 						// if we have a texture to use for the vectors, use it here
@@ -1306,11 +1337,11 @@ int renderer_ogl::draw(const int update)
 					pendingPrimitive=GL_NO_PRIMITIVE;
 				}
 
-				glColor4f(prim->color.r, prim->color.g, prim->color.b, prim->color.a);
+				glColor4f(prim.color.r, prim.color.g, prim.color.b, prim.color.a);
 
-				set_blendmode(PRIMFLAG_GET_BLENDMODE(prim->flags));
+				set_blendmode(PRIMFLAG_GET_BLENDMODE(prim.flags));
 
-				texture = texture_update(prim, 0);
+				texture = texture_update(&prim, 0);
 
 				if ( texture && texture->type==TEXTURE_TYPE_SHADER )
 				{
@@ -1319,14 +1350,14 @@ int renderer_ogl::draw(const int update)
 						if ( i==m_glsl_program_mb2sc )
 						{
 							// i==glsl_program_mb2sc -> transformation mamebm->scrn
-							m_texVerticex[0]=prim->bounds.x0 + hofs;
-							m_texVerticex[1]=prim->bounds.y0 + vofs;
-							m_texVerticex[2]=prim->bounds.x1 + hofs;
-							m_texVerticex[3]=prim->bounds.y0 + vofs;
-							m_texVerticex[4]=prim->bounds.x1 + hofs;
-							m_texVerticex[5]=prim->bounds.y1 + vofs;
-							m_texVerticex[6]=prim->bounds.x0 + hofs;
-							m_texVerticex[7]=prim->bounds.y1 + vofs;
+							m_texVerticex[0]=prim.bounds.x0 + hofs;
+							m_texVerticex[1]=prim.bounds.y0 + vofs;
+							m_texVerticex[2]=prim.bounds.x1 + hofs;
+							m_texVerticex[3]=prim.bounds.y0 + vofs;
+							m_texVerticex[4]=prim.bounds.x1 + hofs;
+							m_texVerticex[5]=prim.bounds.y1 + vofs;
+							m_texVerticex[6]=prim.bounds.x0 + hofs;
+							m_texVerticex[7]=prim.bounds.y1 + vofs;
 						} else {
 							// 1:1 tex coord CCW (0/0) (1/0) (1/1) (0/1) on texture dimensions
 							m_texVerticex[0]=(GLfloat)0.0;
@@ -1341,19 +1372,19 @@ int renderer_ogl::draw(const int update)
 
 						if(i>0) // first fetch already done
 						{
-							texture = texture_update(prim, i);
+							texture = texture_update(&prim, i);
 						}
 						glDrawArrays(GL_QUADS, 0, 4);
 					}
 				} else {
-					m_texVerticex[0]=prim->bounds.x0 + hofs;
-					m_texVerticex[1]=prim->bounds.y0 + vofs;
-					m_texVerticex[2]=prim->bounds.x1 + hofs;
-					m_texVerticex[3]=prim->bounds.y0 + vofs;
-					m_texVerticex[4]=prim->bounds.x1 + hofs;
-					m_texVerticex[5]=prim->bounds.y1 + vofs;
-					m_texVerticex[6]=prim->bounds.x0 + hofs;
-					m_texVerticex[7]=prim->bounds.y1 + vofs;
+					m_texVerticex[0]=prim.bounds.x0 + hofs;
+					m_texVerticex[1]=prim.bounds.y0 + vofs;
+					m_texVerticex[2]=prim.bounds.x1 + hofs;
+					m_texVerticex[3]=prim.bounds.y0 + vofs;
+					m_texVerticex[4]=prim.bounds.x1 + hofs;
+					m_texVerticex[5]=prim.bounds.y1 + vofs;
+					m_texVerticex[6]=prim.bounds.x0 + hofs;
+					m_texVerticex[7]=prim.bounds.y1 + vofs;
 
 					glDrawArrays(GL_QUADS, 0, 4);
 				}
@@ -1376,7 +1407,7 @@ int renderer_ogl::draw(const int update)
 		pendingPrimitive=GL_NO_PRIMITIVE;
 	}
 
-	window().m_primlist->release_lock();
+	win->m_primlist->release_lock();
 	m_init_context = 0;
 
 	m_gl_context->SwapBuffer();
@@ -1407,15 +1438,15 @@ static const char * texfmt_to_string[9] = {
 enum { SDL_TEXFORMAT_SRC_EQUALS_DEST, SDL_TEXFORMAT_SRC_HAS_PALETTE };
 
 static const GLint texture_copy_properties[9][2] = {
-	{ TRUE,  FALSE },   // SDL_TEXFORMAT_ARGB32
-	{ TRUE,  FALSE },   // SDL_TEXFORMAT_RGB32
-	{ TRUE,  TRUE  },   // SDL_TEXFORMAT_RGB32_PALETTED
-	{ FALSE, FALSE },   // SDL_TEXFORMAT_YUY16
-	{ FALSE, TRUE  },   // SDL_TEXFORMAT_YUY16_PALETTED
-	{ FALSE, TRUE  },   // SDL_TEXFORMAT_PALETTE16
-	{ TRUE,  FALSE },   // SDL_TEXFORMAT_RGB15
-	{ TRUE,  TRUE  },   // SDL_TEXFORMAT_RGB15_PALETTED
-	{ FALSE, TRUE  }    // SDL_TEXFORMAT_PALETTE16A
+	{ true,  false },   // SDL_TEXFORMAT_ARGB32
+	{ true,  false },   // SDL_TEXFORMAT_RGB32
+	{ true,  true  },   // SDL_TEXFORMAT_RGB32_PALETTED
+	{ false, false },   // SDL_TEXFORMAT_YUY16
+	{ false, true  },   // SDL_TEXFORMAT_YUY16_PALETTED
+	{ false, true  },   // SDL_TEXFORMAT_PALETTE16
+	{ true,  false },   // SDL_TEXFORMAT_RGB15
+	{ true,  true  },   // SDL_TEXFORMAT_RGB15_PALETTED
+	{ false, true  }    // SDL_TEXFORMAT_PALETTE16A
 };
 
 //============================================================
@@ -1426,13 +1457,13 @@ static const GLint texture_copy_properties[9][2] = {
 // glBufferData to push a nocopy texture to the GPU is slower than TexSubImage2D,
 // so don't use PBO here
 //
-// we also don't want to use PBO's in the case of nocopy==TRUE,
+// we also don't want to use PBO's in the case of nocopy==true,
 // since we now might have GLSL shaders - this decision simplifies out life ;-)
 //
-void renderer_ogl::texture_compute_type_subroutine(const render_texinfo *texsource, ogl_texture_info *texture, UINT32 flags)
+void renderer_ogl::texture_compute_type_subroutine(const render_texinfo *texsource, ogl_texture_info *texture, uint32_t flags)
 {
 	texture->type = TEXTURE_TYPE_NONE;
-	texture->nocopy = FALSE;
+	texture->nocopy = false;
 
 	if ( texture->type == TEXTURE_TYPE_NONE &&
 			!PRIMFLAG_GET_SCREENTEX(flags))
@@ -1459,7 +1490,7 @@ void renderer_ogl::texture_compute_type_subroutine(const render_texinfo *texsour
 			!texture->borderpix && !texsource->palette &&
 			texsource->rowpixels <= m_texture_max_width )
 	{
-		texture->nocopy = TRUE;
+		texture->nocopy = true;
 	}
 
 	if( texture->type == TEXTURE_TYPE_NONE &&
@@ -1483,8 +1514,8 @@ static inline int get_valid_pow2_value(int v, int needPow2)
 	return (needPow2)?gl_round_to_pow2(v):v;
 }
 
-void renderer_ogl::texture_compute_size_subroutine(ogl_texture_info *texture, UINT32 flags,
-											UINT32 width, UINT32 height,
+void renderer_ogl::texture_compute_size_subroutine(ogl_texture_info *texture, uint32_t flags,
+											uint32_t width, uint32_t height,
 											int* p_width, int* p_height, int* p_width_create, int* p_height_create)
 {
 	int width_create;
@@ -1511,8 +1542,10 @@ void renderer_ogl::texture_compute_size_subroutine(ogl_texture_info *texture, UI
 		texture->xprescale--;
 	while (texture->yprescale > 1 && height_create * texture->yprescale > m_texture_max_height)
 		texture->yprescale--;
-	if (PRIMFLAG_GET_SCREENTEX(flags) && (texture->xprescale != window().prescale() || texture->yprescale != window().prescale()))
-		osd_printf_warning("SDL: adjusting prescale from %dx%d to %dx%d\n", window().prescale(), window().prescale(), texture->xprescale, texture->yprescale);
+
+	auto win = assert_window();
+	if (PRIMFLAG_GET_SCREENTEX(flags) && (texture->xprescale != win->prescale() || texture->yprescale != win->prescale()))
+		osd_printf_warning("SDL: adjusting prescale from %dx%d to %dx%d\n", win->prescale(), win->prescale(), texture->xprescale, texture->yprescale);
 
 	width  *= texture->xprescale;
 	height *= texture->yprescale;
@@ -1534,7 +1567,7 @@ void renderer_ogl::texture_compute_size_subroutine(ogl_texture_info *texture, UI
 		*p_height_create=height_create;
 }
 
-void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, ogl_texture_info *texture, UINT32 flags)
+void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, ogl_texture_info *texture, uint32_t flags)
 {
 	int finalheight, finalwidth;
 	int finalheight_create, finalwidth_create;
@@ -1556,7 +1589,7 @@ void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, og
 		((finalwidth > m_texture_max_width && finalwidth - 2 <= m_texture_max_width) ||
 			(finalheight > m_texture_max_height && finalheight - 2 <= m_texture_max_height)))
 	{
-		texture->borderpix = FALSE;
+		texture->borderpix = false;
 
 		texture_compute_type_subroutine(texsource, texture, flags);
 
@@ -1567,10 +1600,10 @@ void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, og
 	// if we're above the max width/height, do what?
 	if (finalwidth_create > m_texture_max_width || finalheight_create > m_texture_max_height)
 	{
-		static int printed = FALSE;
+		static int printed = false;
 		if (!printed)
 			osd_printf_warning("Texture too big! (wanted: %dx%d, max is %dx%d)\n", finalwidth_create, finalheight_create, m_texture_max_width, m_texture_max_height);
-		printed = TRUE;
+		printed = true;
 	}
 
 	if(!texture->nocopy || texture->type==TEXTURE_TYPE_DYNAMIC || texture->type==TEXTURE_TYPE_SHADER ||
@@ -1592,7 +1625,7 @@ void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, og
 			(int)texture_copy_properties[texture->format][SDL_TEXFORMAT_SRC_HAS_PALETTE],
 			texture->xprescale, texture->yprescale,
 			texture->borderpix, texsource->rowpixels, finalwidth, m_texture_max_width,
-			(int)sizeof(UINT32)
+			(int)sizeof(uint32_t)
 			);
 	}
 
@@ -1607,7 +1640,7 @@ void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, og
 //  texture_create
 //============================================================
 
-static int gl_checkFramebufferStatus(void)
+static int gl_checkFramebufferStatus()
 {
 	GLenum status;
 	status=(GLenum)pfn_glCheckFramebufferStatus(GL_FRAMEBUFFER_EXT);
@@ -1650,7 +1683,7 @@ static int gl_checkFramebufferStatus(void)
 	return -1;
 }
 
-static int texture_fbo_create(UINT32 text_unit, UINT32 text_name, UINT32 fbo_name, int width, int height)
+static int texture_fbo_create(uint32_t text_unit, uint32_t text_name, uint32_t fbo_name, int width, int height)
 {
 	pfn_glActiveTexture(text_unit);
 	pfn_glBindFramebuffer(GL_FRAMEBUFFER_EXT, fbo_name);
@@ -1672,8 +1705,8 @@ static int texture_fbo_create(UINT32 text_unit, UINT32 text_name, UINT32 fbo_nam
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	pfn_glFramebufferTexture2D(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
 					GL_TEXTURE_2D, text_name, 0);
@@ -1687,7 +1720,7 @@ static int texture_fbo_create(UINT32 text_unit, UINT32 text_name, UINT32 fbo_nam
 	return 0;
 }
 
-int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_texture_info *texture, UINT32 flags)
+int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_texture_info *texture, uint32_t flags)
 {
 	int uniform_location;
 	int i;
@@ -1806,7 +1839,7 @@ int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_tex
 
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->rawwidth_create);
 
-	UINT32 * dummy = nullptr;
+	uint32_t * dummy = nullptr;
 	GLint _width, _height;
 	if ( gl_texture_check_size(GL_TEXTURE_2D, 0, GL_RGBA8,
 					texture->rawwidth_create, texture->rawheight_create,
@@ -1819,8 +1852,8 @@ int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_tex
 		return -1;
 	}
 
-	dummy = (UINT32 *) malloc(texture->rawwidth_create * texture->rawheight_create * sizeof(UINT32));
-	memset(dummy, 0, texture->rawwidth_create * texture->rawheight_create * sizeof(UINT32));
+	dummy = (uint32_t *) malloc(texture->rawwidth_create * texture->rawheight_create * sizeof(uint32_t));
+	memset(dummy, 0, texture->rawwidth_create * texture->rawheight_create * sizeof(uint32_t));
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
 			texture->rawwidth_create, texture->rawheight_create,
 			0,
@@ -1851,8 +1884,8 @@ int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_tex
 	}
 	else
 	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
 
 	GL_CHECK_ERROR_NORMAL();
@@ -1860,12 +1893,12 @@ int renderer_ogl::texture_shader_create(const render_texinfo *texsource, ogl_tex
 	return 0;
 }
 
-ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, UINT32 flags)
+ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, uint32_t flags)
 {
 	ogl_texture_info *texture;
 
 	// allocate a new texture
-	texture = global_alloc(ogl_texture_info);
+	texture = new ogl_texture_info;
 
 	// fill in the core data
 	texture->hash = texture_compute_hash(texsource, flags);
@@ -1874,8 +1907,9 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 	texture->texinfo.seqid = -1; // force set data
 	if (PRIMFLAG_GET_SCREENTEX(flags))
 	{
-		texture->xprescale = window().prescale();
-		texture->yprescale = window().prescale();
+		auto win = assert_window();
+		texture->xprescale = win->prescale();
+		texture->yprescale = win->prescale();
 	}
 	else
 	{
@@ -1911,9 +1945,6 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 		case TEXFORMAT_PALETTE16:
 			texture->format = SDL_TEXFORMAT_PALETTE16;
 			break;
-		case TEXFORMAT_PALETTEA16:
-			texture->format = SDL_TEXFORMAT_PALETTE16A;
-			break;
 		case TEXFORMAT_YUY16:
 			if (texsource->palette != nullptr)
 				texture->format = SDL_TEXFORMAT_YUY16_PALETTED;
@@ -1939,7 +1970,7 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 	{
 		if ( texture_shader_create(texsource, texture, flags) )
 		{
-			global_free(texture);
+			delete texture;
 			return nullptr;
 		}
 	}
@@ -1975,8 +2006,8 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 		if( texture->texTarget==GL_TEXTURE_RECTANGLE_ARB )
 		{
 			// texture rectangles can't wrap
-			glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-			glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+			glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		} else {
 			// set wrapping mode appropriately
 			if (texture->flags & PRIMFLAG_TEXWRAP_MASK)
@@ -1986,8 +2017,8 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 			}
 			else
 			{
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			}
 		}
 	}
@@ -2003,14 +2034,14 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 
 		// set up the PBO dimension, ..
 		pfn_glBufferData(GL_PIXEL_UNPACK_BUFFER_ARB,
-							texture->rawwidth * texture->rawheight * sizeof(UINT32),
+							texture->rawwidth * texture->rawheight * sizeof(uint32_t),
 					nullptr, GL_STREAM_DRAW);
 	}
 
 	if ( !texture->nocopy && texture->type!=TEXTURE_TYPE_DYNAMIC )
 	{
-		texture->data = (UINT32 *) malloc(texture->rawwidth* texture->rawheight * sizeof(UINT32));
-		texture->data_own=TRUE;
+		texture->data = (uint32_t *) malloc(texture->rawwidth* texture->rawheight * sizeof(uint32_t));
+		texture->data_own=true;
 	}
 
 	// add us to the texture list
@@ -2025,10 +2056,11 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 				m_texhash[i] = texture;
 				break;
 			}
-		assert_always(i < HASH_SIZE + OVERFLOW_SIZE, "texture hash exhausted ...");
+		if ((HASH_SIZE + OVERFLOW_SIZE) <= i)
+			throw emu_fatalerror("renderer_ogl::texture_create: texture hash exhausted ...");
 	}
 
-	if(m_usevbo)
+	if (m_usevbo)
 	{
 		// Generate And Bind The Texture Coordinate Buffer
 		pfn_glGenBuffers( 1, &(texture->texCoordBufferName) );
@@ -2049,7 +2081,7 @@ ogl_texture_info *renderer_ogl::texture_create(const render_texinfo *texsource, 
 //  copyline_palette16
 //============================================================
 
-static inline void copyline_palette16(UINT32 *dst, const UINT16 *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
+static inline void copyline_palette16(uint32_t *dst, const uint16_t *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
 {
 	int x;
 
@@ -2059,8 +2091,9 @@ static inline void copyline_palette16(UINT32 *dst, const UINT16 *src, int width,
 	for (x = 0; x < width; x++)
 	{
 		int srcpix = *src++;
+		uint32_t dstval = 0xff000000 | palette[srcpix];
 		for (int x2 = 0; x2 < xprescale; x2++)
-			*dst++ = 0xff000000 | palette[srcpix];
+			*dst++ = dstval;
 	}
 	if (xborderpix)
 		*dst++ = 0xff000000 | palette[*--src];
@@ -2069,33 +2102,10 @@ static inline void copyline_palette16(UINT32 *dst, const UINT16 *src, int width,
 
 
 //============================================================
-//  copyline_palettea16
-//============================================================
-
-static inline void copyline_palettea16(UINT32 *dst, const UINT16 *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
-{
-	int x;
-
-	assert(xborderpix == 0 || xborderpix == 1);
-	if (xborderpix)
-		*dst++ = palette[*src];
-	for (x = 0; x < width; x++)
-	{
-		int srcpix = *src++;
-		for (int x2 = 0; x2 < xprescale; x2++)
-			*dst++ = palette[srcpix];
-	}
-	if (xborderpix)
-		*dst++ = palette[*--src];
-}
-
-
-
-//============================================================
 //  copyline_rgb32
 //============================================================
 
-static inline void copyline_rgb32(UINT32 *dst, const UINT32 *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
+static inline void copyline_rgb32(uint32_t *dst, const uint32_t *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
 {
 	int x;
 
@@ -2112,10 +2122,9 @@ static inline void copyline_rgb32(UINT32 *dst, const UINT32 *src, int width, con
 		for (x = 0; x < width; x++)
 		{
 			rgb_t srcpix = *src++;
+			uint32_t dstval = 0xff000000 | palette[0x200 + srcpix.r()] | palette[0x100 + srcpix.g()] | palette[srcpix.b()];
 			for (int x2 = 0; x2 < xprescale; x2++)
-			{
-				*dst++ = 0xff000000 | palette[0x200 + srcpix.r()] | palette[0x100 + srcpix.g()] | palette[srcpix.b()];
-			}
+				*dst++ = dstval;
 		}
 		if (xborderpix)
 		{
@@ -2132,11 +2141,9 @@ static inline void copyline_rgb32(UINT32 *dst, const UINT32 *src, int width, con
 		for (x = 0; x < width; x++)
 		{
 			rgb_t srcpix = *src++;
-
+			uint32_t dstval = 0xff000000 | srcpix;
 			for (int x2 = 0; x2 < xprescale; x2++)
-			{
-				*dst++ = 0xff000000 | srcpix;
-			}
+				*dst++ = dstval;
 		}
 		if (xborderpix)
 			*dst++ = 0xff000000 | *--src;
@@ -2147,7 +2154,7 @@ static inline void copyline_rgb32(UINT32 *dst, const UINT32 *src, int width, con
 //  copyline_argb32
 //============================================================
 
-static inline void copyline_argb32(UINT32 *dst, const UINT32 *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
+static inline void copyline_argb32(uint32_t *dst, const uint32_t *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
 {
 	int x;
 
@@ -2164,8 +2171,9 @@ static inline void copyline_argb32(UINT32 *dst, const UINT32 *src, int width, co
 		for (x = 0; x < width; x++)
 		{
 			rgb_t srcpix = *src++;
+			uint32_t dstval = (srcpix & 0xff000000) | palette[0x200 + srcpix.r()] | palette[0x100 + srcpix.g()] | palette[srcpix.b()];
 			for (int x2 = 0; x2 < xprescale; x2++)
-				*dst++ = (srcpix & 0xff000000) | palette[0x200 + srcpix.r()] | palette[0x100 + srcpix.g()] | palette[srcpix.b()];
+				*dst++ = dstval;
 		}
 		if (xborderpix)
 		{
@@ -2190,7 +2198,7 @@ static inline void copyline_argb32(UINT32 *dst, const UINT32 *src, int width, co
 	}
 }
 
-static inline UINT32 ycc_to_rgb(UINT8 y, UINT8 cb, UINT8 cr)
+static inline uint32_t ycc_to_rgb(uint8_t y, uint8_t cb, uint8_t cr)
 {
 	/* original equations:
 
@@ -2235,7 +2243,7 @@ static inline UINT32 ycc_to_rgb(UINT8 y, UINT8 cb, UINT8 cr)
 //  copyline_yuy16_to_argb
 //============================================================
 
-static inline void copyline_yuy16_to_argb(UINT32 *dst, const UINT16 *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
+static inline void copyline_yuy16_to_argb(uint32_t *dst, const uint16_t *src, int width, const rgb_t *palette, int xborderpix, int xprescale)
 {
 	int x;
 
@@ -2247,30 +2255,32 @@ static inline void copyline_yuy16_to_argb(UINT32 *dst, const UINT16 *src, int wi
 	{
 		if (xborderpix)
 		{
-			UINT16 srcpix0 = src[0];
-			UINT16 srcpix1 = src[1];
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix0 = src[0];
+			uint16_t srcpix1 = src[1];
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
 			*dst++ = ycc_to_rgb(palette[0x000 + (srcpix0 >> 8)], cb, cr);
 			*dst++ = ycc_to_rgb(palette[0x000 + (srcpix0 >> 8)], cb, cr);
 		}
 		for (x = 0; x < width / 2; x++)
 		{
-			UINT16 srcpix0 = *src++;
-			UINT16 srcpix1 = *src++;
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix0 = *src++;
+			uint16_t srcpix1 = *src++;
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
+			uint32_t dstval0 = ycc_to_rgb(palette[0x000 + (srcpix0 >> 8)], cb, cr);
+			uint32_t dstval1 = ycc_to_rgb(palette[0x000 + (srcpix1 >> 8)], cb, cr);
 			for (int x2 = 0; x2 < xprescale; x2++)
-				*dst++ = ycc_to_rgb(palette[0x000 + (srcpix0 >> 8)], cb, cr);
+				*dst++ = dstval0;
 			for (int x2 = 0; x2 < xprescale; x2++)
-				*dst++ = ycc_to_rgb(palette[0x000 + (srcpix1 >> 8)], cb, cr);
+				*dst++ = dstval1;
 		}
 		if (xborderpix)
 		{
-			UINT16 srcpix1 = *--src;
-			UINT16 srcpix0 = *--src;
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix1 = *--src;
+			uint16_t srcpix0 = *--src;
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
 			*dst++ = ycc_to_rgb(palette[0x000 + (srcpix1 >> 8)], cb, cr);
 			*dst++ = ycc_to_rgb(palette[0x000 + (srcpix1 >> 8)], cb, cr);
 		}
@@ -2281,30 +2291,32 @@ static inline void copyline_yuy16_to_argb(UINT32 *dst, const UINT16 *src, int wi
 	{
 		if (xborderpix)
 		{
-			UINT16 srcpix0 = src[0];
-			UINT16 srcpix1 = src[1];
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix0 = src[0];
+			uint16_t srcpix1 = src[1];
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
 			*dst++ = ycc_to_rgb(srcpix0 >> 8, cb, cr);
 			*dst++ = ycc_to_rgb(srcpix0 >> 8, cb, cr);
 		}
 		for (x = 0; x < width; x += 2)
 		{
-			UINT16 srcpix0 = *src++;
-			UINT16 srcpix1 = *src++;
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix0 = *src++;
+			uint16_t srcpix1 = *src++;
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
+			uint32_t dstval0 = ycc_to_rgb(srcpix0 >> 8, cb, cr);
+			uint32_t dstval1 = ycc_to_rgb(srcpix1 >> 8, cb, cr);
 			for (int x2 = 0; x2 < xprescale; x2++)
-				*dst++ = ycc_to_rgb(srcpix0 >> 8, cb, cr);
+				*dst++ = dstval0;
 			for (int x2 = 0; x2 < xprescale; x2++)
-				*dst++ = ycc_to_rgb(srcpix1 >> 8, cb, cr);
+				*dst++ = dstval1;
 		}
 		if (xborderpix)
 		{
-			UINT16 srcpix1 = *--src;
-			UINT16 srcpix0 = *--src;
-			UINT8 cb = srcpix0 & 0xff;
-			UINT8 cr = srcpix1 & 0xff;
+			uint16_t srcpix1 = *--src;
+			uint16_t srcpix0 = *--src;
+			uint8_t cb = srcpix0 & 0xff;
+			uint8_t cr = srcpix1 & 0xff;
 			*dst++ = ycc_to_rgb(srcpix1 >> 8, cb, cr);
 			*dst++ = ycc_to_rgb(srcpix1 >> 8, cb, cr);
 		}
@@ -2315,14 +2327,14 @@ static inline void copyline_yuy16_to_argb(UINT32 *dst, const UINT16 *src, int wi
 //  texture_set_data
 //============================================================
 
-static void texture_set_data(ogl_texture_info *texture, const render_texinfo *texsource, UINT32 flags)
+static void texture_set_data(ogl_texture_info *texture, const render_texinfo *texsource, uint32_t flags)
 {
 	if ( texture->type == TEXTURE_TYPE_DYNAMIC )
 	{
 		assert(texture->pbo);
 		assert(!texture->nocopy);
 
-		texture->data = (UINT32 *) pfn_glMapBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY);
+		texture->data = (uint32_t *) pfn_glMapBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY);
 	}
 
 	// note that nocopy and borderpix are mutually exclusive, IOW
@@ -2330,48 +2342,44 @@ static void texture_set_data(ogl_texture_info *texture, const render_texinfo *te
 	// borderpix code below writing to texsource->base .
 	if (texture->nocopy)
 	{
-		texture->data = (UINT32 *) texsource->base;
+		texture->data = (uint32_t *) texsource->base;
 	}
 
 	// always fill non-wrapping textures with an extra pixel on the top
 	if (texture->borderpix)
 	{
 		memset(texture->data, 0,
-				(texsource->width * texture->xprescale + 2) * sizeof(UINT32));
+				(texsource->width * texture->xprescale + 2) * sizeof(uint32_t));
 	}
 
 	// when necessary copy (and convert) the data
 	if (!texture->nocopy)
 	{
 		int y, y2;
-		UINT8 *dst;
+		uint8_t *dst;
 
 		for (y = 0; y < texsource->height; y++)
 		{
 			for (y2 = 0; y2 < texture->yprescale; y2++)
 			{
-				dst = (UINT8 *)(texture->data + (y * texture->yprescale + texture->borderpix + y2) * texture->rawwidth);
+				dst = (uint8_t *)(texture->data + (y * texture->yprescale + texture->borderpix + y2) * texture->rawwidth);
 
 				switch (PRIMFLAG_GET_TEXFORMAT(flags))
 				{
 					case TEXFORMAT_PALETTE16:
-						copyline_palette16((UINT32 *)dst, (UINT16 *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
-						break;
-
-					case TEXFORMAT_PALETTEA16:
-						copyline_palettea16((UINT32 *)dst, (UINT16 *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
+						copyline_palette16((uint32_t *)dst, (uint16_t *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
 						break;
 
 					case TEXFORMAT_RGB32:
-						copyline_rgb32((UINT32 *)dst, (UINT32 *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
+						copyline_rgb32((uint32_t *)dst, (uint32_t *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
 						break;
 
 					case TEXFORMAT_ARGB32:
-						copyline_argb32((UINT32 *)dst, (UINT32 *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
+						copyline_argb32((uint32_t *)dst, (uint32_t *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
 						break;
 
 					case TEXFORMAT_YUY16:
-						copyline_yuy16_to_argb((UINT32 *)dst, (UINT16 *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
+						copyline_yuy16_to_argb((uint32_t *)dst, (uint16_t *)texsource->base + y * texsource->rowpixels, texsource->width, texsource->palette, texture->borderpix, texture->xprescale);
 						break;
 
 					default:
@@ -2385,10 +2393,10 @@ static void texture_set_data(ogl_texture_info *texture, const render_texinfo *te
 	// always fill non-wrapping textures with an extra pixel on the bottom
 	if (texture->borderpix)
 	{
-		memset((UINT8 *)texture->data +
-				(texsource->height + 1) * texture->rawwidth * sizeof(UINT32),
+		memset((uint8_t *)texture->data +
+				(texsource->height + 1) * texture->rawwidth * sizeof(uint32_t),
 				0,
-			(texsource->width * texture->xprescale + 2) * sizeof(UINT32));
+			(texsource->width * texture->xprescale + 2) * sizeof(uint32_t));
 	}
 
 	if ( texture->type == TEXTURE_TYPE_SHADER )
@@ -2444,7 +2452,7 @@ static int compare_texture_primitive(const ogl_texture_info *texture, const rend
 		texture->texinfo.width == prim->texture.width &&
 		texture->texinfo.height == prim->texture.height &&
 		texture->texinfo.rowpixels == prim->texture.rowpixels &&
-		/* texture->texinfo.palette == prim->texture.palette && */
+		texture->texinfo.palette == prim->texture.palette &&
 		((texture->flags ^ prim->flags) & (PRIMFLAG_BLENDMODE_MASK | PRIMFLAG_TEXFORMAT_MASK)) == 0)
 		return 1;
 	else
@@ -2555,7 +2563,7 @@ void renderer_ogl::texture_coord_update(ogl_texture_info *texture, const render_
 
 void renderer_ogl::texture_mpass_flip(ogl_texture_info *texture, int shaderIdx)
 {
-	UINT32 mpass_src_idx = texture->mpass_dest_idx;
+	uint32_t mpass_src_idx = texture->mpass_dest_idx;
 
 	texture->mpass_dest_idx = (mpass_src_idx+1) % 2;
 
@@ -2632,8 +2640,7 @@ void renderer_ogl::texture_shader_update(ogl_texture_info *texture, render_conta
 
 	if (container!=nullptr)
 	{
-		render_container::user_settings settings;
-		container->get_user_settings(settings);
+		render_container::user_settings settings = container->get_user_settings();
 		/* FIXME: the code below is in just for illustration issue on
 		 * how to set shader variables. gamma, contrast and brightness are
 		 * handled already by the core

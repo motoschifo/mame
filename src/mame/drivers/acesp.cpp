@@ -4,94 +4,189 @@
  sp.ACE system by ACE
  based roughly on the Mach2000 hardware used by Castle
 
- skeleton driver!
+ Skeleton driver!
 
- should all games have OKI roms? are most missing?
- I think it was optional, some probably just use the AY..
+ Some games have OKI sample ROMs, others just use the AYs,
+ this depends on the additional plug-in boards.
+ We need to verify which is which as some samples could be missing
 
- has an undumped 'reel processor' (68705 like Mach2000?)
+ Some manufacturers, such as PCP, also used this hardware with
+ different reel controllers etc.
 
  based on internal accesses it seems to use a 6303Y (like Mach2000)
  which does NOT have the same internal map as a 6303R
+
+ some ROMsets here contain a single larger ROM instead of 2 smaller
+ ones, these need verifying to make sure they contain unique data
+ and removing if they do not.
+
 */
 
 
 #include "emu.h"
-#include "cpu/m6800/m6800.h"
+#include "cpu/m6800/m6801.h"
 #include "machine/6821pia.h"
+#include "machine/timer.h"
+
+#include "machine/ace_sp_reelctrl.h"
+
+#include "ace_sp_dmd.lh"
 
 class ace_sp_state : public driver_device
 {
 public:
 	ace_sp_state(const machine_config &mconfig, device_type type, const char *tag)
-		: driver_device(mconfig, type, tag),
-			m_maincpu(*this, "maincpu")
+		: driver_device(mconfig, type, tag)
+		, m_dmdram(*this, "dmdram")
+		, m_sevensegram(*this, "sevensegram")
+		, m_dmd(*this, "dotmatrix%u", 0U)
+		, m_maincpu(*this, "maincpu")
+		, m_reelctrl(*this, "reelctrl")
 	{ }
 
-protected:
+	void ace_sp(machine_config &config);
+	void ace_sp_pcp(machine_config &config);
+
+	void init_ace_sp();
+	void init_ace_cr();
+
+private:
+	void machine_start() override;
+
+	TIMER_DEVICE_CALLBACK_MEMBER(gen_fixfreq);
+
+	void ace_sp_map(address_map &map);
+
+	void dmd_w(offs_t offset, uint8_t data);
+	void sevenseg_w(offs_t offset, uint8_t data);
+
+	uint8_t serial_r(offs_t offset);
+	void serial_w(offs_t offset, uint8_t data);
+
+	required_shared_ptr<uint8_t> m_dmdram;
+	required_shared_ptr<uint8_t> m_sevensegram;
+
+	output_finder<1536> m_dmd;
 
 	// devices
-	required_device<cpu_device> m_maincpu;
-public:
-	DECLARE_DRIVER_INIT(ace_sp);
-	DECLARE_DRIVER_INIT(ace_cr);
+	required_device<hd6303y_cpu_device> m_maincpu;
+	required_device<ace_sp_reelctrl_base_device> m_reelctrl;
 };
 
 
 
+void ace_sp_state::machine_start()
+{
+	m_dmd.resolve();
+}
 
+void ace_sp_state::dmd_w(offs_t offset, uint8_t data)
+{
+	m_dmdram[offset] = data;
 
-static ADDRESS_MAP_START( ace_sp_map, AS_PROGRAM, 8, ace_sp_state )
+	for (int i = 0; i < 8; i++)
+		m_dmd[(offset * 8) + i] = (data >> i) & 1;
+}
+
+void ace_sp_state::sevenseg_w(offs_t offset, uint8_t data)
+{
+	m_sevensegram[offset] = data;
+}
+
+uint8_t ace_sp_state::serial_r(offs_t offset)
+{
+	logerror("%s: serial_r\n", machine().describe_context());
+	return machine().rand();
+}
+
+void ace_sp_state::serial_w(offs_t offset, uint8_t data)
+{
+	logerror("%s: serial_w %02x\n", machine().describe_context(), data);
+}
+
+void ace_sp_state::ace_sp_map(address_map &map)
+{
 	/**** 6303Y internal area ****/
 	//----- 0x0000 - 0x0027 is internal registers -----
-	AM_RANGE(0x0000, 0x0027) AM_RAM
+	map(0x0000, 0x0027).m(m_maincpu, FUNC(hd6303y_cpu_device::hd6301y_io));
 	//----- 0x0028 - 0x003f is external access -----
-	// 0x30 - reels write
+	// 0x30 - to/from reel MCU
 	// 0x31 - lamp high
 	// 0x32 - lamp low
 	// 0x33 - lamp stb
 	// 0x34 - shift stb
 	// 0x35 - shift clk
-	// 0x36 - sio
+	map(0x36, 0x36).ram().rw(FUNC(ace_sp_state::serial_r), FUNC(ace_sp_state::serial_w));   // 0x36 - sio
+
 	// 0x37 - watchdog?
-	AM_RANGE(0x0038, 0x003b) AM_DEVREADWRITE("pia0", pia6821_device, read, write)
+	map(0x0038, 0x003b).rw("pia0", FUNC(pia6821_device::read), FUNC(pia6821_device::write));
 	/* 0x3c */
 	/* 0x3d */
 	/* 0x3e */
 	/* 0x3f */
 	//----- 0x0040 - 0x013f is internal RAM (256 bytes) -----
-	AM_RANGE(0x0040, 0x013f) AM_RAM
-
+	map(0x0040, 0x013f).ram();
 
 	/**** regular map ****/
-	AM_RANGE(0x0140, 0x1fff) AM_RAM
-	AM_RANGE(0x2000, 0xffff) AM_ROM
-ADDRESS_MAP_END
+	map(0x0140, 0x1eff).ram();
+	map(0x1f00, 0x1fbf).ram().w(FUNC(ace_sp_state::dmd_w)).share("dmdram");  // DMD controller shares the RAM? or does this get uploaded somewhere?
+	map(0x1fc0, 0x1fff).ram().w(FUNC(ace_sp_state::sevenseg_w)).share("sevensegram");
+
+	map(0x2000, 0xffff).rom();
+}
 
 
-static ADDRESS_MAP_START( ace_sp_portmap, AS_IO, 8, ace_sp_state )
-	//AM_RANGE(0x02, 0x02) // misc
-	//AM_RANGE(0x05, 0x06) // AYs
-ADDRESS_MAP_END
+#if 0
+void ace_sp_state::ace_sp_portmap(address_map &map)
+{
+	//map(0x02, 0x02) // misc
+	//map(0x05, 0x06) // AYs
+}
+#endif
 
 
 static INPUT_PORTS_START( ace_sp )
 INPUT_PORTS_END
 
+TIMER_DEVICE_CALLBACK_MEMBER(ace_sp_state::gen_fixfreq)
+{
+	// 6303Y must take vector 0xffea periodically, as amongst other things it clears a counter
+	// in RAM which is increased in one of the other interrupts, with a time-out check which
+	// will cause the game to jump back to the reset vector if it fails
+	//
+	// adding code to the core to generate it at the moment then causes a stack overflow issue
+	// instead, which again the code checks for, and resets if the stack grows too large
 
-static MACHINE_CONFIG_START( ace_sp, ace_sp_state )
-	MCFG_CPU_ADD("maincpu", HD6303Y, 1000000)
-	MCFG_CPU_PROGRAM_MAP(ace_sp_map)
-	MCFG_CPU_IO_MAP(ace_sp_portmap)
+	//m_maincpu->force_irq2();
+}
 
-	MCFG_DEVICE_ADD("pia0", PIA6821, 0)
+void ace_sp_state::ace_sp(machine_config &config)
+{
+	HD6303Y(config, m_maincpu, 2000000); // unknown clock
+	m_maincpu->set_addrmap(AS_PROGRAM, &ace_sp_state::ace_sp_map);
 
-MACHINE_CONFIG_END
+	PIA6821(config, "pia0", 0);
+
+	// unknown frequency
+	TIMER(config, "fixedfreq").configure_periodic(FUNC(ace_sp_state::gen_fixfreq), attotime::from_hz(50));
+
+	ACE_SP_REELCTRL(config, m_reelctrl, 2000000); // unknown clock
+
+	config.set_default_layout(layout_ace_sp_dmd);
+}
+
+void ace_sp_state::ace_sp_pcp(machine_config &config)
+{
+	ace_sp(config);
+
+	ACE_SP_REELCTRL_PCP(config.replace(), m_reelctrl, 2000000);
+}
+
 
 
 #define SP_CBOWL_SOUND \
 	ROM_REGION( 0x100000, "oki", ROMREGION_ERASE00 ) \
-	ROM_LOAD( "cashbowlsnd1.bin", 0x0000, 0x80000, CRC(44e67cef) SHA1(3cfe48122da527e82f9058e0c5b81b5096bf4181) ) \
+	ROM_LOAD( "cashbowlsnd1.bin", 0x00000, 0x80000, CRC(44e67cef) SHA1(3cfe48122da527e82f9058e0c5b81b5096bf4181) ) \
 	ROM_LOAD( "cashbowlsnd2.bin", 0x80000, 0x80000, CRC(a28291a2) SHA1(c07b585cee89bc35c880d24eb6124796d6df423c) )
 ROM_START( sp_cbowl )
 	ROM_REGION( 0x80000, "maincpu", 0 )
@@ -116,7 +211,7 @@ ROM_END
 
 ROM_START( sp_cbowlc )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "cb.bin", 0x0000, 0x010000, CRC(dc454e67) SHA1(57f470fbb44fe50c9c8068bbcdc9b41c617b0d82) ) // just a merged rom?
+	ROM_LOAD( "cb.bin", 0x00000, 0x10000, CRC(dc454e67) SHA1(57f470fbb44fe50c9c8068bbcdc9b41c617b0d82) ) // just a merged rom?
 	SP_CBOWL_SOUND
 ROM_END
 
@@ -320,7 +415,7 @@ ROM_END
 
 #define SP_EMMRD_SOUND \
 	ROM_REGION( 0x100000, "oki", ROMREGION_ERASE00 ) \
-	ROM_LOAD( "edsnd1.bin", 0x0000, 0x80000, CRC(e91382d7) SHA1(499a0606e9bbabcf207c8778323899b7b81ae372) ) \
+	ROM_LOAD( "edsnd1.bin", 0x00000, 0x80000, CRC(e91382d7) SHA1(499a0606e9bbabcf207c8778323899b7b81ae372) ) \
 	ROM_LOAD( "edsnd2.bin", 0x80000, 0x80000, CRC(0e103080) SHA1(2dcfcb35d04f34e4bc6da32f2d23bd8685654f8e) )
 
 
@@ -410,13 +505,13 @@ ROM_END
 
 ROM_START( sp_emmrdn )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0015rp50.bin", 0x0000, 0x010000, CRC(e37fa624) SHA1(3d7e09a259ed53a88cd4c9dc2e39b1aadb7049c7) ) // just a merged rom?
+	ROM_LOAD( "0015rp50.bin", 0x00000, 0x10000, CRC(e37fa624) SHA1(3d7e09a259ed53a88cd4c9dc2e39b1aadb7049c7) ) // just a merged rom?
 	SP_EMMRD_SOUND
 ROM_END
 
 ROM_START( sp_emmrdo )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0015rp60.bin", 0x0000, 0x010000, CRC(b27378c8) SHA1(dd8dfc587d0c051d1144f4b0205bd8d4a28ceaaf) ) // just a merged rom?
+	ROM_LOAD( "0015rp60.bin", 0x00000, 0x10000, CRC(b27378c8) SHA1(dd8dfc587d0c051d1144f4b0205bd8d4a28ceaaf) ) // just a merged rom?
 	SP_EMMRD_SOUND
 ROM_END
 
@@ -630,13 +725,13 @@ ROM_END
 
 ROM_START( sp_zigzgl )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0013rp50.bin", 0x0000, 0x010000, CRC(5e7ba11a) SHA1(30477ff930e9f23bf32a5bdf8573fc47ed26773d) ) // just a merged rom?
+	ROM_LOAD( "0013rp50.bin", 0x00000, 0x10000, CRC(5e7ba11a) SHA1(30477ff930e9f23bf32a5bdf8573fc47ed26773d) ) // just a merged rom?
 	SP_ZIGZAG_SOUND
 ROM_END
 
 ROM_START( sp_zigzgm )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0013rp60.bin", 0x0000, 0x010000, CRC(fb439994) SHA1(0820cf663ed5f9600d4e0313a7b3c6f8b28db471) ) // just a merged rom?
+	ROM_LOAD( "0013rp60.bin", 0x00000, 0x10000, CRC(fb439994) SHA1(0820cf663ed5f9600d4e0313a7b3c6f8b28db471) ) // just a merged rom?
 	SP_ZIGZAG_SOUND
 ROM_END
 
@@ -854,13 +949,13 @@ ROM_END
 
 ROM_START( sp_goldm2 )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0017rp40.bin", 0x0000, 0x010000, CRC(6cdd6c14) SHA1(ef57586a770c0693eb16b381356a90040ab000a6) ) // merged rom?
+	ROM_LOAD( "0017rp40.bin", 0x00000, 0x10000, CRC(6cdd6c14) SHA1(ef57586a770c0693eb16b381356a90040ab000a6) ) // merged rom?
 	SP_GOLDM_SOUND
 ROM_END
 
 ROM_START( sp_goldm3 )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0017rp50.bin", 0x0000, 0x010000, CRC(56e77a5d) SHA1(5eae450637f5e57a08e67306d394a03ad18093aa) )
+	ROM_LOAD( "0017rp50.bin", 0x00000, 0x10000, CRC(56e77a5d) SHA1(5eae450637f5e57a08e67306d394a03ad18093aa) )
 	SP_GOLDM_SOUND
 ROM_END
 
@@ -1300,7 +1395,7 @@ ROM_END
 
 #define SP_JURAS_SOUND \
 	ROM_REGION( 0x100000, "oki", ROMREGION_ERASE00 ) \
-	ROM_LOAD( "jt8_snd1.bin", 0x0000, 0x80000, CRC(54f02e21) SHA1(1f2142e3cad828f3f07b729ad8394392c3a5ef46) ) \
+	ROM_LOAD( "jt8_snd1.bin", 0x00000, 0x80000, CRC(54f02e21) SHA1(1f2142e3cad828f3f07b729ad8394392c3a5ef46) ) \
 	ROM_LOAD( "jt8_snd2.bin", 0x80000, 0x80000, CRC(6ae75d87) SHA1(f6a73c26f7715b2a2d69b05d7729571b05b2fdaa) )
 
 ROM_START( sp_juras )
@@ -1460,15 +1555,15 @@ ROM_END
 	/* not used, or missing? */
 ROM_START( sp_playa )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "playitagain-v1-6pound1.bin", 0x0000, 0x8000, CRC(e377e7af) SHA1(4ca7c8ddd15791f4d45bebe861fd3c193c7227e0) )
-	ROM_LOAD( "playitagain-v1-6pound2.bin", 0x8000, 0x8000, CRC(7bab5c33) SHA1(46bc6fe7d5cdd998fc1e4e9a4b1a6a95cd160cf0) )
+	ROM_LOAD( "playitagain-v1-6pound2.bin", 0x0000, 0x8000, CRC(7bab5c33) SHA1(46bc6fe7d5cdd998fc1e4e9a4b1a6a95cd160cf0) )
+	ROM_LOAD( "playitagain-v1-6pound1.bin", 0x8000, 0x8000, CRC(e377e7af) SHA1(4ca7c8ddd15791f4d45bebe861fd3c193c7227e0) )
 	SP_PLAYA_SOUND
 ROM_END
 
 ROM_START( sp_playaa )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "575 pask p3.2.bin", 0x0000, 0x8000, CRC(f7d2d40d) SHA1(83e4e83217fef8d92bcba3edf1250d09243f9f79) )
-	ROM_LOAD( "575 pa p3.1.bin", 0x0000, 0x8000, CRC(9e51ff86) SHA1(a2da9eee6b5f7211296e8633e5ec8eeec8ec77fd) )
+	ROM_LOAD( "575 pa p3.1.bin", 0x8000, 0x8000, CRC(9e51ff86) SHA1(a2da9eee6b5f7211296e8633e5ec8eeec8ec77fd) )
 	SP_PLAYA_SOUND
 ROM_END
 
@@ -1531,7 +1626,7 @@ ROM_END
 
 #define SP_SPELL_SOUND \
 	ROM_REGION( 0x100000, "oki", ROMREGION_ERASE00 ) \
-	ROM_LOAD( "spellboundsnd1.bin", 0x0000, 0x80000, CRC(ab462981) SHA1(a88728eb8c5dbf114007551c7b5d4eb06cc7eb0b) ) \
+	ROM_LOAD( "spellboundsnd1.bin", 0x00000, 0x80000, CRC(ab462981) SHA1(a88728eb8c5dbf114007551c7b5d4eb06cc7eb0b) ) \
 	ROM_LOAD( "spellboundsnd2.bin", 0x80000, 0x80000, CRC(9ada4413) SHA1(2dc9b42cdd3a64b5e5d3eab0d68b109258d12eda) )
 
 ROM_START( sp_spell )
@@ -1592,13 +1687,13 @@ ROM_END
 
 ROM_START( sp_spelli )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0009p5.bin", 0x0000, 0x010000, CRC(5d94418e) SHA1(92a9b6deed307b99bb57193d9974a0b4d76ee569) ) // merged rom
+	ROM_LOAD( "0009p5.bin", 0x00000, 0x10000, CRC(5d94418e) SHA1(92a9b6deed307b99bb57193d9974a0b4d76ee569) ) // merged rom
 	SP_SPELL_SOUND
 ROM_END
 
 ROM_START( sp_spellj )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0009p6.bin", 0x0000, 0x010000, CRC(1b55acee) SHA1(8364cf5b1c1d50f10e1e80031e9b8a587ec0bd39) ) // merged rom
+	ROM_LOAD( "0009p6.bin", 0x00000, 0x10000, CRC(1b55acee) SHA1(8364cf5b1c1d50f10e1e80031e9b8a587ec0bd39) ) // merged rom
 	SP_SPELL_SOUND
 ROM_END
 
@@ -1974,13 +2069,13 @@ ROM_END
 
 ROM_START( sp_tzfet )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0011rp40.bin", 0x0000, 0x010000, CRC(80600391) SHA1(d45e909bfe26e18047ece19bb8004f14a3388427) ) // merged rom?
+	ROM_LOAD( "0011rp40.bin", 0x00000, 0x10000, CRC(80600391) SHA1(d45e909bfe26e18047ece19bb8004f14a3388427) ) // merged rom?
 	SP_TZFE_SOUND
 ROM_END
 
 ROM_START( sp_tzfeu )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0011rp50.bin", 0x0000, 0x010000, CRC(0ad67cf0) SHA1(b4b436f1f0f0b9a0b50013f85c21f203bf8528d0) ) // merged rom
+	ROM_LOAD( "0011rp50.bin", 0x00000, 0x10000, CRC(0ad67cf0) SHA1(b4b436f1f0f0b9a0b50013f85c21f203bf8528d0) ) // merged rom
 	SP_TZFE_SOUND
 ROM_END
 
@@ -2108,7 +2203,7 @@ ROM_END
 
 ROM_START( sp_brkbkd )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0008p6.bin", 0x0000, 0x010000, CRC(4fc20e58) SHA1(4530998a60731283430801028a59b7a4fbd3f1bc) ) // merged rom
+	ROM_LOAD( "0008p6.bin", 0x00000, 0x10000, CRC(4fc20e58) SHA1(4530998a60731283430801028a59b7a4fbd3f1bc) ) // merged rom
 	SP_BRKBK_SOUND
 ROM_END
 
@@ -2421,56 +2516,56 @@ ROM_END
 ROM_START( sp_donky )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2b", 0x0000, 0x8000, CRC(49c60006) SHA1(9a4964df1238f267cdf05fa063f7de8b5716da10) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkya )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2c", 0x0000, 0x8000, CRC(c482c400) SHA1(dc5087260772807725ce08e7fd89ee5c19406fe5) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkyb )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2d", 0x0000, 0x8000, CRC(4fd3db89) SHA1(f1233adfbfd95c87ebf7706bb242b7297947699c) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkyc )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2e", 0x0000, 0x8000, CRC(c2971f8f) SHA1(c14db5294c397148293c496d52ac0b41067952b2) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkyd )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2f", 0x0000, 0x8000, CRC(05e1c1df) SHA1(c00fe8553eac50229dc6bf2a5016c353fcb61c82) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkye )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2g", 0x0000, 0x8000, CRC(88a505d9) SHA1(0d10f8e102daddde840b582cb962270f6180a399) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkyf )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2h", 0x0000, 0x8000, CRC(03f41a50) SHA1(907a947449a7dccfff00dca2536e0bc230b5771d) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
 ROM_START( sp_donkyg )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "dd663p2i", 0x0000, 0x8000, CRC(8eb0de56) SHA1(6411e9008b09f9387622911e09d954dc7e89c6cf) )
-	ROM_LOAD( "dd663p2a", 0x0000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
+	ROM_LOAD( "dd663p2a", 0x8000, 0x8000, CRC(9a477e7e) SHA1(d6206495c1a75ac2c1ce51f24ca18898916b6e11) )
 	SP_DONKY_SOUND
 ROM_END
 
@@ -2494,7 +2589,7 @@ ROM_END
 
 ROM_START( sp_festi )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0001rp10.bin", 0x0000, 0x010000, CRC(e584c26e) SHA1(dc48e27895c5c0b2004f6bc74ec0bdfa24af9613) ) // merged rom
+	ROM_LOAD( "0001rp10.bin", 0x00000, 0x10000, CRC(e584c26e) SHA1(dc48e27895c5c0b2004f6bc74ec0bdfa24af9613) ) // merged rom
 	SP_FESTI_SOUND
 ROM_END
 
@@ -2765,7 +2860,7 @@ ROM_END
 	/* not used, or missing? */
 ROM_START( sp_gol )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "gl706p04.bin", 0x0000, 0x010000, CRC(01a48714) SHA1(0a48cfad05905450aa2a7c9dc22f937377894ff0) ) // merged rom
+	ROM_LOAD( "gl706p04.bin", 0x00000, 0x10000, CRC(01a48714) SHA1(0a48cfad05905450aa2a7c9dc22f937377894ff0) ) // merged rom
 	SP_GOL_SOUND
 ROM_END
 
@@ -2834,26 +2929,26 @@ ROM_END
 ROM_START( sp_goldse )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "724p2-0b.bin", 0x0000, 0x8000, CRC(39c3a458) SHA1(6fe06283e8d942c3fa851a29c069dbcf4a9f07a5) )
-	ROM_LOAD( "724p2-0a.bin", 0x0000, 0x8000, CRC(26c9e283) SHA1(7b817b89ff751c068de4c76ee1ddb68183bca5c8) )
+	ROM_LOAD( "724p2-0a.bin", 0x8000, 0x8000, CRC(26c9e283) SHA1(7b817b89ff751c068de4c76ee1ddb68183bca5c8) )
 	SP_GOLDS_SOUND
 ROM_END
 
 ROM_START( sp_goldsf )
 	ROM_REGION( 0x80000, "maincpu", 0 )
 	ROM_LOAD( "724p2-0z.bin", 0x0000, 0x8000, CRC(1219607f) SHA1(c5b4b92a237884df5cc4ca5d5563c9b66b183fa5) )
-	ROM_LOAD( "724p2-0a.bin", 0x0000, 0x8000, CRC(26c9e283) SHA1(7b817b89ff751c068de4c76ee1ddb68183bca5c8) )
+	ROM_LOAD( "724p2-0a.bin", 0x8000, 0x8000, CRC(26c9e283) SHA1(7b817b89ff751c068de4c76ee1ddb68183bca5c8) )
 	SP_GOLDS_SOUND
 ROM_END
 
 ROM_START( sp_goldsg )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0021rp30.bin", 0x0000, 0x010000, CRC(3228013a) SHA1(dcf41ddd3003804062cde928bcb5bc409fa66c75) )
+	ROM_LOAD( "0021rp30.bin", 0x00000, 0x10000, CRC(3228013a) SHA1(dcf41ddd3003804062cde928bcb5bc409fa66c75) )
 	SP_GOLDS_SOUND
 ROM_END
 
 ROM_START( sp_goldsh )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0022rp30.bin", 0x0000, 0x010000, CRC(28b80866) SHA1(9f8af3d5cb6a03cba5ba37f2177390eef2950eb4) )
+	ROM_LOAD( "0022rp30.bin", 0x00000, 0x10000, CRC(28b80866) SHA1(9f8af3d5cb6a03cba5ba37f2177390eef2950eb4) )
 	SP_GOLDS_SOUND
 ROM_END
 
@@ -2953,7 +3048,7 @@ ROM_END
 	/* not used, or missing? */
 ROM_START( sp_lotto )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "sp705p14.bin", 0x0000, 0x010000, CRC(46a8a503) SHA1(39d40c6d34ec1879b037d13b47e648ae09f345d8) ) // merged rom
+	ROM_LOAD( "sp705p14.bin", 0x00000, 0x10000, CRC(46a8a503) SHA1(39d40c6d34ec1879b037d13b47e648ae09f345d8) ) // merged rom
 	SP_LOTTO_SOUND
 ROM_END
 
@@ -3054,7 +3149,7 @@ ROM_END
 
 ROM_START( sp_megmog )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0004p6.bin", 0x0000, 0x010000, CRC(fcfa212d) SHA1(968cc358450d85e6fd4e3086347be7d34d68e012) ) // merged rom
+	ROM_LOAD( "0004p6.bin", 0x00000, 0x10000, CRC(fcfa212d) SHA1(968cc358450d85e6fd4e3086347be7d34d68e012) ) // merged rom
 	SP_MEGMO_SOUND
 ROM_END
 
@@ -3281,13 +3376,13 @@ ROM_END
 
 ROM_START( sp_onboxm )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0016rp40.bin", 0x0000, 0x010000, CRC(591e3e24) SHA1(b147bfc19aa46eb3237b270d771031caaf978850) ) // merged rom
+	ROM_LOAD( "0016rp40.bin", 0x00000, 0x10000, CRC(591e3e24) SHA1(b147bfc19aa46eb3237b270d771031caaf978850) ) // merged rom
 	SP_ONBOX_SOUND
 ROM_END
 
 ROM_START( sp_onboxn )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "0016rp50.bin", 0x0000, 0x010000, CRC(73c5c449) SHA1(453969ec5c4fe1ce8f118110106e31126a358cda) ) // merged rom
+	ROM_LOAD( "0016rp50.bin", 0x00000, 0x10000, CRC(73c5c449) SHA1(453969ec5c4fe1ce8f118110106e31126a358cda) ) // merged rom
 	SP_ONBOX_SOUND
 ROM_END
 
@@ -3412,7 +3507,7 @@ ROM_END
 
 ROM_START( sp_pistep )
 	ROM_REGION( 0x80000, "maincpu", 0 )
-	ROM_LOAD( "otp10.bin", 0x0000, 0x010000, CRC(8a9e40df) SHA1(be1c8c5733d65dbdfefcaeb35050d82d59c75450) ) // merged rom
+	ROM_LOAD( "otp10.bin", 0x00000, 0x10000, CRC(8a9e40df) SHA1(be1c8c5733d65dbdfefcaeb35050d82d59c75450) ) // merged rom
 	SP_PISTE_SOUND
 ROM_END
 
@@ -3775,10 +3870,10 @@ ROM_END
 	ROM_REGION( 0x100000, "oki", ROMREGION_ERASE00 ) \
 	/* actually I think this rom is just a bad dump, there is a rom which is the same in the JPM HW set, */ \
 	/* but twice the size.  Also this isn't an oki rom!                                                  */ \
-	ROM_LOAD( "atw80snd.bin", 0x0000, 0x020000, CRC(b002e11c) SHA1(f7133f4bb8c31feaad0a7b9ee88749f9b7877575) )
+	ROM_LOAD( "atw80snd.bin", 0x00000, 0x20000, CRC(b002e11c) SHA1(f7133f4bb8c31feaad0a7b9ee88749f9b7877575) )
 ROM_START( sp_atw )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "artwld80", 0x0000, 0x010000, CRC(3ff314c3) SHA1(345df80243953b35916449b0aa6ffaf9d3501d2b) ) // pre-decrypted? bootleg?
+	ROM_LOAD( "artwld80", 0x00000, 0x10000, CRC(3ff314c3) SHA1(345df80243953b35916449b0aa6ffaf9d3501d2b) ) // pre-decrypted? bootleg?
 	SP_ATW_SOUND
 ROM_END
 
@@ -3788,13 +3883,13 @@ ROM_END
 
 ROM_START( sp_five )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "fn19.bin", 0x0000, 0x010000, CRC(4721ccf8) SHA1(a6b7b238df7e7cf45c049b4fb16bf0c05fb95b41) )
+	ROM_LOAD( "fn19.bin", 0x00000, 0x10000, CRC(4721ccf8) SHA1(a6b7b238df7e7cf45c049b4fb16bf0c05fb95b41) )
 	SP_FIVE_SOUND
 ROM_END
 
 ROM_START( sp_fivea )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "fn19p.bin", 0x0000, 0x010000, CRC(ac2de72f) SHA1(61263944fe29b5f5c79c987989a784b32700c902) )
+	ROM_LOAD( "fn19p.bin", 0x00000, 0x10000, CRC(ac2de72f) SHA1(61263944fe29b5f5c79c987989a784b32700c902) )
 	SP_FIVE_SOUND
 ROM_END
 
@@ -3805,19 +3900,19 @@ ROM_END
 
 ROM_START( sp_crun )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "crun411.bin", 0x0000, 0x010000, CRC(74a69327) SHA1(087d791b8e5c43a9c614f5f4344ce2524a8c445d) )
+	ROM_LOAD( "crun411.bin", 0x00000, 0x10000, CRC(74a69327) SHA1(087d791b8e5c43a9c614f5f4344ce2524a8c445d) )
 	SP_CRUN_SOUND
 ROM_END
 
 ROM_START( sp_cruna )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "em111.bin", 0x0000, 0x010000, CRC(c1e9d4ec) SHA1(49eadcf7880d68c1559e94f4389eca739a3b04d7) )
+	ROM_LOAD( "em111.bin", 0x00000, 0x10000, CRC(c1e9d4ec) SHA1(49eadcf7880d68c1559e94f4389eca739a3b04d7) )
 	SP_CRUN_SOUND
 ROM_END
 
 ROM_START( sp_crunb )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "em111p.bin", 0x0000, 0x010000, CRC(bbe90c64) SHA1(5e65c318f14f7aa160f3d0daeb1f3038df162b65) )
+	ROM_LOAD( "em111p.bin", 0x00000, 0x10000, CRC(bbe90c64) SHA1(5e65c318f14f7aa160f3d0daeb1f3038df162b65) )
 	SP_CRUN_SOUND
 ROM_END
 
@@ -3833,7 +3928,7 @@ ROM_END
 
 ROM_START( sp_roofa )
 	ROM_REGION( 0x10000, "maincpu", 0 )
-	ROM_LOAD( "034p1-2i.bin", 0x000000, 0x008000, CRC(a64797fc) SHA1(7437dc2e203efc525aab251da5196d31b95d159a) )
+	ROM_LOAD( "034p1-2i.bin", 0x0000, 0x8000, CRC(a64797fc) SHA1(7437dc2e203efc525aab251da5196d31b95d159a) )
 	ROM_LOAD( "034p1-2a.bin", 0x8000, 0x8000, NO_DUMP )
 	SP_ROOF_SOUND
 ROM_END
@@ -3848,587 +3943,590 @@ ROM_START( sp_cpal )
 	SP_CPAL_SOUND
 ROM_END
 
-static void descramble_crystal( UINT8* region, int start, int end, UINT8 extra_xor)
+static void descramble_crystal( uint8_t* region, int start, int end, uint8_t extra_xor)
 {
 	for (int i=start;i<end;i++)
 	{
-		UINT8 x = region[i];
+		uint8_t x = region[i];
 		switch (i & 0x58)
 		{
 		case 0x00: // same as 0x08
-		case 0x08: x = BITSWAP8( x^0xca , 3,2,1,0,7,4,6,5 ); break;
-		case 0x10: x = BITSWAP8( x^0x30 , 3,0,4,6,1,5,7,2 ); break;
-		case 0x18: x = BITSWAP8( x^0x89 , 4,1,2,5,7,0,6,3 ); break;
-		case 0x40: x = BITSWAP8( x^0x14 , 6,1,4,3,2,5,0,7 ); break;
-		case 0x48: x = BITSWAP8( x^0x40 , 1,0,3,2,5,4,7,6 ); break;
-		case 0x50: x = BITSWAP8( x^0xcb , 3,2,1,0,7,6,5,4 ); break;
-		case 0x58: x = BITSWAP8( x^0xc0 , 2,3,6,0,5,1,7,4 ); break;
+		case 0x08: x = bitswap<8>( x^0xca , 3,2,1,0,7,4,6,5 ); break;
+		case 0x10: x = bitswap<8>( x^0x30 , 3,0,4,6,1,5,7,2 ); break;
+		case 0x18: x = bitswap<8>( x^0x89 , 4,1,2,5,7,0,6,3 ); break;
+		case 0x40: x = bitswap<8>( x^0x14 , 6,1,4,3,2,5,0,7 ); break;
+		case 0x48: x = bitswap<8>( x^0x40 , 1,0,3,2,5,4,7,6 ); break;
+		case 0x50: x = bitswap<8>( x^0xcb , 3,2,1,0,7,6,5,4 ); break;
+		case 0x58: x = bitswap<8>( x^0xc0 , 2,3,6,0,5,1,7,4 ); break;
 		}
 		region[i] = x ^ extra_xor;
 	}
 }
-DRIVER_INIT_MEMBER(ace_sp_state,ace_cr)
+void ace_sp_state::init_ace_cr()
 {
 	descramble_crystal(memregion( "maincpu" )->base(), 0x0000, 0x10000, 0x00);
 }
 
-DRIVER_INIT_MEMBER(ace_sp_state,ace_sp)
+void ace_sp_state::init_ace_sp()
 {
 }
 
-GAME( 199?, sp_cbowl        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowla       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlb       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlc       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowld       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowle       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlf       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlg       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlh       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowli       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlj       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlk       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowll       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlm       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowln       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlo       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlp       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlq       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlr       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowls       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlt       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cbowlu       ,sp_cbowl   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Cash Bowl (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowl,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowla,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlb,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlc,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowld,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowle,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlf,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlg,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlh,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowli,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlj,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlk,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowll,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlm,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowln,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlo,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlp,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlq,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlr,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowls,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlt,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cbowlu,    sp_cbowl, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Cash Bowl (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_crime        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimea       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimeb       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimec       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimed       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimee       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimef       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimeg       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crimeh       ,sp_crime   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Crime Watch (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crime,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimea,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimeb,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimec,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimed,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimee,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimef,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimeg,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crimeh,    sp_crime, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Crime Watch (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
 
 // seems to be very closely related to Woolpack, looks like the same basic game with different strings, these have "GO TO EMMERDALE"
-GAME( 1995, sp_emmrd        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrda       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdb       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdc       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdd       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrde       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdf       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdg       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdh       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdi       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdj       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdk       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdn       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_emmrdo       ,sp_emmrd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Emmerdale (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrd,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrda,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdb,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdc,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdd,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrde,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdf,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdg,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdh,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdi,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdj,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdk,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdn,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_emmrdo,    sp_emmrd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Emmerdale (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
 // seems to be very closely related to Emmerdale, looks like the same basic game with different strings, these have "GO T' WOOLPACK"
-GAME( 1995, sp_woolp        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpa       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpb       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpc       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpd       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpe       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpf       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 1995, sp_woolpg       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 1995, sp_woolph       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 1995, sp_woolpi       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 1995, sp_woolpj       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpk       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpl       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpm       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpn       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 1995, sp_woolpo       ,sp_woolp   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Woolpack (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolp,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpa,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpb,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpc,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpd,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpe,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpf,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 1995, sp_woolpg,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 1995, sp_woolph,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 1995, sp_woolpi,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 1995, sp_woolpj,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpk,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpl,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpm,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpn,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 1995, sp_woolpo,    sp_woolp, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Woolpack (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
 // this has 'Emmerdale' padding, but seems to be a unique game, contains "ZIGZAG" strings
-GAME( 199?, sp_zigzg        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzga       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgb       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgc       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgd       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzge       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgf       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgg       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgh       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgi       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgj       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgk       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgl       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_zigzgm       ,sp_zigzg   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Zig Zag (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzg,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzga,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgb,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgc,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgd,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzge,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgf,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgg,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgh,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgi,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgj,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgk,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgl,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_zigzgm,    sp_zigzg, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Zig Zag (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
 // some of these have additional Whitbread copyright, many appear to be 'Golden Mile Showcase', several have a 'Golden Mile Prize' padding instead of the regular
-GAME( 199?, sp_goldm        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldma       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmb       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmc       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmd       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldme       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmf       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmg       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmh       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmi       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmj       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmk       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldml       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmm       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmn       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmo       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmp       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmq       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmr       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldms       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmt       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmu       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmv       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 23)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmw       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 24)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmx       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 25)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmy       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 26)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldmz       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 27)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldm0       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 28)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldm1       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 29)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldm2       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 30)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldm3       ,sp_goldm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Mile (Ace) (sp.ACE) (set 31)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldm,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldma,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmb,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmc,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmd,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldme,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmf,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmg,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmh,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmi,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmj,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmk,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldml,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmm,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmn,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmo,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmp,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmq,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmr,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldms,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmt,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmu,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmv,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 23)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmw,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 24)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmx,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 25)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmy,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 26)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldmz,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 27)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldm0,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 28)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldm1,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 29)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldm2,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 30)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldm3,    sp_goldm, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Mile (Ace) (sp.ACE) (set 31)",MACHINE_IS_SKELETON_MECHANICAL )
 // one of the types here have blanked out padding, possibly a BWB re-release?
-GAME( 199?, sp_gnat         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnata        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatb        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatc        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatd        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnate        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatf        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatg        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnath        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnati        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatj        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatk        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatl        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatm        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnatn        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gnato        ,sp_gnat    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand National (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnat,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnata,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatb,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatc,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatd,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnate,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatf,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatg,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnath,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnati,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatj,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatk,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatl,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatm,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnatn,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gnato,     sp_gnat , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand National (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
 // seems to be a variation on Grand National (prize cabinet?)
-GAME( 199?, sp_przna        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznaa       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznab       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznac       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznad       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznae       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznaf       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_prznag       ,sp_przna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Prize National (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_przna,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznaa,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznab,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznac,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznad,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznae,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznaf,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_prznag,    sp_przna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Prize National (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_gprix        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixa       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixb       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixc       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixd       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixe       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixf       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixg       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_gprixh       ,sp_gprix   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Grand Prix (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprix,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixa,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixb,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixc,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixd,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixe,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixf,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixg,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gprixh,    sp_gprix, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Grand Prix (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_hideh        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hideha       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehb       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehc       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehd       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehe       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehf       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehg       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehh       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehi       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehj       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehk       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehl       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehm       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehn       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hideho       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hidehp       ,sp_hideh   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi De Hi (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hideh,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hideha,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehb,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehc,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehd,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehe,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehf,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehg,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehh,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehi,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehj,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehk,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehl,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehm,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehn,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hideho,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hidehp,    sp_hideh, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi De Hi (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_hifly        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflya       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyb       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyc       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyd       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflye       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyf       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyg       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyh       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyi       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyj       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyk       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyl       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflym       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyn       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyo       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hiflyp       ,sp_hifly   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Hi Flyer (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hifly,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflya,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyb,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyc,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyd,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflye,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyf,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyg,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyh,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyi,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyj,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyk,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyl,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflym,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyn,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyo,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hiflyp,    sp_hifly, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Hi Flyer (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_juras        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Jurassic Trail (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_juras,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Jurassic Trail (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_openb        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openba       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbb       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbc       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbd       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbe       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbf       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbg       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbh       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_openbi       ,sp_openb   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Open The Box (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openb,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openba,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbb,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbc,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbd,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbe,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbf,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbg,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbh,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_openbi,    sp_openb, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Open The Box (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_payrs        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsa       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsb       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsc       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsd       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrse       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsf       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsg       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_payrsh       ,sp_payrs   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Payrise (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrs,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsa,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsb,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsc,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsd,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrse,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsf,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsg,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_payrsh,    sp_payrs, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Payrise (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_playa        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_playaa       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_playab       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 199?, sp_playac       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
-GAME( 199?, sp_playad       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
-GAME( 199?, sp_playae       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
-GAME( 199?, sp_playaf       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
-GAME( 199?, sp_playag       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
-GAME( 199?, sp_playah       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
-GAME( 199?, sp_playai       ,sp_playa   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Play It Again (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playa,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_playaa,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_playab,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 199?, sp_playac,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete
+GAME( 199?, sp_playad,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playae,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playaf,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playag,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playah,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
+GAME( 199?, sp_playai,    sp_playa, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Play It Again (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL ) // possible bad pairing
 
-GAME( 199?, sp_spell        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spella       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spellb       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spellc       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spelld       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spelle       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spellf       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spellg       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spelli       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_spellj       ,sp_spell   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Spellbound (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spell,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spella,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spellb,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spellc,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spelld,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spelle,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spellf,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spellg,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spelli,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_spellj,    sp_spell, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Spellbound (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_swop         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopa        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopb        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopc        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopd        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swope        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopf        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_swopg        ,sp_swop    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Swop Shop (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swop,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopa,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopb,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopc,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopd,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swope,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopf,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_swopg,     sp_swop , ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Swop Shop (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_timem        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timema       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemb       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemc       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemd       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timeme       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemf       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemg       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemh       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemi       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemj       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_timemk       ,sp_timem   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Time Machine (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timem,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timema,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemb,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemc,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemd,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timeme,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemf,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemg,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemh,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemi,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemj,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_timemk,    sp_timem, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Time Machine (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_tz           ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tza          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzb          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzc          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzd          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tze          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzf          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzg          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzh          ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace",       "Twilight Zone (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzbwb        ,sp_tz      ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Twilight Zone (Ace/Bwb) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tz,        0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tza,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzb,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzc,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzd,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tze,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzf,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzg,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzh,       sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace",       "Twilight Zone (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzbwb,     sp_tz,    ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Twilight Zone (Ace/Bwb) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_tzfe         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfea        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeb        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfec        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfed        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfee        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfef        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeg        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeh        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfei        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfej        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfek        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfel        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfem        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfen        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeo        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfep        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeq        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfer        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfes        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfet        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tzfeu        ,sp_tzfe    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfe,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfea,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeb,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfec,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfed,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfee,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfef,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeg,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeh,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfei,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfej,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfek,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfel,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfem,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfen,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeo,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfep,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeq,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfer,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfes,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfet,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 21)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tzfeu,     sp_tzfe,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Twilight Zone - Further Encounters (Ace) (sp.ACE) (set 22)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_beau         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beaua        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beaub        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beauc        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beaud        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beaue        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beauf        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beaug        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beauh        ,sp_beau    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Beau Peep (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beaua,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beaub,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beauc,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beaud,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beaue,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beauf,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beaug,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beauh,     sp_beau,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Beau Peep (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_bigbd        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Big Break Deluxe Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_bigbda       ,sp_bigbd   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Big Break Deluxe Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_bigbd,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Big Break Deluxe Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_bigbda,    sp_bigbd, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Big Break Deluxe Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_brkbk        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Break The Bank (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_brkbka       ,sp_brkbk   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Break The Bank (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_brkbkb       ,sp_brkbk   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Break The Bank (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_brkbkc       ,sp_brkbk   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Break The Bank (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_brkbkd       ,sp_brkbk   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Break The Bank (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_brkbk,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Break The Bank (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_brkbka,    sp_brkbk, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Break The Bank (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_brkbkb,    sp_brkbk, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Break The Bank (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_brkbkc,    sp_brkbk, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Break The Bank (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_brkbkd,    sp_brkbk, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Break The Bank (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_camel        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camela       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelb       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelc       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cameld       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camele       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelf       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelg       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelh       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cameli       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelj       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelk       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camell       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelm       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_cameln       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_camelo       ,sp_camel   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Camelot (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camel,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camela,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelb,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelc,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cameld,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camele,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelf,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelg,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelh,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cameli,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelj,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelk,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camell,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelm,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cameln,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_camelo,    sp_camel, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Camelot (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_clbna        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Club National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_clbnaa       ,sp_clbna   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Club National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_clbna,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Club National (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_clbnaa,    sp_clbna, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Club National (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_coder        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_codera       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_coderb       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_coderc       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_coderd       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_codere       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_coderf       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_coderg       ,sp_coder   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Code Red (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coder,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_codera,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coderb,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coderc,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coderd,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_codere,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coderf,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_coderg,    sp_coder, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Code Red (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_criss        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissa       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissb       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissc       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissd       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crisse       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissf       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_crissg       ,sp_criss   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_criss,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissa,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissb,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissc,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissd,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crisse,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissf,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crissg,    sp_criss, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Criss Cross Cash (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_daytr        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Daytripper (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_daytra       ,sp_daytr   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Daytripper (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_daytrb       ,sp_daytr   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Daytripper (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_daytrc       ,sp_daytr   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Daytripper (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_daytr,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Daytripper (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_daytra,    sp_daytr, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Daytripper (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_daytrb,    sp_daytr, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Daytripper (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_daytrc,    sp_daytr, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Daytripper (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_donky        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkya       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkyb       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkyc       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkyd       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkye       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkyf       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_donkyg       ,sp_donky   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Donkey Derby (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donky,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkya,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkyb,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkyc,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkyd,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkye,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkyf,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_donkyg,    sp_donky, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Donkey Derby (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_dyour        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Double Your Money (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_dyour,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Double Your Money (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_festi        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Festival (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_festi,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Festival (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_beau2        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2a       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2b       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2c       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2d       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2e       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_beau2f       ,sp_beau2   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2a,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2b,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2c,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2d,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2e,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_beau2f,    sp_beau2, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Further Adventures Of Beau Peep (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_ghost        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghosta       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostb       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostc       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostd       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghoste       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostf       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostg       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghosth       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghosti       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostj       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostk       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostl       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostm       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostn       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghosto       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostp       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostq       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghostr       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_ghosts       ,sp_ghost   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Ghost Trapper (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghost,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghosta,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostb,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostc,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostd,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghoste,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostf,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostg,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghosth,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghosti,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostj,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostk,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostl,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostm,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostn,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghosto,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostp,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostq,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 18)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghostr,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 19)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_ghosts,    sp_ghost, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Ghost Trapper (Ace) (sp.ACE) (set 20)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_globe        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globea       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globeb       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globec       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globed       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globee       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globef       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_globeg       ,sp_globe   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Globe Trotter (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globe,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globea,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globeb,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globec,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globed,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globee,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globef,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_globeg,    sp_globe, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Globe Trotter (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_gol          ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Gol (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_gol,       0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Gol (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_golda        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Arrow Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldaa       ,sp_golda   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Arrow Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_golda,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Arrow Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldaa,    sp_golda, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Arrow Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
 // These contain lots of 'Golden Streak' strings, as well as 'Have you got the Golden Touch?' strings
-GAME( 199?, sp_golds        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsa       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsb       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsc       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsd       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldse       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsf       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsg       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_goldsh       ,sp_golds   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_golds,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsa,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsb,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsc,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsd,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldse,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsf,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsg,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldsh,    sp_golds, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
 // Very similar to above, but many of the 'Golden Streak' strings have been changed to Golden Touch, header still says Golden Streak tho
-GAME( 199?, sp_goldt        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Golden Streak (Golden Touch) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_goldt,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Golden Streak (Golden Touch) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_here         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_herea        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hereb        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_herec        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hered        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_heree        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_heref        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_hereg        ,sp_here    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Here We Go (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_here,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_herea,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hereb,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_herec,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hered,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_heree,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_heref,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_hereg,     sp_here,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Here We Go (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_holid        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Holiday Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_holida       ,sp_holid   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Holiday Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_holid,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Holiday Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_holida,    sp_holid, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Holiday Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_lotto        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Lotto (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_lotto,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Lotto (Spanish) (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_magmo        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Magic Money (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_magmoa       ,sp_magmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Magic Money (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_magmob       ,sp_magmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Magic Money (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_magmoc       ,sp_magmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Magic Money (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_magmod       ,sp_magmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Magic Money (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_magmo,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Magic Money (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_magmoa,    sp_magmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Magic Money (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_magmob,    sp_magmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Magic Money (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_magmoc,    sp_magmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Magic Money (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_magmod,    sp_magmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Magic Money (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_megmo        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmoa       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmob       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmoc       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmod       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmoe       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmof       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_megmog       ,sp_megmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Mega Money (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmo,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmoa,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmob,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmoc,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmod,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmoe,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmof,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_megmog,    sp_megmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Mega Money (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_monma        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Magic (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmaa       ,sp_monma   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Magic (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmab       ,sp_monma   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Magic (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmac       ,sp_monma   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Magic (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmad       ,sp_monma   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Magic (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monma,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Magic (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmaa,    sp_monma, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Magic (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmab,    sp_monma, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Magic (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmac,    sp_monma, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Magic (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmad,    sp_monma, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Magic (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_monmo        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmoa       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmob       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmoc       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmod       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmoe       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmof       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_monmog       ,sp_monmo   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Money Mountain (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmo,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmoa,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmob,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmoc,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmod,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmoe,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmof,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_monmog,    sp_monmo, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Money Mountain (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_nudex        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Nudge Explosion (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_nudexa       ,sp_nudex   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Nudge Explosion (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_nudex,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Nudge Explosion (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_nudexa,    sp_nudex, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Nudge Explosion (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_onbox        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxa       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxb       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxc       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxd       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxe       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxf       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxg       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxh       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxi       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxj       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxk       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxl       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxm       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_onboxn       ,sp_onbox   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Box (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onbox,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxa,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxb,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxc,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxd,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxe,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxf,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxg,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxh,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxi,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxj,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxk,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxl,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxm,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_onboxn,    sp_onbox, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Box (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_piste        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistea       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisteb       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistec       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisted       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistee       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistef       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisteg       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisteh       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistei       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistej       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistek       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistel       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistem       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisten       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pisteo       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pistep       ,sp_piste   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "On The Piste (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_piste,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistea,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisteb,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistec,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisted,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistee,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistef,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisteg,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisteh,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistei,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistej,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistek,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistel,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistem,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisten,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pisteo,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pistep,    sp_piste, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "On The Piste (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_pound        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pounda       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundb       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundc       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundd       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_pounde       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundf       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundg       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundh       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundi       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundj       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundk       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundl       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundm       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundn       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundo       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundp       ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Pound For Pound (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwb     ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwba    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbb    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbc    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbd    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbe    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbf    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_poundbwbg    ,sp_pound   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pound,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pounda,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundb,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundc,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundd,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_pounde,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundf,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundg,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundh,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 9)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundi,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 10)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundj,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 11)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundk,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 12)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundl,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 13)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundm,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 14)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundn,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 15)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundo,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 16)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundp,    sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Pound For Pound (Ace) (sp.ACE) (set 17)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwb,  sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwba, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbb, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbc, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbd, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbe, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbf, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_poundbwbg, sp_pound, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace / Bwb", "Pound For Pound (Ace/Bwb) (sp.ACE) (set 8)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_road         ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Road To Hell (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete program
+GAME( 199?, sp_road,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Road To Hell (Ace) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL ) // incomplete program
 
-GAME( 199?, sp_skylm        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "The Sky's The Limit Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_skylma       ,sp_skylm   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "The Sky's The Limit Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_skylm,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "The Sky's The Limit Club (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_skylma,    sp_skylm, ace_sp ,ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "The Sky's The Limit Club (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_tkpik        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpika       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpikb       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpikc       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpikd       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpike       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_tkpikf       ,sp_tkpik   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Take Your Pick (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpik,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpika,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpikb,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpikc,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 4)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpikd,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 5)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpike,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 6)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_tkpikf,    sp_tkpik, ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Take Your Pick (Ace) (sp.ACE) (set 7)",MACHINE_IS_SKELETON_MECHANICAL )
 // not sure.. looks like 6303 code to me
-GAME( 199?, sp_carry        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Pcp", "Carry On (Pcp) (sp.ACE?) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_carrya       ,sp_carry   ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Pcp", "Carry On (Pcp) (sp.ACE?) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_atw,       0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Crystal","Around The World In Eighty Days (Crystal) (sp.ACE?)",MACHINE_IS_SKELETON_MECHANICAL )
 // not sure.. looks like 6303 code to me
-GAME( 199?, sp_front        ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Bwb", "Final Frontier (Bwb) (sp.ACE?)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_five,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_cr, ROT0, "Crystal","Fiver Fever (Crystal) (sp.ACE?) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_fivea,     sp_five,  ace_sp, ace_sp, ace_sp_state, init_ace_cr, ROT0, "Crystal","Fiver Fever (Crystal) (sp.ACE?) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 // not sure.. looks like 6303 code to me
-GAME(199?, sp_atw   ,0          ,ace_sp ,ace_sp     , ace_sp_state,ace_sp,  ROT0,   "Crystal","Around The World In Eighty Days (Crystal) (sp.ACE?)",MACHINE_IS_SKELETON_MECHANICAL )
-// not sure.. looks like 6303 code to me
-GAME(199?, sp_five  ,0          ,ace_sp ,ace_sp     , ace_sp_state,ace_cr,  ROT0,   "Crystal","Fiver Fever (Crystal) (sp.ACE?) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME(199?, sp_fivea ,sp_five    ,ace_sp ,ace_sp     , ace_sp_state,ace_cr,  ROT0,   "Crystal","Fiver Fever (Crystal) (sp.ACE?) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-// not sure.. looks like 6303 code to me
-GAME(199?, sp_crun  ,0          ,ace_sp ,ace_sp     , ace_sp_state,ace_cr,  ROT0,   "Crystal","Cash Run (Crystal) (sp.ACE?) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME(199?, sp_cruna ,sp_crun    ,ace_sp ,ace_sp     , ace_sp_state,ace_cr,  ROT0,   "Crystal","Cash Run (Crystal) (sp.ACE?) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME(199?, sp_crunb ,sp_crun    ,ace_sp ,ace_sp     , ace_sp_state,ace_cr,  ROT0,   "Crystal","Cash Run (Crystal) (sp.ACE?) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crun,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_cr, ROT0, "Crystal","Cash Run (Crystal) (sp.ACE?) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_cruna,     sp_crun,  ace_sp, ace_sp, ace_sp_state, init_ace_cr, ROT0, "Crystal","Cash Run (Crystal) (sp.ACE?) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_crunb,     sp_crun,  ace_sp, ace_sp, ace_sp_state, init_ace_cr, ROT0, "Crystal","Cash Run (Crystal) (sp.ACE?) (set 3)",MACHINE_IS_SKELETON_MECHANICAL )
 
 // incomplete dump (was mixed with the IMPACT rebuild)
-GAME( 199?, sp_roof     ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Thru' The Roof (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
-GAME( 199?, sp_roofa    ,sp_roof    ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Thru' The Roof (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_roof,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Thru' The Roof (Ace) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_roofa,     sp_roof,  ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Thru' The Roof (Ace) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
 
-GAME( 199?, sp_cpal     ,0          ,ace_sp ,ace_sp , ace_sp_state,ace_sp   ,ROT0   ,"Ace", "Caesars Palace (Ace) (sp.ACE?)",MACHINE_IS_SKELETON_MECHANICAL ) // was in an IMPACT set, might be a different game but CPU seems correct for here
+GAME( 199?, sp_cpal,      0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Ace", "Caesars Palace (Ace) (sp.ACE?)",MACHINE_IS_SKELETON_MECHANICAL ) // was in an IMPACT set, might be a different game but CPU seems correct for here
+
+// these show something
+
+GAME( 199?, sp_carry,     0,        ace_sp_pcp, ace_sp, ace_sp_state, init_ace_sp, ROT0,"Pcp", "Carry On (Pcp) (sp.ACE) (set 1)",MACHINE_IS_SKELETON_MECHANICAL )
+GAME( 199?, sp_carrya,    sp_carry, ace_sp_pcp, ace_sp, ace_sp_state, init_ace_sp, ROT0,"Pcp", "Carry On (Pcp) (sp.ACE) (set 2)",MACHINE_IS_SKELETON_MECHANICAL )
+// boots to 'Fire Crak V1' (maybe DMD wasn't visible on this machine or this is mislabaled?)
+GAME( 199?, sp_front,     0,        ace_sp, ace_sp, ace_sp_state, init_ace_sp, ROT0, "Bwb", "Final Frontier (Bwb) (sp.ACE)",MACHINE_IS_SKELETON_MECHANICAL )
+

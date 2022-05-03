@@ -6,20 +6,24 @@
 //
 //============================================================
 
+#include "emu.h"
 #import "pointsviewer.h"
 
 #import "breakpointsview.h"
+#import "registerpointsview.h"
 #import "watchpointsview.h"
+
+#include "util/xmlfile.h"
 
 
 @implementation MAMEPointsViewer
 
 - (id)initWithMachine:(running_machine &)m console:(MAMEDebugConsole *)c {
-	MAMEDebugView	*breakView, *watchView;
-	NSScrollView	*breakScroll, *watchScroll;
-	NSTabViewItem	*breakTab, *watchTab;
-	NSPopUpButton	*actionButton, *subviewButton;
-	NSRect			subviewFrame;
+	MAMEDebugView   *breakView, *watchView, *registerView;
+	NSScrollView    *breakScroll, *watchScroll, *registerScroll;
+	NSTabViewItem   *breakTab, *watchTab, *registerTab;
+	NSPopUpButton   *actionButton;
+	NSRect          subviewFrame;
 
 	if (!(self = [super initWithMachine:m title:@"(Break|Watch)points" console:c]))
 		return nil;
@@ -41,6 +45,9 @@
 	[[[subviewButton menu] addItemWithTitle:@"All Watchpoints"
 									 action:NULL
 							  keyEquivalent:@""] setTag:1];
+	[[[subviewButton menu] addItemWithTitle:@"All Registerpoints"
+									 action:NULL
+							  keyEquivalent:@""] setTag:2];
 	[subviewButton sizeToFit];
 	subviewFrame = [subviewButton frame];
 	subviewFrame.origin.x = subviewFrame.size.height;
@@ -72,13 +79,14 @@
 	[breakScroll setHasVerticalScroller:YES];
 	[breakScroll setAutohidesScrollers:YES];
 	[breakScroll setBorderType:NSNoBorder];
+	[breakScroll setDrawsBackground:NO];
 	[breakScroll setDocumentView:breakView];
 	[breakView release];
 	breakTab = [[NSTabViewItem alloc] initWithIdentifier:@""];
 	[breakTab setView:breakScroll];
 	[breakScroll release];
 
-	// create the breakpoints view
+	// create the watchpoints view
 	watchView = [[MAMEWatchpointsView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)
 												   machine:*machine];
 	watchScroll = [[NSScrollView alloc] initWithFrame:[breakScroll frame]];
@@ -87,11 +95,28 @@
 	[watchScroll setHasVerticalScroller:YES];
 	[watchScroll setAutohidesScrollers:YES];
 	[watchScroll setBorderType:NSNoBorder];
+	[watchScroll setDrawsBackground:NO];
 	[watchScroll setDocumentView:watchView];
 	[watchView release];
 	watchTab = [[NSTabViewItem alloc] initWithIdentifier:@""];
 	[watchTab setView:watchScroll];
 	[watchScroll release];
+
+	// create the registerpoints view
+	registerView = [[MAMERegisterpointsView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)
+														 machine:*machine];
+	registerScroll = [[NSScrollView alloc] initWithFrame:[breakScroll frame]];
+	[registerScroll setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+	[registerScroll setHasHorizontalScroller:YES];
+	[registerScroll setHasVerticalScroller:YES];
+	[registerScroll setAutohidesScrollers:YES];
+	[registerScroll setBorderType:NSNoBorder];
+	[registerScroll setDrawsBackground:NO];
+	[registerScroll setDocumentView:registerView];
+	[registerView release];
+	registerTab = [[NSTabViewItem alloc] initWithIdentifier:@""];
+	[registerTab setView:registerScroll];
+	[registerScroll release];
 
 	// create a tabless tabview for the two subviews
 	tabs = [[NSTabView alloc] initWithFrame:[breakScroll frame]];
@@ -101,6 +126,8 @@
 	[breakTab release];
 	[tabs addTabViewItem:watchTab];
 	[watchTab release];
+	[tabs addTabViewItem:registerTab];
+	[registerTab release];
 	[[window contentView] addSubview:tabs];
 	[tabs release];
 
@@ -119,8 +146,12 @@
 												hasHorizontalScroller:YES
 												  hasVerticalScroller:YES
 														   borderType:[watchScroll borderType]];
-	NSSize const desired = NSMakeSize(MAX(breakDesired.width, watchDesired.width),
-									  MAX(breakDesired.height, watchDesired.height));
+	NSSize const registerDesired = [NSScrollView frameSizeForContentSize:[registerView maximumFrameSize]
+												   hasHorizontalScroller:YES
+													 hasVerticalScroller:YES
+															  borderType:[registerScroll borderType]];
+	NSSize const desired = NSMakeSize(std::max({ breakDesired.width, watchDesired.width, registerDesired.width }),
+									  std::max({ breakDesired.height, watchDesired.height, registerDesired.height }));
 	[self cascadeWindowWithDesiredSize:desired forView:tabs];
 
 	// don't forget the result
@@ -136,6 +167,24 @@
 - (IBAction)changeSubview:(id)sender {
 	[tabs selectTabViewItemAtIndex:[[sender selectedItem] tag]];
 	[window setTitle:[[sender selectedItem] title]];
+}
+
+
+- (void)saveConfigurationToNode:(util::xml::data_node *)node {
+	[super saveConfigurationToNode:node];
+	node->set_attribute_int("type", MAME_DEBUGGER_WINDOW_TYPE_POINTS_VIEWER);
+	node->set_attribute_int("bwtype", [tabs indexOfTabViewItem:[tabs selectedTabViewItem]]);
+}
+
+
+- (void)restoreConfigurationFromNode:(util::xml::data_node const *)node {
+	[super restoreConfigurationFromNode:node];
+	int const tab = node->get_attribute_int("bwtype", [tabs indexOfTabViewItem:[tabs selectedTabViewItem]]);
+	if ((0 <= tab) && ([tabs numberOfTabViewItems] > tab))
+	{
+		[subviewButton selectItemAtIndex:tab];
+		[self changeSubview:subviewButton];
+	}
 }
 
 @end

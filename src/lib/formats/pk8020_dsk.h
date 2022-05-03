@@ -1,4 +1,4 @@
-// license:GPL-2.0+
+// license:BSD-3-Clause
 // copyright-holders:Dirk Best
 /***************************************************************************
 
@@ -7,11 +7,10 @@
     Disk image format
 
 ***************************************************************************/
+#ifndef MAME_FORMATS_PK8020_DSK_H
+#define MAME_FORMATS_PK8020_DSK_H
 
 #pragma once
-
-#ifndef __PK8020_DSK_H__
-#define __PK8020_DSK_H__
 
 #include "wd177x_dsk.h"
 
@@ -28,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_PK8020_FORMAT;
+extern const pk8020_format FLOPPY_PK8020_FORMAT;
 
-#endif // __PK8020_DSK_H__
+#endif // MAME_FORMATS_PK8020_DSK_H

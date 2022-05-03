@@ -19,45 +19,61 @@
 #include "emu.h"
 #include "i82371ab.h"
 
-const device_type I82371AB = &device_creator<i82371ab_device>;
+#define LOG_ISA    (1U <<  1)
+#define LOG_IDE    (1U <<  2)
+#define LOG_USB    (1U <<  3)
+#define LOG_ACPI   (1U <<  4)
+
+#define VERBOSE (LOG_GENERAL | LOG_ISA | LOG_IDE | LOG_USB | LOG_ACPI)
+//#define LOG_OUTPUT_FUNC osd_printf_info
+#include "logmacro.h"
+
+#define LOGISA(...)    LOGMASKED(LOG_ISA, __VA_ARGS__)
+#define LOGIDE(...)    LOGMASKED(LOG_IDE, __VA_ARGS__)
+#define LOGUSB(...)    LOGMASKED(LOG_USB, __VA_ARGS__)
+#define LOGACPI(...)   LOGMASKED(LOG_ACPI, __VA_ARGS__)
+
+DEFINE_DEVICE_TYPE(I82371AB, i82371ab_device, "i82371ab", "Intel 82371AB")
 
 
-i82371ab_device::i82371ab_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-		: southbridge_device(mconfig, I82371AB, "Intel 82371AB", tag, owner, clock, "i82371ab", __FILE__),
-		pci_device_interface( mconfig, *this )
+i82371ab_device::i82371ab_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: southbridge_extended_device(mconfig, I82371AB, tag, owner, clock)
+	, pci_device_interface(mconfig, *this)
 {
 }
 
-UINT32 i82371ab_device::pci_isa_r(device_t *busdevice, int offset, UINT32 mem_mask)
+
+
+uint32_t i82371ab_device::pci_isa_r(device_t *busdevice, int offset, uint32_t mem_mask)
 {
-	UINT32 result = m_regs[0][offset] |
+	uint32_t result = m_regs[0][offset] |
 			m_regs[0][offset+1] << 8 |
 			m_regs[0][offset+2] << 16|
 			m_regs[0][offset+3] << 24;
 
-	logerror("i82371ab_pci_isa_r, offset = %02x, mem_mask = %08x\n", offset, mem_mask);
+	LOGISA("ISA read: [%02x] -> %08x & %08x\n", offset, result, mem_mask);
 
 	return result;
 }
 
-void i82371ab_device::pci_isa_w(device_t *busdevice, int offset, UINT32 data, UINT32 mem_mask)
+void i82371ab_device::pci_isa_w(device_t *busdevice, int offset, uint32_t data, uint32_t mem_mask)
 {
-	UINT32 cdata = 0;
+	uint32_t cdata = 0;
 	int i;
 	COMBINE_DATA(&cdata);
 
-	logerror("i82371ab_pci_isa_w, offset = %02x, data = %08x, mem_mask = %08x\n", offset, data, mem_mask);
+	LOGISA("ISA write: [%02x] <- %08x & %08x\n", offset, data, mem_mask);
 
 	for(i = 0; i < 4; i++, offset++, cdata >>= 8)
 	{
 		switch (offset)
 		{
 			case 0x04:
-				/* clear reserved bits */
+				// clear reserved bits
 				m_regs[0][offset] = cdata & 0x05;
 				break;
 			case 0x06:
-				/* set new status */
+				// set new status
 				m_regs[0][offset] |= 0x80;
 				break;
 			case 0x07:
@@ -67,36 +83,36 @@ void i82371ab_device::pci_isa_w(device_t *busdevice, int offset, UINT32 data, UI
 	}
 }
 
-UINT32 i82371ab_device::pci_ide_r(device_t *busdevice, int offset, UINT32 mem_mask)
+uint32_t i82371ab_device::pci_ide_r(device_t *busdevice, int offset, uint32_t mem_mask)
 {
-	UINT32 result = m_regs[1][offset] |
+	uint32_t result = m_regs[1][offset] |
 			m_regs[1][offset+1] << 8 |
 			m_regs[1][offset+2] << 16|
 			m_regs[1][offset+3] << 24;
 
-	logerror("i82371ab_pci_ide_r, offset = %02x, mem_mask = %08x\n", offset, mem_mask);
+	LOGIDE("IDE read: [%02x] -> %08x & %08x\n", offset, result, mem_mask);
 
 	return result;
 }
 
-void i82371ab_device::pci_ide_w(device_t *busdevice, int offset, UINT32 data, UINT32 mem_mask)
+void i82371ab_device::pci_ide_w(device_t *busdevice, int offset, uint32_t data, uint32_t mem_mask)
 {
-	UINT32 cdata = 0;
+	uint32_t cdata = 0;
 	int i;
 	COMBINE_DATA(&cdata);
 
-	logerror("i82371ab_pci_isa_w, offset = %02x, data = %08x, mem_mask = %08x\n", offset, data, mem_mask);
+	LOGIDE("IDE write: [%02x] <- %08x & %08x\n", offset, data, mem_mask);
 
 	for(i = 0; i < 4; i++, offset++, cdata >>= 8)
 	{
 		switch (offset)
 		{
 			case 0x04:
-				/* clear reserved bits */
+				// clear reserved bits
 				m_regs[1][offset] = cdata & 0x05;
 				break;
 			case 0x06:
-				/* set new status */
+				// set new status
 				m_regs[1][offset] |= 0x80;
 				break;
 			case 0x07:
@@ -106,36 +122,36 @@ void i82371ab_device::pci_ide_w(device_t *busdevice, int offset, UINT32 data, UI
 	}
 }
 
-UINT32 i82371ab_device::pci_usb_r(device_t *busdevice, int offset, UINT32 mem_mask)
+uint32_t i82371ab_device::pci_usb_r(device_t *busdevice, int offset, uint32_t mem_mask)
 {
-	UINT32 result = m_regs[2][offset] |
+	uint32_t result = m_regs[2][offset] |
 			m_regs[2][offset+1] << 8 |
 			m_regs[2][offset+2] << 16|
 			m_regs[2][offset+3] << 24;
 
-	logerror("i82371ab_pci_usb_r, offset = %02x, mem_mask = %08x\n", offset, mem_mask);
+	LOGUSB("USB read: [%02x] -> %08x & %08x\n", offset, result, mem_mask);
 
 	return result;
 }
 
-void i82371ab_device::pci_usb_w(device_t *busdevice, int offset, UINT32 data, UINT32 mem_mask)
+void i82371ab_device::pci_usb_w(device_t *busdevice, int offset, uint32_t data, uint32_t mem_mask)
 {
-	UINT32 cdata = 0;
+	uint32_t cdata = 0;
 	int i;
 	COMBINE_DATA(&cdata);
 
-	logerror("i82371ab_pci_isa_w, offset = %02x, data = %08x, mem_mask = %08x\n", offset, data, mem_mask);
+	LOGUSB("USB write: [%02x] <- %08x & %08x\n", offset, data, mem_mask);
 
 	for(i = 0; i < 4; i++, offset++, cdata >>= 8)
 	{
 		switch (offset)
 		{
 			case 0x04:
-				/* clear reserved bits */
+				// clear reserved bits
 				m_regs[2][offset] = cdata & 0x05;
 				break;
 			case 0x06:
-				/* set new status */
+				// set new status
 				m_regs[2][offset] |= 0x80;
 				break;
 			case 0x07:
@@ -145,36 +161,36 @@ void i82371ab_device::pci_usb_w(device_t *busdevice, int offset, UINT32 data, UI
 	}
 }
 
-UINT32 i82371ab_device::pci_acpi_r(device_t *busdevice, int offset, UINT32 mem_mask)
+uint32_t i82371ab_device::pci_acpi_r(device_t *busdevice, int offset, uint32_t mem_mask)
 {
-	UINT32 result = m_regs[3][offset] |
+	uint32_t result = m_regs[3][offset] |
 			m_regs[3][offset+1] << 8 |
 			m_regs[3][offset+2] << 16|
 			m_regs[3][offset+3] << 24;
 
-	logerror("i82371ab_pci_acpi_r, offset = %02x, mem_mask = %08x\n", offset, mem_mask);
+	LOGACPI("ACPI read: [%02x] -> %08x & %08x\n", offset, result, mem_mask);
 
 	return result;
 }
 
-void i82371ab_device::pci_acpi_w(device_t *busdevice, int offset, UINT32 data, UINT32 mem_mask)
+void i82371ab_device::pci_acpi_w(device_t *busdevice, int offset, uint32_t data, uint32_t mem_mask)
 {
-	UINT32 cdata = 0;
+	uint32_t cdata = 0;
 	int i;
 	COMBINE_DATA(&cdata);
 
-	logerror("i82371ab_pci_isa_w, offset = %02x, data = %08x, mem_mask = %08x\n", offset, data, mem_mask);
+	LOGACPI("ACPI write: [%02x] <- %08x & %08x\n", offset, data, mem_mask);
 
 	for(i = 0; i < 4; i++, offset++, cdata >>= 8)
 	{
 		switch (offset)
 		{
 			case 0x04:
-				/* clear reserved bits */
+				// clear reserved bits
 				m_regs[3][offset] = cdata & 0x05;
 				break;
 			case 0x06:
-				/* set new status */
+				// set new status
 				m_regs[3][offset] |= 0x80;
 				break;
 			case 0x07:
@@ -184,7 +200,7 @@ void i82371ab_device::pci_acpi_w(device_t *busdevice, int offset, UINT32 data, U
 	}
 }
 
-UINT32 i82371ab_device::pci_read(pci_bus_device *pcibus, int function, int offset, UINT32 mem_mask)
+uint32_t i82371ab_device::pci_read(pci_bus_device *pcibus, int function, int offset, uint32_t mem_mask)
 {
 	switch (function)
 	{
@@ -194,12 +210,12 @@ UINT32 i82371ab_device::pci_read(pci_bus_device *pcibus, int function, int offse
 	case 3: return pci_acpi_r(pcibus, offset, mem_mask);
 	}
 
-	logerror("i82371ab_pci_read: read from undefined function %d\n", function);
+	LOG("read from undefined function %d\n", function);
 
 	return 0;
 }
 
-void i82371ab_device::pci_write(pci_bus_device *pcibus, int function, int offset, UINT32 data, UINT32 mem_mask)
+void i82371ab_device::pci_write(pci_bus_device *pcibus, int function, int offset, uint32_t data, uint32_t mem_mask)
 {
 	switch (function)
 	{
@@ -210,14 +226,19 @@ void i82371ab_device::pci_write(pci_bus_device *pcibus, int function, int offset
 	}
 }
 
+void i82371ab_device::remap(int space_id, offs_t start, offs_t end)
+{
+	m_isabus->remap(space_id, start, end);
+}
+
 //-------------------------------------------------
 //  device_start - device-specific startup
 //-------------------------------------------------
 
 void i82371ab_device::device_start()
 {
-	southbridge_device::device_start();
-	/* setup save states */
+	southbridge_extended_device::device_start();
+	// setup save states
 	save_item(NAME(m_regs));
 }
 
@@ -227,29 +248,29 @@ void i82371ab_device::device_start()
 
 void i82371ab_device::device_reset()
 {
-	southbridge_device::device_reset();
+	southbridge_extended_device::device_reset();
 	memset(m_regs, 0, sizeof(m_regs));
-	UINT32 (*regs32)[64] = (UINT32 (*)[64])(m_regs);
+	uint32_t (*regs32)[64] = (uint32_t (*)[64])(m_regs);
 
-	/* isa */
+	// isa
 	regs32[0][0x00] = 0x71108086;
 	regs32[0][0x04] = 0x00000000;
 	regs32[0][0x08] = 0x06010000;
 	regs32[0][0x0c] = 0x00800000;
 
-	/* ide */
+	// ide
 	regs32[1][0x00] = 0x71118086;
 	regs32[1][0x04] = 0x02800000;
 	regs32[1][0x08] = 0x01018000;
 	regs32[1][0x0c] = 0x00000000;
 
-	/* usb */
+	// usb
 	regs32[2][0x00] = 0x71128086;
 	regs32[2][0x04] = 0x02800000;
 	regs32[2][0x08] = 0x0c030000;
 	regs32[2][0x0c] = 0x00000000;
 
-	/* acpi */
+	// acpi
 	regs32[3][0x00] = 0x71138086;
 	regs32[3][0x04] = 0x02800000;
 	regs32[3][0x08] = 0x06800000;

@@ -15,26 +15,12 @@ dofile("modules.lua")
 function maintargetosdoptions(_target,_subtarget)
 	osdmodulestargetconf()
 
-	configuration { "mingw*-gcc" }
-		linkoptions {
-			"-municode",
-		}
+	configuration { "mingw*" }
 		links {
 			"mingw32",
 		}
 
 	configuration { }
-
-	if _OPTIONS["DIRECTINPUT"] == "8" then
-		links {
-			"dinput8",
-		}
-	else
-		links {
-			"dinput",
-		}
-	end
-
 
 	if _OPTIONS["USE_SDL"] == "1" then
 		links {
@@ -43,26 +29,15 @@ function maintargetosdoptions(_target,_subtarget)
 	end
 
 	links {
+		"dinput8",
 		"comctl32",
 		"comdlg32",
 		"psapi",
 		"ole32",
+		"shlwapi",
 	}
 end
 
-
-newoption {
-	trigger = "DIRECTINPUT",
-	description = "Minimum DirectInput version to support",
-	allowed = {
-		{ "7",  "Support DirectInput 7 or later"  },
-		{ "8",  "Support DirectInput 8 or later"  },
-	},
-}
-
-if not _OPTIONS["DIRECTINPUT"] then
-	_OPTIONS["DIRECTINPUT"] = "8"
-end
 
 newoption {
 	trigger = "USE_SDL",
@@ -126,17 +101,8 @@ project ("osd_" .. _OPTIONS["osd"])
 
 	defines {
 		"DIRECT3D_VERSION=0x0900",
+		"DIRECTINPUT_VERSION=0x0800",
 	}
-
-	if _OPTIONS["DIRECTINPUT"] == "8" then
-		defines {
-			"DIRECTINPUT_VERSION=0x0800",
-		}
-	else
-		defines {
-			"DIRECTINPUT_VERSION=0x0700",
-		}
-	end
 
 	includedirs {
 		MAME_DIR .. "src/emu",
@@ -144,6 +110,7 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd",
 		MAME_DIR .. "src/lib",
 		MAME_DIR .. "src/lib/util",
+		MAME_DIR .. "src/osd/modules/file",
 		MAME_DIR .. "src/osd/modules/render",
 		MAME_DIR .. "3rdparty",
 	}
@@ -152,9 +119,13 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/windows",
 	}
 
+	if _OPTIONS["gcc"]~=nil and string.find(_OPTIONS["gcc"], "clang") then
+		buildoptions_cpp {
+			"-Wno-ignored-attributes",-- many instances in ImGui
+		}
+	end
+
 	files {
-		MAME_DIR .. "src/osd/modules/render/d3d/d3d9intf.cpp",
-		MAME_DIR .. "src/osd/modules/render/d3d/d3dintf.h",
 		MAME_DIR .. "src/osd/modules/render/d3d/d3dhlsl.cpp",
 		MAME_DIR .. "src/osd/modules/render/d3d/d3dcomm.h",
 		MAME_DIR .. "src/osd/modules/render/d3d/d3dhlsl.h",
@@ -164,8 +135,6 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/modules/render/drawgdi.h",
 		MAME_DIR .. "src/osd/modules/render/drawnone.cpp",
 		MAME_DIR .. "src/osd/modules/render/drawnone.h",
-		MAME_DIR .. "src/osd/windows/output.cpp",
-		MAME_DIR .. "src/osd/windows/output.h",
 		MAME_DIR .. "src/osd/windows/video.cpp",
 		MAME_DIR .. "src/osd/windows/video.h",
 		MAME_DIR .. "src/osd/windows/window.cpp",
@@ -194,6 +163,8 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/modules/debugger/win/editwininfo.h",
 		MAME_DIR .. "src/osd/modules/debugger/win/logwininfo.cpp",
 		MAME_DIR .. "src/osd/modules/debugger/win/logwininfo.h",
+		MAME_DIR .. "src/osd/modules/debugger/win/logviewinfo.cpp",
+		MAME_DIR .. "src/osd/modules/debugger/win/logviewinfo.h",
 		MAME_DIR .. "src/osd/modules/debugger/win/memoryviewinfo.cpp",
 		MAME_DIR .. "src/osd/modules/debugger/win/memoryviewinfo.h",
 		MAME_DIR .. "src/osd/modules/debugger/win/memorywininfo.cpp",
@@ -220,6 +191,7 @@ project ("ocore_" .. _OPTIONS["osd"])
 		MAME_DIR .. "3rdparty",
 		MAME_DIR .. "src/emu",
 		MAME_DIR .. "src/osd",
+		MAME_DIR .. "src/osd/modules/file",
 		MAME_DIR .. "src/lib",
 		MAME_DIR .. "src/lib/util",
 	}
@@ -229,13 +201,13 @@ project ("ocore_" .. _OPTIONS["osd"])
 
 	includedirs {
 		MAME_DIR .. "src/osd/windows",
-		MAME_DIR .. "src/lib/winpcap",
 	}
 
 	files {
 		MAME_DIR .. "src/osd/eigccppc.h",
 		MAME_DIR .. "src/osd/eigccx86.h",
 		MAME_DIR .. "src/osd/eivc.h",
+		MAME_DIR .. "src/osd/eivcarm.h",
 		MAME_DIR .. "src/osd/eivcx86.h",
 		MAME_DIR .. "src/osd/eminline.h",
 		MAME_DIR .. "src/osd/osdcomm.h",
@@ -243,24 +215,22 @@ project ("ocore_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/osdcore.h",
 		MAME_DIR .. "src/osd/strconv.cpp",
 		MAME_DIR .. "src/osd/strconv.h",
-		MAME_DIR .. "src/osd/windows/main.cpp",
-		MAME_DIR .. "src/osd/windows/windir.cpp",
-		MAME_DIR .. "src/osd/windows/winfile.cpp",
-		MAME_DIR .. "src/osd/modules/sync/osdsync.cpp",
-		MAME_DIR .. "src/osd/modules/sync/osdsync.h",
+		MAME_DIR .. "src/osd/osdsync.cpp",
+		MAME_DIR .. "src/osd/osdsync.h",
 		MAME_DIR .. "src/osd/windows/winutf8.cpp",
 		MAME_DIR .. "src/osd/windows/winutf8.h",
 		MAME_DIR .. "src/osd/windows/winutil.cpp",
 		MAME_DIR .. "src/osd/windows/winutil.h",
-		MAME_DIR .. "src/osd/windows/winfile.h",
-		MAME_DIR .. "src/osd/windows/winclip.cpp",
-		MAME_DIR .. "src/osd/windows/winsocket.cpp",
-		MAME_DIR .. "src/osd/windows/winptty.cpp",
 		MAME_DIR .. "src/osd/modules/osdmodule.cpp",
 		MAME_DIR .. "src/osd/modules/osdmodule.h",
+		MAME_DIR .. "src/osd/modules/file/windir.cpp",
+		MAME_DIR .. "src/osd/modules/file/winfile.cpp",
+		MAME_DIR .. "src/osd/modules/file/winfile.h",
+		MAME_DIR .. "src/osd/modules/file/winptty.cpp",
+		MAME_DIR .. "src/osd/modules/file/winsocket.cpp",
 		MAME_DIR .. "src/osd/modules/lib/osdlib_win32.cpp",
-		MAME_DIR .. "src/osd/modules/sync/work_osd.cpp",
 	}
+
 
 
 --------------------------------------------------
@@ -273,10 +243,10 @@ if _OPTIONS["with-tools"] then
 		kind "ConsoleApp"
 
 		flags {
-			"Symbols", -- always include minimum symbols for executables 	
+			"Symbols", -- always include minimum symbols for executables
 		}
 
-		if _OPTIONS["SEPARATE_BIN"]~="1" then 
+		if _OPTIONS["SEPARATE_BIN"]~="1" then
 			targetdir(MAME_DIR)
 		end
 
@@ -287,7 +257,7 @@ if _OPTIONS["with-tools"] then
 		includedirs {
 			MAME_DIR .. "src/osd",
 		}
-		
+
 		files {
 			MAME_DIR .. "src/osd/windows/ledutil.cpp",
 		}

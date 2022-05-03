@@ -1,5 +1,5 @@
 #include "benchmark/benchmark_api.h"
-#include <time.h>
+#include <ctime>
 #include "osdcore.h"
 #include "osdcomm.h"
 #define MAME_NOASM 1
@@ -11,9 +11,9 @@ osd_ticks_t osd_ticks(void)
 #include "eminline.h"
 
 static void BM_count_leading_zeros_noasm(benchmark::State& state) {
-	UINT32 cnt = 0x332533;
+	uint32_t cnt = 0x332533;
 	while (state.KeepRunning()) {
-		(void)count_leading_zeros(cnt);
+		(void)count_leading_zeros_32(cnt);
 		cnt++;
 	}
 }

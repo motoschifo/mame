@@ -7,13 +7,15 @@
     iq151 format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_IQ151_DSK_H
+#define MAME_FORMATS_IQ151_DSK_H
 
-#ifndef IQ151_DSK_H_
-#define IQ151_DSK_H_
+#pragma once
 
 #include "upd765_dsk.h"
 
-class iq151_format : public upd765_format {
+class iq151_format : public upd765_format
+{
 public:
 	iq151_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_IQ151_FORMAT;
+extern const iq151_format FLOPPY_IQ151_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_IQ151_DSK_H

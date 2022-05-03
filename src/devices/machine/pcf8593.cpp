@@ -8,6 +8,7 @@
 
 *********************************************************************/
 
+#include "emu.h"
 #include "pcf8593.h"
 
 
@@ -39,17 +40,17 @@
 //  GLOBAL VARIABLES
 //**************************************************************************
 
-const device_type PCF8593 = &device_creator<pcf8593_device>;
+DEFINE_DEVICE_TYPE(PCF8593, pcf8593_device, "pcf8593", "PCF8593 RTC")
 
 
 //-------------------------------------------------
 //  pcf8593_device - constructor
 //-------------------------------------------------
 
-pcf8593_device::pcf8593_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, PCF8593, "PCF8593 RTC", tag, owner, clock, "pcf8593", __FILE__),
-		device_rtc_interface(mconfig, *this),
-		device_nvram_interface(mconfig, *this)
+pcf8593_device::pcf8593_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, PCF8593, tag, owner, clock)
+	, device_rtc_interface(mconfig, *this)
+	, device_nvram_interface(mconfig, *this)
 {
 }
 
@@ -75,8 +76,8 @@ void pcf8593_device::device_reset()
 	_logerror( 0, ("pcf8593_reset\n"));
 	m_pin_scl = 1;
 	m_pin_sda = 1;
-	m_active  = FALSE;
-	m_inp     = 0;
+	m_active  = false;
+	m_inp     = 0; // FIXME: sda should default 1 not 0.
 	m_mode    = RTC_MODE_RECV;
 	m_bits    = 0;
 	m_pos     = 0;
@@ -89,7 +90,7 @@ void pcf8593_device::device_reset()
 //  device_timer - handler timer events
 //-------------------------------------------------
 
-void pcf8593_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void pcf8593_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch(id)
 	{
@@ -133,9 +134,10 @@ void pcf8593_device::nvram_default()
 //  .nv file
 //-------------------------------------------------
 
-void pcf8593_device::nvram_read(emu_file &file)
+bool pcf8593_device::nvram_read(util::read_stream &file)
 {
-	file.read(m_data, sizeof(m_data));
+	size_t actual;
+	return !file.read(m_data, sizeof(m_data), actual) && actual == sizeof(m_data);
 }
 
 
@@ -144,9 +146,10 @@ void pcf8593_device::nvram_read(emu_file &file)
 //  .nv file
 //-------------------------------------------------
 
-void pcf8593_device::nvram_write(emu_file &file)
+bool pcf8593_device::nvram_write(util::write_stream &file)
 {
-	file.write(m_data, sizeof(m_data));
+	size_t actual;
+	return !file.write(m_data, sizeof(m_data), actual) && actual == sizeof(m_data);
 }
 
 
@@ -158,6 +161,10 @@ void pcf8593_device::nvram_write(emu_file &file)
 WRITE_LINE_MEMBER(pcf8593_device::scl_w)
 {
 	// send bit
+	// FIXME: Processing on the rising edge of the clock causes sda output to
+	// change while clock is high. This is not allowed.
+	// All received data is currently acknowledge, need to add checks for
+	// valid device-id and ACK/NAK as required.
 	if ((m_active) && (!m_pin_scl) && (state))
 	{
 		switch (m_mode)
@@ -185,7 +192,7 @@ WRITE_LINE_MEMBER(pcf8593_device::scl_w)
 					// A2 + xx + .. = write byte
 					if ((m_data_recv[0] == 0xA2) && (m_data_recv_index >= 2))
 					{
-						UINT8 rtc_pos, rtc_val;
+						uint8_t rtc_pos, rtc_val;
 						rtc_pos = m_data_recv[1] + (m_data_recv_index - 2);
 						rtc_val = m_data_recv[m_data_recv_index];
 						//if (rtc_pos == 0) rtc_val = rtc_val & 3; // what is this doing here?
@@ -244,7 +251,7 @@ WRITE_LINE_MEMBER(pcf8593_device::sda_w)
 		if ((!state) && (m_pin_sda))
 		{
 			_logerror( 1, ("pcf8593 start condition\n"));
-			m_active          = TRUE;
+			m_active          = true;
 			m_bits            = 0;
 			m_data_recv_index = 0;
 			clear_buffer_rx();
@@ -254,7 +261,7 @@ WRITE_LINE_MEMBER(pcf8593_device::sda_w)
 		if ((state) && (!m_pin_sda))
 		{
 			_logerror( 1, ("pcf8593 stop condition\n"));
-			m_active = FALSE;
+			m_active = false;
 		}
 	}
 	// save sda

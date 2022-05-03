@@ -7,13 +7,15 @@
     Enterprise Sixty Four disk image format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_EP64_DSK_H
+#define MAME_FORMATS_EP64_DSK_H
 
-#ifndef EP64_DSK_H_
-#define EP64_DSK_H_
+#pragma once
 
 #include "wd177x_dsk.h"
 
-class ep64_format : public wd177x_format {
+class ep64_format : public wd177x_format
+{
 public:
 	ep64_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_EP64_FORMAT;
+extern const ep64_format FLOPPY_EP64_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_EP64_DSK_H

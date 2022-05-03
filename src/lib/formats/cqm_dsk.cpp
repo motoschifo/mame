@@ -8,9 +8,13 @@
 
 *********************************************************************/
 
-#include <string.h>
-#include <assert.h>
-#include "flopimg.h"
+#include "cqm_dsk.h"
+#include "flopimg_legacy.h"
+
+#include "ioprocs.h"
+
+#include <cstring>
+
 
 #define CQM_HEADER_SIZE 133
 
@@ -24,8 +28,8 @@ struct cqmdsk_tag
 	int interleave;
 	int skew;
 
-	UINT8* buf;
-	UINT64 track_offsets[84*2]; /* offset within data for each track */
+	uint8_t* buf;
+	uint64_t track_offsets[84*2]; /* offset within data for each track */
 };
 
 
@@ -40,7 +44,7 @@ static struct cqmdsk_tag *get_tag(floppy_image_legacy *floppy)
 
 FLOPPY_IDENTIFY( cqm_dsk_identify )
 {
-	UINT8 header[2];
+	uint8_t header[2];
 
 	floppy_image_read(floppy, header, 0, 2);
 	if (header[0]=='C' && header[1]=='Q') {
@@ -61,16 +65,16 @@ static int cqm_get_tracks_per_disk(floppy_image_legacy *floppy)
 	return get_tag(floppy)->tracks;
 }
 
-static UINT64 cqm_get_track_offset(floppy_image_legacy *floppy, int head, int track)
+static uint64_t cqm_get_track_offset(floppy_image_legacy *floppy, int head, int track)
 {
 	return get_tag(floppy)->track_offsets[(track<<1) + head];
 }
 
-static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, int sector, int sector_is_index, UINT64 *offset)
+static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, int sector, bool sector_is_index, uint64_t *offset)
 {
-	UINT64 pos = 0;
-	UINT8 data;
-	INT16 len;
+	uint64_t pos = 0;
+	uint8_t data;
+	int16_t len;
 	int s;
 
 	if ((head < 0) || (head >= get_tag(floppy)->heads) || (track < 0) || (track >= get_tag(floppy)->tracks)
@@ -101,9 +105,9 @@ static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, in
 
 
 
-static floperr_t internal_cqm_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, int sector_is_index, void *buffer, size_t buflen)
+static floperr_t internal_cqm_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, bool sector_is_index, void *buffer, size_t buflen)
 {
-	UINT64 offset;
+	uint64_t offset;
 	floperr_t err;
 
 	// take sector offset
@@ -117,18 +121,18 @@ static floperr_t internal_cqm_read_sector(floppy_image_legacy *floppy, int head,
 
 static floperr_t cqm_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, void *buffer, size_t buflen)
 {
-	return internal_cqm_read_sector(floppy, head, track, sector, FALSE, buffer, buflen);
+	return internal_cqm_read_sector(floppy, head, track, sector, false, buffer, buflen);
 }
 
 static floperr_t cqm_read_indexed_sector(floppy_image_legacy *floppy, int head, int track, int sector, void *buffer, size_t buflen)
 {
-	return internal_cqm_read_sector(floppy, head, track, sector, TRUE, buffer, buflen);
+	return internal_cqm_read_sector(floppy, head, track, sector, true, buffer, buflen);
 }
 
-static floperr_t cqm_get_sector_length(floppy_image_legacy *floppy, int head, int track, int sector, UINT32 *sector_length)
+static floperr_t cqm_get_sector_length(floppy_image_legacy *floppy, int head, int track, int sector, uint32_t *sector_length)
 {
 	floperr_t err;
-	err = get_offset(floppy, head, track, sector, FALSE, nullptr);
+	err = get_offset(floppy, head, track, sector, false, nullptr);
 	if (err)
 		return err;
 
@@ -138,7 +142,7 @@ static floperr_t cqm_get_sector_length(floppy_image_legacy *floppy, int head, in
 	return FLOPPY_ERROR_SUCCESS;
 }
 
-static floperr_t cqm_get_indexed_sector_info(floppy_image_legacy *floppy, int head, int track, int sector_index, int *cylinder, int *side, int *sector, UINT32 *sector_length, unsigned long *flags)
+static floperr_t cqm_get_indexed_sector_info(floppy_image_legacy *floppy, int head, int track, int sector_index, int *cylinder, int *side, int *sector, uint32_t *sector_length, unsigned long *flags)
 {
 	if (sector_index >= get_tag(floppy)->sector_per_track) return FLOPPY_ERROR_SEEKERROR;
 
@@ -163,9 +167,9 @@ FLOPPY_CONSTRUCT( cqm_dsk_construct )
 {
 	struct FloppyCallbacks *callbacks;
 	struct cqmdsk_tag *tag;
-	UINT8 header[CQM_HEADER_SIZE];
-	UINT64 pos = 0;
-	INT16 len;
+	uint8_t header[CQM_HEADER_SIZE];
+	uint64_t pos = 0;
+	int16_t len;
 	int head;
 	int track;
 	int s;
@@ -194,7 +198,7 @@ FLOPPY_CONSTRUCT( cqm_dsk_construct )
 	pos = CQM_HEADER_SIZE + (header[0x70] << 8) + header[0x6f];
 	track = 0;
 	head = 0;
-	tag->buf = (UINT8*)malloc(tag->sector_size*tag->sector_per_track);
+	tag->buf = (uint8_t*)malloc(tag->sector_size*tag->sector_per_track);
 	do {
 		tag->track_offsets[(track<<1) + head] = pos;
 		s = 0;
@@ -231,17 +235,6 @@ FLOPPY_CONSTRUCT( cqm_dsk_construct )
 
 
 
-
-/*********************************************************************
-
-    formats/cqm_dsk.c
-
-    CopyQM disk images
-
-*********************************************************************/
-
-#include "cqm_dsk.h"
-
 cqm_format::cqm_format()
 {
 }
@@ -261,23 +254,25 @@ const char *cqm_format::extensions() const
 	return "cqm,cqi,dsk";
 }
 
-int cqm_format::identify(io_generic *io, UINT32 form_factor)
+int cqm_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
-	UINT8 h[3];
-	io_generic_read(io, h, 0, 3);
+	uint8_t h[3];
+	size_t actual;
+	io.read_at(0, h, 3, actual);
 
 	if (h[0] == 'C' && h[1] == 'Q' && h[2] == 0x14)
-		return 100;
+		return FIFID_SIGN;
 
 	return 0;
 }
 
-bool cqm_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool cqm_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
+	size_t actual;
 	const int max_size = 4*1024*1024; // 4MB ought to be large enough for any floppy
-	dynamic_buffer imagebuf(max_size);
-	UINT8 header[CQM_HEADER_SIZE];
-	io_generic_read(io, header, 0, CQM_HEADER_SIZE);
+	std::vector<uint8_t> imagebuf(max_size);
+	uint8_t header[CQM_HEADER_SIZE];
+	io.read_at(0, header, CQM_HEADER_SIZE, actual);
 
 	int sector_size      = (header[0x04] << 8) | header[0x03];
 	int sector_per_track = (header[0x11] << 8) | header[0x10];
@@ -308,6 +303,7 @@ bool cqm_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 			if (heads == 1)
 				return false; // single side ED ?
 			image->set_variant(floppy_image::DSED);
+			break;
 		default:
 			return false;
 	}
@@ -317,14 +313,16 @@ bool cqm_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	int rpm = form_factor == floppy_image::FF_8 || (form_factor == floppy_image::FF_525 && rate >= 300000) ? 360 : 300;
 	int base_cell_count = rate*60/rpm;
 
-	int cqm_size = io_generic_size(io);
-	dynamic_buffer cqmbuf(cqm_size);
-	io_generic_read(io, &cqmbuf[0], 0, cqm_size);
+	uint64_t cqm_size;
+	if (io.length(cqm_size))
+		return false;
+	std::vector<uint8_t> cqmbuf(cqm_size);
+	io.read_at(0, &cqmbuf[0], cqm_size, actual);
 
 	// decode the RLE data
 	for (int s = 0, pos = CQM_HEADER_SIZE + comment_size; pos < cqm_size; )
 	{
-		INT16 len = (cqmbuf[pos + 1] << 8) | cqmbuf[pos];
+		int16_t len = (cqmbuf[pos + 1] << 8) | cqmbuf[pos];
 		pos += 2;
 		if(len < 0)
 		{
@@ -368,7 +366,7 @@ bool cqm_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	return true;
 }
 
-bool cqm_format::save(io_generic *io, floppy_image *image)
+bool cqm_format::save(util::random_read_write &io, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
 	return false;
 }
@@ -378,4 +376,4 @@ bool cqm_format::supports_save() const
 	return false;
 }
 
-const floppy_format_type FLOPPY_CQM_FORMAT = &floppy_image_format_creator<cqm_format>;
+const cqm_format FLOPPY_CQM_FORMAT;

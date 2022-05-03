@@ -31,9 +31,14 @@
 
 *********************************************************************/
 
-#include <assert.h>
-
 #include "fdd_dsk.h"
+
+#include "ioprocs.h"
+
+#include "osdcomm.h" // little_endianize_int32
+
+#include <cstring>
+
 
 fdd_format::fdd_format()
 {
@@ -54,39 +59,41 @@ const char *fdd_format::extensions() const
 	return "fdd";
 }
 
-int fdd_format::identify(io_generic *io, UINT32 form_factor)
+int fdd_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
-	UINT8 h[7];
-	io_generic_read(io, h, 0, 7);
+	uint8_t h[7];
+	size_t actual;
+	io.read_at(0, h, 7, actual);
 
 	if (strncmp((const char *)h, "VFD1.0", 6) == 0)
-		return 100;
+		return FIFID_SIGN;
 
 	return 0;
 }
 
-bool fdd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool fdd_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
-	UINT8 hsec[0x0c];
+	uint8_t hsec[0x0c];
 
 	// sector map
-	UINT8 num_secs[160];
-	UINT8 tracks[160 * 26];
-	UINT8 heads[160 * 26];
-	UINT8 secs[160 * 26];
-	UINT8 fill_vals[160 * 26];
-	UINT32 sec_offs[160 * 26];
-	UINT8 sec_sizes[160 * 26];
+	uint8_t num_secs[160];
+	uint8_t tracks[160 * 26];
+	uint8_t heads[160 * 26];
+	uint8_t secs[160 * 26];
+	uint8_t fill_vals[160 * 26];
+	uint32_t sec_offs[160 * 26];
+	uint8_t sec_sizes[160 * 26];
 
 	int pos = 0xdc;
 
 	for (int track = 0; track < 160; track++)
 	{
-		int curr_num_sec = 0, curr_track_size = 0;
+		int curr_num_sec = 0; [[maybe_unused]] int curr_track_size = 0;
 		for (int sect = 0; sect < 26; sect++)
 		{
 			// read sector map for this sector
-			io_generic_read(io, hsec, pos, 0x0c);
+			size_t actual;
+			io.read_at(pos, hsec, 0x0c, actual);
 			pos += 0x0c;
 
 			if (hsec[0] == 0xff)    // unformatted/unused sector
@@ -97,7 +104,7 @@ bool fdd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 			secs[(track * 26) + sect] = hsec[2];
 			sec_sizes[(track * 26) + sect] = hsec[3];
 			fill_vals[(track * 26) + sect] = hsec[4];
-			sec_offs[(track * 26) + sect] = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(hsec + 0x08));
+			sec_offs[(track * 26) + sect] = little_endianize_int32(*(uint32_t *)(hsec + 0x08));
 
 			curr_track_size += (128 << hsec[3]);
 			curr_num_sec++;
@@ -107,7 +114,7 @@ bool fdd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 
 	int cell_count = form_factor == floppy_image::FF_35 ? 200000 : 166666;
 	desc_pc_sector sects[256];
-	UINT8 sect_data[65536];
+	uint8_t sect_data[65536];
 	int cur_sec_map = 0, sector_size;
 
 	for (int track = 0; track < 160; track++)
@@ -118,10 +125,11 @@ bool fdd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 			cur_sec_map = track * 26 + i;
 			sector_size = 128 << sec_sizes[cur_sec_map];
 
+			size_t actual;
 			if (sec_offs[cur_sec_map] == 0xffffffff)
 				memset(sect_data + cur_pos, fill_vals[cur_sec_map], sector_size);
 			else
-				io_generic_read(io, sect_data + cur_pos, sec_offs[cur_sec_map], sector_size);
+				io.read_at(sec_offs[cur_sec_map], sect_data + cur_pos, sector_size, actual);
 
 			sects[i].track       = tracks[cur_sec_map];
 			sects[i].head        = heads[cur_sec_map];
@@ -145,4 +153,4 @@ bool fdd_format::supports_save() const
 	return false;
 }
 
-const floppy_format_type FLOPPY_FDD_FORMAT = &floppy_image_format_creator<fdd_format>;
+const fdd_format FLOPPY_FDD_FORMAT;

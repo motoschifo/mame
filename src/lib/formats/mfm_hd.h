@@ -10,11 +10,11 @@
     February 2012: Rewritten as class
 
 *****************************************************************************/
+#ifndef MAME_FORMATS_MFM_HD_H
+#define MAME_FORMATS_MFM_HD_H
 
-#ifndef __MFMHDFMT__
-#define __MFMHDFMT__
+#pragma once
 
-#include "emu.h"
 #include "chd.h"
 
 const chd_metadata_tag MFM_HARD_DISK_METADATA_TAG = CHD_MAKE_TAG('G','D','D','I');
@@ -55,30 +55,30 @@ public:
 	// could be changed, but we do not support this (yet). These are defined
 	// in the CHD and must match those of the device. They are stored by the GDDD tag.
 	// The encoding is not stored in the CHD but is also supposed to be immutable.
-	int     cylinders;
-	int     heads;
-	int     sectors_per_track;
-	int     sector_size;
+	int     cylinders = 0;
+	int     heads = 0;
+	int     sectors_per_track = 0;
+	int     sector_size = 0;
 	mfmhd_enc_t     encoding;
 
 	// Parameters like interleave, precompensation, write current can be changed
 	// on every write operation. They are stored by the GDDI tag (first record).
-	int     interleave;
-	int     cylskew;
-	int     headskew;
-	int     write_precomp_cylinder;     // if -1, no wpcom on the disks
-	int     reduced_wcurr_cylinder;     // if -1, no rwc on the disks
+	int     interleave = 0;
+	int     cylskew = 0;
+	int     headskew = 0;
+	int     write_precomp_cylinder = 0;     // if -1, no wpcom on the disks
+	int     reduced_wcurr_cylinder = 0;     // if -1, no rwc on the disks
 
 	// Parameters for the track layout that are supposed to be the same for
 	// all tracks and that do not change (until the next reformat).
 	// Also, they do not have any influence on the CHD file.
 	// They are stored by the GDDI tag (second record).
-	int     gap1;
-	int     gap2;
-	int     gap3;
-	int     sync;
-	int     headerlen;
-	int     ecctype;        // -1 is CRC
+	int     gap1 = 0;
+	int     gap2 = 0;
+	int     gap3 = 0;
+	int     sync = 0;
+	int     headerlen = 0;
+	int     ecctype = 0;        // -1 is CRC
 
 	bool sane_rec() const
 	{
@@ -147,14 +147,14 @@ class mfmhd_image_format_t
 {
 public:
 	mfmhd_image_format_t(): m_lastbit(false), m_current_crc(0)
-		{ m_devtag = std::string("mfmhd_image_format_t"); };
-	virtual ~mfmhd_image_format_t() {};
+		{ m_devtag = std::string("mfmhd_image_format_t"); }
+	virtual ~mfmhd_image_format_t() {}
 
 	// Load the image.
-	virtual chd_error load(chd_file* chdfile, UINT16* trackimage, int tracksize, int cylinder, int head) = 0;
+	virtual std::error_condition load(chd_file* chdfile, uint16_t* trackimage, int tracksize, int cylinder, int head) = 0;
 
 	// Save the image.
-	virtual chd_error save(chd_file* chdfile, UINT16* trackimage, int tracksize, int cylinder, int head) = 0;
+	virtual std::error_condition save(chd_file* chdfile, uint16_t* trackimage, int tracksize, int cylinder, int head) = 0;
 
 	// Return the original parameters of the image
 	mfmhd_layout_params* get_initial_params() { return &m_param_old; }
@@ -179,35 +179,35 @@ protected:
 
 	mfmhd_layout_params m_param, m_param_old;
 
-	void    mfm_encode(UINT16* trackimage, int& position, UINT8 byte, int count=1);
-	void    mfm_encode_a1(UINT16* trackimage, int& position);
-	void    mfm_encode_mask(UINT16* trackimage, int& position, UINT8 byte, int count, int mask);
-	UINT8   mfm_decode(UINT16 raw);
+	void    mfm_encode(uint16_t* trackimage, int& position, uint8_t byte, int count=1);
+	void    mfm_encode_a1(uint16_t* trackimage, int& position);
+	void    mfm_encode_mask(uint16_t* trackimage, int& position, uint8_t byte, int count, int mask);
+	uint8_t   mfm_decode(uint16_t raw);
 
 	// Deliver defaults.
 	virtual int get_default(mfmhd_param_t type) =0;
 
 	// Debugging
-	void    showtrack(UINT16* enctrack, int length);
+	void    showtrack(uint16_t* enctrack, int length);
 	virtual const char* tag() { return m_devtag.c_str(); }
 };
 
 class mfmhd_generic_format : public mfmhd_image_format_t
 {
 public:
-	mfmhd_generic_format() { m_devtag = std::string("mfmhd_generic_format"); };
-	chd_error load(chd_file* chdfile, UINT16* trackimage, int tracksize, int cylinder, int head) override;
-	chd_error save(chd_file* chdfile, UINT16* trackimage, int tracksize, int cylinder, int head) override;
+	mfmhd_generic_format() { m_devtag = std::string("mfmhd_generic_format"); }
+	std::error_condition load(chd_file* chdfile, uint16_t* trackimage, int tracksize, int cylinder, int head) override;
+	std::error_condition save(chd_file* chdfile, uint16_t* trackimage, int tracksize, int cylinder, int head) override;
 
 	// Yes, we want to save all parameters
 	virtual bool save_param(mfmhd_param_t type) override { return true; }
 	virtual int get_default(mfmhd_param_t type) override;
 
 protected:
-	virtual UINT8   cylinder_to_ident(int cylinder);
+	virtual uint8_t   cylinder_to_ident(int cylinder);
 	virtual int     chs_to_lba(int cylinder, int head, int sector);
 };
 
 extern const mfmhd_format_type MFMHD_GEN_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_MFM_HD_H

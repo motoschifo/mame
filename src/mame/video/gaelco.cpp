@@ -6,10 +6,20 @@
 
   Functions to emulate the video hardware of the machine
 
+  TODO:
+  verify priority implementations
+
+  NOTE:
+  if Squash fails a protection check it will leave bad 'Insert Coin' text
+  on the screen after a continue, this is not a sprite emulation bug, the
+  machine expects a 68k clock of around 10Mhz and a refresh of around 57.4
+  to pass the protection, see notes in main driver file.
+
 ***************************************************************************/
 
 #include "emu.h"
 #include "includes/gaelco.h"
+#include "screen.h"
 
 /***************************************************************************
 
@@ -33,27 +43,16 @@
       1  | xxxxxxxx -------- | not used
 */
 
-TILE_GET_INFO_MEMBER(gaelco_state::get_tile_info_gaelco_screen0)
+template<int Layer>
+TILE_GET_INFO_MEMBER(gaelco_state::get_tile_info)
 {
-	int data = m_videoram[tile_index << 1];
-	int data2 = m_videoram[(tile_index << 1) + 1];
+	int data = m_videoram[(Layer * 0x1000 / 2) + (tile_index << 1)];
+	int data2 = m_videoram[(Layer * 0x1000 / 2) + (tile_index << 1) + 1];
 	int code = ((data & 0xfffc) >> 2);
 
 	tileinfo.category = (data2 >> 6) & 0x03;
 
-	SET_TILE_INFO_MEMBER(1, 0x4000 + code, data2 & 0x3f, TILE_FLIPYX(data & 0x03));
-}
-
-
-TILE_GET_INFO_MEMBER(gaelco_state::get_tile_info_gaelco_screen1)
-{
-	int data = m_videoram[(0x1000 / 2) + (tile_index << 1)];
-	int data2 = m_videoram[(0x1000 / 2) + (tile_index << 1) + 1];
-	int code = ((data & 0xfffc) >> 2);
-
-	tileinfo.category = (data2 >> 6) & 0x03;
-
-	SET_TILE_INFO_MEMBER(1, 0x4000 + code, data2 & 0x3f, TILE_FLIPYX(data & 0x03));
+	tileinfo.set(1, 0x4000 + code, data2 & 0x3f, TILE_FLIPYX(data & 0x03));
 }
 
 /***************************************************************************
@@ -62,10 +61,12 @@ TILE_GET_INFO_MEMBER(gaelco_state::get_tile_info_gaelco_screen1)
 
 ***************************************************************************/
 
-WRITE16_MEMBER(gaelco_state::gaelco_vram_w)
+void gaelco_state::vram_w(offs_t offset, u16 data, u16 mem_mask)
 {
+	uint16_t old = m_videoram[offset];
 	COMBINE_DATA(&m_videoram[offset]);
-	m_tilemap[offset >> 11]->mark_tile_dirty(((offset << 1) & 0x0fff) >> 2);
+	if (old != m_videoram[offset])
+		m_tilemap[offset >> 11]->mark_tile_dirty(((offset << 1) & 0x0fff) >> 2);
 }
 
 /***************************************************************************
@@ -76,18 +77,30 @@ WRITE16_MEMBER(gaelco_state::gaelco_vram_w)
 
 VIDEO_START_MEMBER(gaelco_state,bigkarnk)
 {
-	m_tilemap[0] = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(gaelco_state::get_tile_info_gaelco_screen0),this), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
-	m_tilemap[1] = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(gaelco_state::get_tile_info_gaelco_screen1),this), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+	m_tilemap[0] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<0>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+	m_tilemap[1] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<1>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
 
-	m_tilemap[0]->set_transmask(0, 0xff01, 0x00ff); /* pens 1-7 opaque, pens 0, 8-15 transparent */
-	m_tilemap[1]->set_transmask(0, 0xff01, 0x00ff); /* pens 1-7 opaque, pens 0, 8-15 transparent */
+	m_tilemap[0]->set_transmask(0, 0xff01, 0x00ff); // pens 1-7 opaque, pens 0, 8-15 transparent
+	m_tilemap[1]->set_transmask(0, 0xff01, 0x00ff); // pens 1-7 opaque, pens 0, 8-15 transparent
+}
+
+VIDEO_START_MEMBER(gaelco_state,squash)
+{
+	m_tilemap[0] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<0>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+	m_tilemap[1] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<1>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+
+	m_tilemap[0]->set_transmask(0, 0xff01, 0x00ff); // pens 1-7 opaque, pens 0, 8-15 transparent
+	m_tilemap[1]->set_transmask(0, 0xff01, 0x00ff); // pens 1-7 opaque, pens 0, 8-15 transparent
+
+	m_sprite_palette_force_high = 0x3c;
 }
 
 VIDEO_START_MEMBER(gaelco_state,maniacsq)
 {
-	m_tilemap[0] = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(gaelco_state::get_tile_info_gaelco_screen0),this), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
-	m_tilemap[1] = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(gaelco_state::get_tile_info_gaelco_screen1),this), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+	m_tilemap[0] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<0>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
+	m_tilemap[1] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(gaelco_state::get_tile_info<1>)), TILEMAP_SCAN_ROWS, 16, 16, 32, 32);
 
+	// it is possible Maniac Square hardware also has more complex priority handling, but does not use it
 	m_tilemap[0]->set_transparent_pen(0);
 	m_tilemap[1]->set_transparent_pen(0);
 }
@@ -139,13 +152,18 @@ void gaelco_state::draw_sprites( screen_device &screen, bitmap_ind16 &bitmap, co
 		int yflip = attr & 0x40;
 		int spr_size, pri_mask;
 
-		/* palettes 0x38-0x3f are used for high priority sprites in Big Karnak */
-		if (color >= 0x38)
+		/* palettes 0x38-0x3f are used for high priority sprites in Big Karnak
+		   the same logic in Squash causes player sprites to be drawn over the
+		   pixels that form the glass play area.
+
+		   Is this accurate, or just exposing a different flaw in the priority
+		   handling? */
+		if (color >= m_sprite_palette_force_high)
 			priority = 4;
 
 		switch (priority)
 		{
-			case 0: pri_mask = 0xff00; break;
+			case 0: pri_mask = 0xff00; break;  // above everything?
 			case 1: pri_mask = 0xff00 | 0xf0f0; break;
 			case 2: pri_mask = 0xff00 | 0xf0f0 | 0xcccc; break;
 			case 3: pri_mask = 0xff00 | 0xf0f0 | 0xcccc | 0xaaaa; break;
@@ -183,7 +201,7 @@ void gaelco_state::draw_sprites( screen_device &screen, bitmap_ind16 &bitmap, co
 
 ***************************************************************************/
 
-UINT32 gaelco_state::screen_update_maniacsq(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t gaelco_state::screen_update_maniacsq(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	/* set scroll registers */
 	m_tilemap[0]->set_scrolly(0, m_vregs[0]);
@@ -210,7 +228,51 @@ UINT32 gaelco_state::screen_update_maniacsq(screen_device &screen, bitmap_ind16 
 	return 0;
 }
 
-UINT32 gaelco_state::screen_update_bigkarnk(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t gaelco_state::screen_update_thoop(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	/* set scroll registers */
+	m_tilemap[0]->set_scrolly(0, m_vregs[0]);
+	m_tilemap[0]->set_scrollx(0, m_vregs[1] + 4);
+	m_tilemap[1]->set_scrolly(0, m_vregs[2]);
+	m_tilemap[1]->set_scrollx(0, m_vregs[3]);
+
+	screen.priority().fill(0, cliprect);
+	bitmap.fill(0, cliprect);
+
+	// the priority handling differs from Big Karnak (or the Big Karnak implementation isn't correct)
+	// the games only make minimal use of the priority features.
+
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 3, 0);
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 3, 0);
+
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 3, 0);
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 3, 0);
+
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 2, 1);
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 2, 1);
+
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 2, 1);
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 2, 1);
+
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 1, 2);
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 1, 2);
+
+	// sprites are sandwiched in here
+
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 1, 4);
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 1, 4);
+
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 0, 8);
+	m_tilemap[1]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 0, 8);
+
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER1 | 0, 8);
+	m_tilemap[0]->draw(screen, bitmap, cliprect, TILEMAP_DRAW_LAYER0 | 0, 8);
+
+	draw_sprites(screen, bitmap, cliprect);
+	return 0;
+}
+
+uint32_t gaelco_state::screen_update_bigkarnk(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	/* set scroll registers */
 	m_tilemap[0]->set_scrolly(0, m_vregs[0]);

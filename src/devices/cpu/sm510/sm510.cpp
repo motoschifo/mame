@@ -2,375 +2,164 @@
 // copyright-holders:hap
 /*
 
-  Sharp SM510 MCU family - known chips:
-  - SM510: 2.7Kx8 ROM, 128x4 RAM(32x4 for LCD)
-  - SM511: 4Kx8 ROM, 128x4 RAM(32x4 for LCD), melody controller
-  - SM512: 4Kx8 ROM, 128x4 RAM(48x4 for LCD), melody controller
-
-  Other chips that may be in the same family, investigate more when one of
-  them needs to get emulated: SM500, SM530/31, SM4A, SM3903, ..
-
-  References:
-  - 1990 Sharp Microcomputers Data Book
-  - 1996 Sharp Microcomputer Databook
-
-  TODO:
-  - proper support for LFSR program counter in debugger
-  - callback for lcd screen as MAME bitmap (when needed)
-  - LCD bs pin blink mode via Y register (0.5s off, 0.5s on)
-  - LB/SBM is correct?
-  - SM511 unknown opcodes
+  Sharp SM510 MCU core implementation
 
 */
 
+#include "emu.h"
 #include "sm510.h"
-#include "debugger.h"
+#include "sm510d.h"
 
 
-//-------------------------------------------------
-//  device_start - device-specific startup
-//-------------------------------------------------
+// MCU types
+DEFINE_DEVICE_TYPE(SM510, sm510_device, "sm510", "Sharp SM510") // 2.7Kx8 ROM, 128x4 RAM(32x4 for LCD)
 
-enum
+
+// internal memory maps
+void sm510_device::program_2_7k(address_map &map)
 {
-	SM510_PC=1, SM510_ACC, SM510_BL, SM510_BM,
-	SM510_C, SM510_W
-};
+	map(0x0000, 0x02bf).rom();
+	map(0x0400, 0x06bf).rom();
+	map(0x0800, 0x0abf).rom();
+	map(0x0c00, 0x0ebf).rom();
+}
 
-void sm510_base_device::device_start()
+void sm510_device::data_96_32x4(address_map &map)
 {
-	m_program = &space(AS_PROGRAM);
-	m_data = &space(AS_DATA);
-	m_prgmask = (1 << m_prgwidth) - 1;
-	m_datamask = (1 << m_datawidth) - 1;
-
-	// resolve callbacks
-	m_read_k.resolve_safe(0);
-	m_read_ba.resolve_safe(1);
-	m_read_b.resolve_safe(1);
-	m_write_s.resolve_safe();
-	m_write_r.resolve_safe();
-
-	m_write_sega.resolve_safe();
-	m_write_segb.resolve_safe();
-	m_write_segbs.resolve_safe();
-	m_write_segc.resolve_safe();
-
-	// zerofill
-	memset(m_stack, 0, sizeof(m_stack));
-	m_pc = 0;
-	m_prev_pc = 0;
-	m_op = 0;
-	m_prev_op = 0;
-	m_param = 0;
-	m_acc = 0;
-	m_bl = 0;
-	m_bm = 0;
-	m_c = 0;
-	m_skip = false;
-	m_w = 0;
-	m_r = 0;
-	m_div = 0;
-	m_1s = false;
-	m_k_active = false;
-	m_l = 0;
-	m_x = 0;
-	m_y = 0;
-	m_bp = false;
-	m_bc = false;
-	m_halt = false;
-	m_melody_rd = 0;
-	m_melody_step_count = 0;
-	m_melody_duty_count = 0;
-	m_melody_duty_index = 0;
-	m_melody_address = 0;
-
-	// register for savestates
-	save_item(NAME(m_stack));
-	save_item(NAME(m_pc));
-	save_item(NAME(m_prev_pc));
-	save_item(NAME(m_op));
-	save_item(NAME(m_prev_op));
-	save_item(NAME(m_param));
-	save_item(NAME(m_acc));
-	save_item(NAME(m_bl));
-	save_item(NAME(m_bm));
-	save_item(NAME(m_c));
-	save_item(NAME(m_skip));
-	save_item(NAME(m_w));
-	save_item(NAME(m_r));
-	save_item(NAME(m_div));
-	save_item(NAME(m_1s));
-	save_item(NAME(m_k_active));
-	save_item(NAME(m_l));
-	save_item(NAME(m_x));
-	save_item(NAME(m_y));
-	save_item(NAME(m_bp));
-	save_item(NAME(m_bc));
-	save_item(NAME(m_halt));
-	save_item(NAME(m_melody_rd));
-	save_item(NAME(m_melody_step_count));
-	save_item(NAME(m_melody_duty_count));
-	save_item(NAME(m_melody_duty_index));
-	save_item(NAME(m_melody_address));
-
-	// register state for debugger
-	state_add(SM510_PC,  "PC",  m_pc).formatstr("%04X");
-	state_add(SM510_ACC, "ACC", m_acc).formatstr("%01X");
-	state_add(SM510_BL,  "BL",  m_bl).formatstr("%01X");
-	state_add(SM510_BM,  "BM",  m_bm).formatstr("%01X");
-	state_add(SM510_C,   "C",   m_c).formatstr("%01X");
-	state_add(SM510_W,   "W",   m_w).formatstr("%02X");
-
-	state_add(STATE_GENPC, "curpc", m_pc).formatstr("%04X").noshow();
-	state_add(STATE_GENFLAGS, "GENFLAGS", m_c).formatstr("%1s").noshow();
-
-	m_icountptr = &m_icount;
-
-	// init peripherals
-	init_divider();
-	init_lcd_driver();
-	init_melody();
+	map(0x00, 0x5f).ram();
+	map(0x60, 0x6f).ram().share("lcd_ram_a");
+	map(0x70, 0x7f).ram().share("lcd_ram_b");
 }
 
 
+// device definitions
+sm510_device::sm510_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock) :
+	sm510_base_device(mconfig, SM510, tag, owner, clock, 2 /* stack levels */, 12 /* prg width */, address_map_constructor(FUNC(sm510_device::program_2_7k), this), 7 /* data width */, address_map_constructor(FUNC(sm510_device::data_96_32x4), this))
+{ }
 
-//-------------------------------------------------
-//  device_reset - device-specific reset
-//-------------------------------------------------
 
-void sm510_base_device::device_reset()
+// disasm
+std::unique_ptr<util::disasm_interface> sm510_device::create_disassembler()
 {
-	m_skip = false;
-	m_halt = false;
-	m_op = m_prev_op = 0;
-	do_branch(3, 7, 0);
-	m_prev_pc = m_pc;
-
-	// lcd is on (Bp on, BC off, bs(y) off)
-	m_bp = true;
-	m_bc = false;
-	m_y = 0;
-
-	m_r = 0;
-	m_write_r(0, 0, 0xff);
-	m_melody_rd &= ~1;
+	return std::make_unique<sm510_disassembler>();
 }
 
 
-
 //-------------------------------------------------
-//  lcd driver
-//-------------------------------------------------
-
-inline UINT16 sm510_base_device::get_lcd_row(int column, UINT8* ram)
-{
-	// output 0 if lcd blackpate/bleeder is off, or in case row doesn't exist
-	if (ram == nullptr || m_bc || !m_bp)
-		return 0;
-
-	UINT16 rowdata = 0;
-	for (int i = 0; i < 0x10; i++)
-		rowdata |= (ram[i] >> column & 1) << i;
-
-	return rowdata;
-}
-
-TIMER_CALLBACK_MEMBER(sm510_base_device::lcd_timer_cb)
-{
-	// 4 columns
-	for (int h = 0; h < 4; h++)
-	{
-		// 16 segments per row from upper part of RAM
-		m_write_sega(h | SM510_PORT_SEGA, get_lcd_row(h, m_lcd_ram_a), 0xffff);
-		m_write_segb(h | SM510_PORT_SEGB, get_lcd_row(h, m_lcd_ram_b), 0xffff);
-		m_write_segc(h | SM510_PORT_SEGC, get_lcd_row(h, m_lcd_ram_c), 0xffff);
-
-		// bs output from L/X and Y regs
-		UINT8 bs = (m_l >> h & 1) | ((m_x*2) >> h & 2);
-		m_write_segbs(h | SM510_PORT_SEGBS, (m_bc || !m_bp) ? 0 : bs, 0xffff);
-	}
-
-	// schedule next timeout
-	m_lcd_timer->adjust(attotime::from_ticks(0x200, unscaled_clock()));
-}
-
-void sm510_base_device::init_lcd_driver()
-{
-	// note: in reality, this timer runs at high frequency off the main divider, strobing one segment at a time
-	m_lcd_timer = machine().scheduler().timer_alloc(timer_expired_delegate(FUNC(sm510_base_device::lcd_timer_cb), this));
-	m_lcd_timer->adjust(attotime::from_ticks(0x200, unscaled_clock())); // 64hz default
-}
-
-
-
-//-------------------------------------------------
-//  melody controller
+//  buzzer controller
 //-------------------------------------------------
 
-void sm510_base_device::clock_melody()
+void sm510_device::clock_melody()
 {
-	if (!m_melody_rom)
-		return;
+	u8 out = 0;
 
-	// tone cycle table (SM511/SM512 datasheet fig.5)
-	// cmd 0 = cmd, 1 = stop, > 13 = illegal(unknown)
-	static const UINT8 lut_tone_cycles[4*16] =
+	if (m_r_mask_option == RMASK_DIRECT)
 	{
-		0, 0, 7, 8, 8, 9, 9, 10,11,11,12,13,14,14, 7*2, 8*2,
-		0, 0, 8, 8, 9, 9, 10,11,11,12,13,13,14,15, 8*2, 8*2,
-		0, 0, 8, 8, 9, 9, 10,10,11,12,12,13,14,15, 8*2, 8*2,
-		0, 0, 8, 9, 9, 10,10,11,11,12,13,14,14,15, 8*2, 9*2
-	};
-
-	UINT8 cmd = m_melody_rom[m_melody_address] & 0x3f;
-	UINT8 out = 0;
-
-	// clock duty cycle if tone is active
-	if ((cmd & 0xf) > 1)
-	{
-		out = m_melody_duty_index & m_melody_rd & 1;
-		m_melody_duty_count++;
-		int index = m_melody_duty_index << 4 | (cmd & 0xf);
-		int shift = ~cmd >> 4 & 1; // OCT
-
-		if (m_melody_duty_count >= (lut_tone_cycles[index] << shift))
-		{
-			m_melody_duty_count = 0;
-			m_melody_duty_index = (m_melody_duty_index + 1) & 3;
-		}
-	}
-	else if ((cmd & 0xf) == 1)
-	{
-		// rest tell signal
-		m_melody_rd |= 2;
-	}
-
-	// clock time base on F8(d7)
-	if ((m_div & 0x7f) == 0)
-	{
-		UINT8 mask = (cmd & 0x20) ? 0x1f : 0x0f;
-		m_melody_step_count = (m_melody_step_count + 1) & mask;
-
-		if (m_melody_step_count == 0)
-			m_melody_address++;
-	}
-
-	// output to R pin
-	if (out != m_r)
-	{
-		m_write_r(0, out, 0xff);
-		m_r = out;
-	}
-}
-
-void sm510_base_device::init_melody()
-{
-	if (!m_melody_rom)
-		return;
-
-	// verify melody rom
-	for (int i = 0; i < 0x100; i++)
-	{
-		UINT8 data = m_melody_rom[i];
-		if (data & 0xc0 || (data & 0x0f) > 13)
-			logerror("%s unknown melody ROM data $%02X at $%02X\n", tag(), data, i);
-	}
-}
-
-
-
-//-------------------------------------------------
-//  interrupt/divider
-//-------------------------------------------------
-
-bool sm510_base_device::wake_me_up()
-{
-	// in halt mode, wake up after 1S signal or K input
-	if (m_k_active || m_1s)
-	{
-		// note: official doc warns that Bl/Bm and the stack are undefined
-		// after waking up, but we leave it unchanged
-		m_halt = false;
-		do_branch(1, 0, 0);
-
-		standard_irq_callback(0);
-		return true;
+		// direct output
+		out = m_r & 3;
 	}
 	else
-		return false;
+	{
+		// from divider, R2 inverse phase
+		out = m_div >> m_r_mask_option & 1;
+		out |= (out << 1 ^ 2);
+		out &= m_r;
+	}
+
+	// output to R pins
+	if (out != m_r_out)
+	{
+		m_write_r(out);
+		m_r_out = out;
+	}
 }
-
-void sm510_base_device::execute_set_input(int line, int state)
-{
-	if (line != SM510_INPUT_LINE_K)
-		return;
-
-	// set K input lines active state
-	m_k_active = (state != 0);
-}
-
-TIMER_CALLBACK_MEMBER(sm510_base_device::div_timer_cb)
-{
-	m_div = (m_div + 1) & 0x7fff;
-
-	// 1S signal on overflow(falling edge of f1)
-	if (m_div == 0)
-		m_1s = true;
-
-	clock_melody();
-}
-
-void sm510_base_device::init_divider()
-{
-	m_div_timer = machine().scheduler().timer_alloc(timer_expired_delegate(FUNC(sm510_base_device::div_timer_cb), this));
-	m_div_timer->adjust(attotime::from_ticks(1, unscaled_clock()), 0, attotime::from_ticks(1, unscaled_clock()));
-}
-
 
 
 //-------------------------------------------------
 //  execute
 //-------------------------------------------------
 
-void sm510_base_device::increment_pc()
+void sm510_device::execute_one()
 {
-	// PL(program counter low 6 bits) is a simple LFSR: newbit = (bit0==bit1)
-	// PU,PM(high bits) specify page, PL specifies steps within page
-	int feed = ((m_pc >> 1 ^ m_pc) & 1) ? 0 : 0x20;
-	m_pc = feed | (m_pc >> 1 & 0x1f) | (m_pc & ~0x3f);
+	switch (m_op & 0xf0)
+	{
+		case 0x20: op_lax(); break;
+		case 0x30: op_adx(); break;
+		case 0x40: op_lb(); break;
+
+		case 0x80: case 0x90: case 0xa0: case 0xb0:
+			op_t(); break;
+		case 0xc0: case 0xd0: case 0xe0: case 0xf0:
+			op_tm(); break;
+
+		default:
+			switch (m_op & 0xfc)
+			{
+		case 0x04: op_rm(); break;
+		case 0x0c: op_sm(); break;
+		case 0x10: op_exc(); break;
+		case 0x14: op_exci(); break;
+		case 0x18: op_lda(); break;
+		case 0x1c: op_excd(); break;
+		case 0x54: op_tmi(); break;
+		case 0x70: case 0x74: case 0x78: op_tl(); break;
+		case 0x7c: op_tml(); break;
+
+		default:
+			switch (m_op)
+			{
+		case 0x00: op_skip(); break;
+		case 0x01: op_atbp(); break;
+		case 0x02: op_sbm(); break;
+		case 0x03: op_atpl(); break;
+		case 0x08: op_add(); break;
+		case 0x09: op_add11(); break;
+		case 0x0a: op_coma(); break;
+		case 0x0b: op_exbla(); break;
+
+		case 0x51: op_tb(); break;
+		case 0x52: op_tc(); break;
+		case 0x53: op_tam(); break;
+		case 0x58: op_tis(); break;
+		case 0x59: op_atl(); break;
+		case 0x5a: op_ta0(); break;
+		case 0x5b: op_tabl(); break;
+		case 0x5d: op_cend(); break;
+		case 0x5e: op_tal(); break;
+		case 0x5f: op_lbl(); break;
+
+		case 0x60: op_atfc(); break;
+		case 0x61: op_atr(); break;
+		case 0x62: op_wr(); break;
+		case 0x63: op_ws(); break;
+		case 0x64: op_incb(); break;
+		case 0x65: op_idiv(); break;
+		case 0x66: op_rc(); break;
+		case 0x67: op_sc(); break;
+		case 0x68: op_tf1(); break;
+		case 0x69: op_tf4(); break;
+		case 0x6a: op_kta(); break;
+		case 0x6b: op_rot(); break;
+		case 0x6c: op_decb(); break;
+		case 0x6d: op_bdc(); break;
+		case 0x6e: op_rtn0(); break;
+		case 0x6f: op_rtn1(); break;
+
+		default: op_illegal(); break;
+			}
+			break; // 0xff
+
+			}
+			break; // 0xfc
+
+	} // big switch
+
+	// BM high bit is only valid for 1 step
+	m_bmask = (m_op == 0x02) ? 0x40 : 0;
 }
 
-void sm510_base_device::execute_run()
+bool sm510_device::op_argument()
 {
-	while (m_icount > 0)
-	{
-		m_icount--;
-
-		if (m_halt && !wake_me_up())
-		{
-			// got nothing to do
-			m_icount = 0;
-			return;
-		}
-
-		// remember previous state
-		m_prev_op = m_op;
-		m_prev_pc = m_pc;
-
-		// fetch next opcode
-		debugger_instruction_hook(this, m_pc);
-		m_op = m_program->read_byte(m_pc);
-		increment_pc();
-		get_opcode_param();
-
-		// handle opcode if it's not skipped
-		if (m_skip)
-		{
-			m_skip = false;
-			m_op = 0; // fake nop
-		}
-		else
-			execute_one();
-	}
+	// LBL, TL, TML opcodes are 2 bytes
+	return m_op == 0x5f || (m_op & 0xf0) == 0x70;
 }

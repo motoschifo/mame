@@ -8,8 +8,12 @@
 
 *********************************************************************/
 
-#include <assert.h>
 #include "pc98fdi_dsk.h"
+
+#include "ioprocs.h"
+
+#include "osdcomm.h" // little_endianize_int32
+
 
 pc98fdi_format::pc98fdi_format()
 {
@@ -30,47 +34,53 @@ const char *pc98fdi_format::extensions() const
 	return "fdi";
 }
 
-int pc98fdi_format::identify(io_generic *io, UINT32 form_factor)
+int pc98fdi_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
-	UINT64 size = io_generic_size(io);
-	UINT8 h[32];
+	uint64_t size;
+	if(io.length(size))
+		return 0;
 
-	io_generic_read(io, h, 0, 32);
-	UINT32 hsize = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0x8));
-	UINT32 psize = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0xc));
-	UINT32 ssize = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0x10));
-	UINT32 scnt = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0x14));
-	UINT32 sides = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0x18));
-	UINT32 ntrk = LITTLE_ENDIANIZE_INT32(*(UINT32 *) (h + 0x1c));
+	uint8_t h[32];
+	size_t actual;
+	io.read_at(0, h, 32, actual);
+
+	uint32_t const hsize = little_endianize_int32(*(uint32_t *) (h + 0x8));
+	uint32_t const psize = little_endianize_int32(*(uint32_t *) (h + 0xc));
+	uint32_t const ssize = little_endianize_int32(*(uint32_t *) (h + 0x10));
+	uint32_t const scnt = little_endianize_int32(*(uint32_t *) (h + 0x14));
+	uint32_t const sides = little_endianize_int32(*(uint32_t *) (h + 0x18));
+	uint32_t const ntrk = little_endianize_int32(*(uint32_t *) (h + 0x1c));
 	if(size == hsize + psize && psize == ssize*scnt*sides*ntrk)
-		return 100;
+		return FIFID_STRUCT;
 
 	return 0;
 }
 
-bool pc98fdi_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool pc98fdi_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
-	UINT8 h[32];
+	size_t actual;
 
-	io_generic_read(io, h, 0, 32);
+	uint8_t h[32];
+	io.read_at(0, h, 32, actual);
 
-	UINT32 hsize         = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x8));
-	UINT32 sector_size   = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x10));
-	UINT32 sector_count  = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x14));
-	UINT32 head_count    = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x18));
-	UINT32 track_count   = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x1c));
+	uint32_t const hsize         = little_endianize_int32(*(uint32_t *)(h+0x8));
+	uint32_t const sector_size   = little_endianize_int32(*(uint32_t *)(h+0x10));
+	uint32_t const sector_count  = little_endianize_int32(*(uint32_t *)(h+0x14));
+	uint32_t const head_count    = little_endianize_int32(*(uint32_t *)(h+0x18));
+	uint32_t const track_count   = little_endianize_int32(*(uint32_t *)(h+0x1c));
 
-	int cell_count = form_factor == floppy_image::FF_35 ? 200000 : 166666;
+	int const cell_count = form_factor == floppy_image::FF_35 ? 200000 : 166666;
 
-	int ssize;
-	for(ssize=0; (128 << ssize) < sector_size; ssize++) {};
+	int ssize = 0;
+	while ((128 << ssize) < sector_size)
+		ssize++;
 
 	desc_pc_sector sects[256];
-	UINT8 sect_data[65536];
+	uint8_t sect_data[65536];
 
 	for(int track=0; track < track_count; track++)
 		for(int head=0; head < head_count; head++) {
-			io_generic_read(io, sect_data, hsize + sector_size*sector_count*(track*head_count + head), sector_size*sector_count);
+			io.read_at(hsize + sector_size*sector_count*(track*head_count + head), sect_data, sector_size*sector_count, actual);
 
 			for(int i=0; i<sector_count; i++) {
 				sects[i].track       = track;
@@ -94,4 +104,4 @@ bool pc98fdi_format::supports_save() const
 	return false;
 }
 
-const floppy_format_type FLOPPY_PC98FDI_FORMAT = &floppy_image_format_creator<pc98fdi_format>;
+const pc98fdi_format FLOPPY_PC98FDI_FORMAT;

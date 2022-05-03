@@ -9,51 +9,105 @@
 #include "emu.h"
 
 #include "slider.h"
+#include "../frontend/mame/ui/slider.h"
 
-bgfx_slider::bgfx_slider(slider_type type, std::string name, std::string description, void *defaults, void *min, void *max)
-	: m_type(type)
-	, m_name(name)
+bgfx_slider::bgfx_slider(running_machine &machine, std::string name, float min, float def, float max, float step, slider_type type, screen_type screen, std::string format, std::string description, std::vector<std::string>& strings)
+	: m_name(name)
+	, m_step(step)
+	, m_type(type)
+	, m_screen_type(screen)
+	, m_format(format)
 	, m_description(description)
+	, m_machine(machine)
 {
-	m_data = global_alloc_array_clear<char>(storage_size(type));
-	m_min = global_alloc_array_clear<char>(storage_size(type));
-	m_max = global_alloc_array_clear<char>(storage_size(type));
-	memcpy(m_data, defaults, size(type));
-	memcpy(m_min, min, size(type));
-	memcpy(m_max, max, size(type));
+	m_min = min;
+	m_default = def;
+	m_max = max;
+	m_value = def;
+
+	for (const std::string &string : strings)
+	{
+		m_strings.push_back(string);
+	}
+
+	m_slider_state = create_core_slider();
 }
 
 bgfx_slider::~bgfx_slider()
 {
-	global_free(m_data);
-	global_free(m_min);
-	global_free(m_max);
 }
 
-size_t bgfx_slider::storage_size(slider_type type)
+void bgfx_slider::import(float val)
 {
-	switch(type)
+	m_value = val;
+	update(nullptr, int32_t(floor(m_value / m_step + 0.5f)));
+}
+
+std::unique_ptr<slider_state> bgfx_slider::create_core_slider()
+{
+	int32_t minval = int32_t(floor(m_min / m_step + 0.5f));
+	int32_t defval = int32_t(floor(m_default / m_step + 0.5f));
+	int32_t maxval = int32_t(floor(m_max / m_step + 0.5f));
+	int32_t incval = int32_t(floor(m_step / m_step + 0.5f));
+
+	using namespace std::placeholders;
+	return std::make_unique<slider_state>(m_description, minval, defval, maxval, incval, std::bind(&bgfx_slider::update, this, _1, _2));
+}
+
+int32_t bgfx_slider::update(std::string *str, int32_t newval)
+{
+	switch (m_type)
 	{
+		case SLIDER_INT_ENUM:
+		{
+			if (newval != SLIDER_NOCHANGE)
+			{
+				m_value = float(newval);
+			}
+			if (str != nullptr)
+			{
+				*str = string_format(m_format, m_strings[as_int()]);
+			}
+			return as_int();
+		}
+
 		case SLIDER_INT:
-			return 1 * sizeof(int);
-		case SLIDER_BOOL:
-		case SLIDER_FLOAT:
-		case SLIDER_COLOR:
-		case SLIDER_VEC2:
-			return 4 * sizeof(float);
+		{
+			if (newval != SLIDER_NOCHANGE)
+			{
+				m_value = float(newval);
+			}
+			if (str != nullptr)
+			{
+				*str = string_format(m_format, as_int());
+			}
+			return as_int();
+		}
+
 		default:
-			return 0;
+		{
+			auto *val_ptr = reinterpret_cast<float *>(&m_value);
+			if (newval != SLIDER_NOCHANGE)
+			{
+				*val_ptr = float(newval) * m_step;
+			}
+			if (str != nullptr)
+			{
+				*str = string_format(m_format, *val_ptr);
+			}
+			return int32_t(floor(*val_ptr / m_step + 0.5f));
+		}
 	}
+	return 0;
 }
 
-size_t bgfx_slider::size(slider_type type)
+size_t bgfx_slider::get_size_for_type(slider_type type)
 {
 	switch(type)
 	{
-		case SLIDER_INT:
-			return sizeof(int);
-		case SLIDER_BOOL:
+		case SLIDER_INT_ENUM:
 		case SLIDER_FLOAT:
+		case SLIDER_INT:
 			return sizeof(float);
 		case SLIDER_COLOR:
 			return sizeof(float) * 3;

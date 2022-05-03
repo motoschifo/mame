@@ -8,57 +8,75 @@
 
 *********************************************************************/
 
+#include "emu.h"
 #include "a2dx1.h"
-#include "includes/apple2.h"
+
 #include "sound/dac.h"
 
-/***************************************************************************
-    PARAMETERS
-***************************************************************************/
+#include "speaker.h"
+
+
+namespace {
 
 //**************************************************************************
-//  GLOBAL VARIABLES
+//  TYPE DEFINITIONS
 //**************************************************************************
 
-const device_type A2BUS_DX1 = &device_creator<a2bus_dx1_device>;
+class a2bus_dx1_device:
+	public device_t,
+	public device_a2bus_card_interface
+{
+public:
+	// construction/destruction
+	a2bus_dx1_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-#define DAC_TAG         "dac"
+protected:
+	a2bus_dx1_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
-MACHINE_CONFIG_FRAGMENT( a2dx1 )
-	MCFG_SPEAKER_STANDARD_MONO("dx1spkr")
-	MCFG_SOUND_ADD(DAC_TAG, DAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "dx1spkr", 1.00)
-MACHINE_CONFIG_END
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+
+	// overrides of standard a2bus slot functions
+	virtual uint8_t read_c0nx(uint8_t offset) override;
+	virtual void write_c0nx(uint8_t offset, uint8_t data) override;
+	virtual bool take_c800() override { return false; }
+
+	required_device<dac_byte_interface> m_dac;
+	required_device<dac_byte_interface> m_dacvol;
+};
 
 /***************************************************************************
     FUNCTION PROTOTYPES
 ***************************************************************************/
 
 //-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-machine_config_constructor a2bus_dx1_device::device_mconfig_additions() const
+void a2bus_dx1_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( a2dx1 );
+	SPEAKER(config, "speaker").front_center();
+	DAC_8BIT_R2R(config, m_dac, 0).add_route(ALL_OUTPUTS, "speaker", 0.5); // unknown DAC
+	DAC_8BIT_R2R(config, m_dacvol, 0)
+		.set_output_range(0, 1)
+		.add_route(0, "dac", 1.0, DAC_INPUT_RANGE_HI)
+		.add_route(0, "dac", -1.0, DAC_INPUT_RANGE_LO); // unknown DAC
 }
 
 //**************************************************************************
 //  LIVE DEVICE
 //**************************************************************************
 
-a2bus_dx1_device::a2bus_dx1_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source) :
-	device_t(mconfig, type, name, tag, owner, clock, shortname, source),
+a2bus_dx1_device::a2bus_dx1_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, type, tag, owner, clock),
 	device_a2bus_card_interface(mconfig, *this),
-	m_dac(*this, DAC_TAG), m_volume(0), m_lastdac(0)
+	m_dac(*this, "dac"),
+	m_dacvol(*this, "dacvol")
 {
 }
 
-a2bus_dx1_device::a2bus_dx1_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	device_t(mconfig, A2BUS_DX1, "Decillonix DX-1", tag, owner, clock, "a2dx1", __FILE__),
-	device_a2bus_card_interface(mconfig, *this),
-	m_dac(*this, DAC_TAG), m_volume(0), m_lastdac(0)
+a2bus_dx1_device::a2bus_dx1_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	a2bus_dx1_device(mconfig, A2BUS_DX1, tag, owner, clock)
 {
 }
 
@@ -68,19 +86,9 @@ a2bus_dx1_device::a2bus_dx1_device(const machine_config &mconfig, const char *ta
 
 void a2bus_dx1_device::device_start()
 {
-	// set_a2bus_device makes m_slot valid
-	set_a2bus_device();
-
-	save_item(NAME(m_volume));
-	save_item(NAME(m_lastdac));
 }
 
-void a2bus_dx1_device::device_reset()
-{
-	m_volume = m_lastdac = 0;
-}
-
-UINT8 a2bus_dx1_device::read_c0nx(address_space &space, UINT8 offset)
+uint8_t a2bus_dx1_device::read_c0nx(uint8_t offset)
 {
 	switch (offset)
 	{
@@ -97,23 +105,25 @@ UINT8 a2bus_dx1_device::read_c0nx(address_space &space, UINT8 offset)
 	return 0xff;
 }
 
-void a2bus_dx1_device::write_c0nx(address_space &space, UINT8 offset, UINT8 data)
+void a2bus_dx1_device::write_c0nx(uint8_t offset, uint8_t data)
 {
 	switch (offset)
 	{
-		case 5: // volume
-			m_volume = data;
-			m_dac->write_unsigned16(data*m_lastdac);
+		case 5:
+			m_dacvol->write(data);
 			break;
 
 		case 6:
-			m_lastdac = data;
-			m_dac->write_unsigned16(data*m_volume);
+			m_dac->write(data);
 			break;
 	}
 }
 
-bool a2bus_dx1_device::take_c800()
-{
-	return false;
-}
+} // anonymous namespace
+
+
+//**************************************************************************
+//  GLOBAL VARIABLES
+//**************************************************************************
+
+DEFINE_DEVICE_TYPE_PRIVATE(A2BUS_DX1, device_a2bus_card_interface, a2bus_dx1_device, "a2dx1", "Decillonix DX-1")

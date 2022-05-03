@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:smf
+#include "emu.h"
 #include "cdu76s.h"
 
 void sony_cdu76s_device::ExecCommand()
@@ -15,7 +16,7 @@ void sony_cdu76s_device::ExecCommand()
 	}
 }
 
-void sony_cdu76s_device::ReadData( UINT8 *data, int dataLength )
+void sony_cdu76s_device::ReadData( uint8_t *data, int dataLength )
 {
 	switch ( command[0] )
 	{
@@ -39,9 +40,23 @@ void sony_cdu76s_device::ReadData( UINT8 *data, int dataLength )
 }
 
 // device type definition
-const device_type CDU76S = &device_creator<sony_cdu76s_device>;
+DEFINE_DEVICE_TYPE(CDU76S, sony_cdu76s_device, "cdu76s", "Sony CDU-76S")
 
-sony_cdu76s_device::sony_cdu76s_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	scsicd_device(mconfig, CDU76S, "Sony CDU-76S", tag, owner, clock, "cdu76s", __FILE__)
+sony_cdu76s_device::sony_cdu76s_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	scsicd_device(mconfig, CDU76S, tag, owner, clock)
 {
+}
+
+ROM_START(cdu76s)
+	ROM_REGION(0x10000, "eprom", 0)
+	ROM_DEFAULT_BIOS("1.1c")
+	ROM_SYSTEM_BIOS( 0, "1.1c", "CDU76S firmware 1.1c" )
+	ROMX_LOAD("76s.1.1c.ic206", 0x00000, 0x10000, CRC(8a233f19) SHA1(5f3c3f1ec181cb7f18daea5c8c592f6910aac3b2), ROM_BIOS(0))
+	ROM_SYSTEM_BIOS( 1, "1.1a", "CDU76S firmware 1.1a" )
+	ROMX_LOAD("76s.1.1a.ic206", 0x00000, 0x10000, CRC(1df044f9) SHA1(8d1f6ccd6fb5e04b987b9aa21e602a21df7505a4), ROM_BIOS(1)) // 95.06.01
+ROM_END
+
+const tiny_rom_entry *sony_cdu76s_device::device_rom_region() const
+{
+	return ROM_NAME(cdu76s);
 }

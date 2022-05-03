@@ -20,7 +20,7 @@ System specs :
 ===============
    CPU       : Z80 x 4
    Sound     : YM2151
-   Chips     : TC0010VCU x 2 + TC0140SYT
+   Chips     : TC0010VCU x 2 + PC060HA
 
    There are two types of Exzisus PCB:
 
@@ -29,19 +29,166 @@ System specs :
    * The second, later PCB has a single video output and is JAMMA compliant.
 
 TODO:
-- There must be a way for cpu a to stop cpu c, otherwise the RAM check in test
+- There must be a way for CPU a to stop CPU c, otherwise the RAM check in test
   mode cannot work. However, the only way I found to do that is making writes
   to F404 pulse the reset line, which isn't a common way to handle these things.
 
 ****************************************************************************/
 
 #include "emu.h"
-#include "cpu/z80/z80.h"
-#include "includes/taitoipt.h"
-#include "audio/taitosnd.h"
-#include "sound/2151intf.h"
-#include "includes/exzisus.h"
 
+#include "audio/taitosnd.h"
+#include "includes/taitoipt.h"
+
+#include "cpu/z80/z80.h"
+#include "sound/ymopm.h"
+
+#include "emupal.h"
+#include "screen.h"
+#include "speaker.h"
+
+
+namespace {
+
+class exzisus_state : public driver_device
+{
+public:
+	exzisus_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
+		m_cpuc(*this, "cpuc"),
+		m_gfxdecode(*this, "gfxdecode"),
+		m_palette(*this, "palette"),
+		m_objectram(*this, "objectram%u", 0U),
+		m_videoram(*this, "videoram%u", 0U),
+		m_sharedram_ac(*this, "sharedram_ac"),
+		m_sharedram_ab(*this, "sharedram_ab"),
+		m_cpubank(*this, "cpubank%u", 0U)
+	{ }
+
+	void exzisus(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
+
+private:
+	required_device<cpu_device> m_cpuc;
+	required_device<gfxdecode_device> m_gfxdecode;
+	required_device<palette_device> m_palette;
+
+	required_shared_ptr_array<uint8_t, 2> m_objectram;
+	required_shared_ptr_array<uint8_t, 2> m_videoram;
+	required_shared_ptr<uint8_t> m_sharedram_ac;
+	required_shared_ptr<uint8_t> m_sharedram_ab;
+	required_memory_bank_array<2> m_cpubank;
+
+	template <uint8_t Which> void cpu_bankswitch_w(uint8_t data);
+	void coincounter_w(uint8_t data);
+	void cpuc_reset_w(uint8_t data);
+
+	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void cpua_map(address_map &map);
+	void cpub_map(address_map &map);
+	void cpuc_map(address_map &map);
+	void sound_map(address_map &map);
+};
+
+
+// video
+
+/***************************************************************************
+
+ Video hardware of this hardware is almost similar with "mexico86". So,
+ most routines are derived from mexico86 driver.
+
+***************************************************************************/
+
+
+/***************************************************************************
+  Screen refresh
+***************************************************************************/
+
+uint32_t exzisus_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	// Is this correct ?
+	bitmap.fill(1023, cliprect);
+
+	// 2 TC0010VCU. TODO: devicify if more drivers use this chip
+	for (int j = 0; j < 2; j++)
+	{
+		int sx = 0;
+
+		for (int offs = 0 ; offs < m_objectram[j].bytes() ; offs += 4)
+		{
+			int height;
+
+			// Skip empty sprites.
+			if ( !(*(uint32_t *)(&m_objectram[j][offs])) )
+			{
+				continue;
+			}
+
+			int gfx_num = m_objectram[j][offs + 1];
+			int gfx_attr = m_objectram[j][offs + 3];
+
+			int gfx_offs;
+			if ((gfx_num & 0x80) == 0)  // 16x16 sprites
+			{
+				gfx_offs = ((gfx_num & 0x7f) << 3);
+				height = 2;
+
+				sx = m_objectram[j][offs + 2];
+				sx |= (gfx_attr & 0x40) << 2;
+			}
+			else    // tilemaps (each sprite is a 16x256 column)
+			{
+				gfx_offs = ((gfx_num & 0x3f) << 7) + 0x0400;
+				height = 32;
+
+				if (gfx_num & 0x40)         // Next column
+				{
+					sx += 16;
+				}
+				else
+				{
+					sx = m_objectram[j][offs + 2];
+					sx |= (gfx_attr & 0x40) << 2;
+				}
+			}
+
+			int sy = 256 - (height << 3) - (m_objectram[j][offs]);
+
+			for (int xc = 0 ; xc < 2 ; xc++)
+			{
+				int goffs = gfx_offs;
+				for (int yc = 0 ; yc < height ; yc++)
+				{
+					int code  = (m_videoram[j][goffs + 1] << 8) | m_videoram[j][goffs];
+					int color = (m_videoram[j][goffs + 1] >> 6) | (gfx_attr & 0x0f);
+					int x = (sx + (xc << 3)) & 0xff;
+					int y = (sy + (yc << 3)) & 0xff;
+
+					if (flip_screen())
+					{
+						x = 248 - x;
+						y = 248 - y;
+					}
+
+					m_gfxdecode->gfx(j)->transpen(bitmap, cliprect,
+							code & 0x3fff,
+							color,
+							flip_screen(), flip_screen(),
+							x, y, 15);
+					goffs += 2;
+				}
+				gfx_offs += height << 1;
+			}
+		}
+	}
+	return 0;
+}
+
+
+// machine
 
 /***************************************************************************
 
@@ -49,43 +196,36 @@ TODO:
 
 ***************************************************************************/
 
-WRITE8_MEMBER(exzisus_state::cpua_bankswitch_w)
+template <uint8_t Which>
+void exzisus_state::cpu_bankswitch_w(uint8_t data)
 {
-	membank("cpuabank")->set_entry(data & 0x0f);
+	m_cpubank[Which]->set_entry(data & 0x0f);
 	flip_screen_set(data & 0x40);
 }
 
-WRITE8_MEMBER(exzisus_state::cpub_bankswitch_w)
+void exzisus_state::coincounter_w(uint8_t data)
 {
-	membank("cpubbank")->set_entry(data & 0x0f);
-	flip_screen_set(data & 0x40);
+	machine().bookkeeping().coin_lockout_w(0, ~data & 0x01);
+	machine().bookkeeping().coin_lockout_w(1, ~data & 0x02);
+	machine().bookkeeping().coin_counter_w(0, data & 0x04);
+	machine().bookkeeping().coin_counter_w(1, data & 0x08);
 }
 
-WRITE8_MEMBER(exzisus_state::coincounter_w)
+void exzisus_state::cpuc_reset_w(uint8_t data)
 {
-	machine().bookkeeping().coin_lockout_w(0,~data & 0x01);
-	machine().bookkeeping().coin_lockout_w(1,~data & 0x02);
-	machine().bookkeeping().coin_counter_w(0,data & 0x04);
-	machine().bookkeeping().coin_counter_w(1,data & 0x08);
-}
-
-// is it ok that cpub_reset refers to cpuc?
-WRITE8_MEMBER(exzisus_state::cpub_reset_w)
-{
-	m_cpuc->set_input_line(INPUT_LINE_RESET, PULSE_LINE);
+	m_cpuc->pulse_input_line(INPUT_LINE_RESET, attotime::zero);
 }
 
 #if 0
-// without cpub_reset_w, the following patch would be needed for
-// the RAM check to work
-DRIVER_INIT_MEMBER(exzisus_state,exzisus)
+// without cpuc_reset_w, the following patch would be needed for the RAM check to work
+void exzisus_state::init_exzisus()
 {
-	UINT8 *RAM = memregion("cpua")->base();
+	uint8_t *RAM = memregion("cpua")->base();
 
-	/* Fix WORK RAM error */
+	// Fix WORK RAM error
 	RAM[0x67fd] = 0x18;
 
-	/* Fix ROM 1 error */
+	// Fix ROM 1 error
 	RAM[0x6829] = 0x18;
 }
 #endif
@@ -97,51 +237,55 @@ DRIVER_INIT_MEMBER(exzisus_state,exzisus)
 
 **************************************************************************/
 
-static ADDRESS_MAP_START( cpua_map, AS_PROGRAM, 8, exzisus_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0xbfff) AM_ROMBANK("cpuabank")
-	AM_RANGE(0xc000, 0xc5ff) AM_RAM AM_SHARE("objectram1")
-	AM_RANGE(0xc600, 0xdfff) AM_RAM AM_SHARE("videoram1")
-	AM_RANGE(0xe000, 0xefff) AM_RAM AM_SHARE("sharedram_ac")
-	AM_RANGE(0xf400, 0xf400) AM_WRITE(cpua_bankswitch_w)
-	AM_RANGE(0xf404, 0xf404) AM_WRITE(cpub_reset_w) // ??
-	AM_RANGE(0xf800, 0xffff) AM_RAM AM_SHARE("sharedram_ab")
-ADDRESS_MAP_END
+void exzisus_state::cpua_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0xbfff).bankr(m_cpubank[0]);
+	map(0xc000, 0xc5ff).ram().share(m_objectram[1]);
+	map(0xc600, 0xdfff).ram().share(m_videoram[1]);
+	map(0xe000, 0xefff).ram().share(m_sharedram_ac);
+	map(0xf400, 0xf400).w(FUNC(exzisus_state::cpu_bankswitch_w<0>));
+	map(0xf404, 0xf404).w(FUNC(exzisus_state::cpuc_reset_w)); // ??
+	map(0xf800, 0xffff).ram().share(m_sharedram_ab);
+}
 
-static ADDRESS_MAP_START( cpub_map, AS_PROGRAM, 8, exzisus_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0xbfff) AM_ROMBANK("cpubbank")
-	AM_RANGE(0xc000, 0xc5ff) AM_RAM AM_SHARE("objectram0")
-	AM_RANGE(0xc600, 0xdfff) AM_RAM AM_SHARE("videoram0")
-	AM_RANGE(0xe000, 0xefff) AM_RAM
-	AM_RANGE(0xf000, 0xf000) AM_READNOP AM_DEVWRITE("tc0140syt", tc0140syt_device, master_port_w)
-	AM_RANGE(0xf001, 0xf001) AM_DEVREADWRITE("tc0140syt", tc0140syt_device, master_comm_r, master_comm_w)
-	AM_RANGE(0xf400, 0xf400) AM_READ_PORT("P1")
-	AM_RANGE(0xf400, 0xf400) AM_WRITE(cpub_bankswitch_w)
-	AM_RANGE(0xf401, 0xf401) AM_READ_PORT("P2")
-	AM_RANGE(0xf402, 0xf402) AM_READ_PORT("SYSTEM")
-	AM_RANGE(0xf402, 0xf402) AM_WRITE(coincounter_w)
-	AM_RANGE(0xf404, 0xf404) AM_READ_PORT("DSWA")
-	AM_RANGE(0xf404, 0xf404) AM_WRITENOP // ??
-	AM_RANGE(0xf405, 0xf405) AM_READ_PORT("DSWB")
-	AM_RANGE(0xf800, 0xffff) AM_RAM AM_SHARE("sharedram_ab")
-ADDRESS_MAP_END
+void exzisus_state::cpub_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0xbfff).bankr(m_cpubank[1]);
+	map(0xc000, 0xc5ff).ram().share(m_objectram[0]);
+	map(0xc600, 0xdfff).ram().share(m_videoram[0]);
+	map(0xe000, 0xefff).ram();
+	map(0xf000, 0xf000).nopr().w("ciu", FUNC(pc060ha_device::master_port_w));
+	map(0xf001, 0xf001).rw("ciu", FUNC(pc060ha_device::master_comm_r), FUNC(pc060ha_device::master_comm_w));
+	map(0xf400, 0xf400).portr("P1");
+	map(0xf400, 0xf400).w(FUNC(exzisus_state::cpu_bankswitch_w<1>));
+	map(0xf401, 0xf401).portr("P2");
+	map(0xf402, 0xf402).portr("SYSTEM");
+	map(0xf402, 0xf402).w(FUNC(exzisus_state::coincounter_w));
+	map(0xf404, 0xf404).portr("DSWA");
+	map(0xf404, 0xf404).nopw(); // ??
+	map(0xf405, 0xf405).portr("DSWB");
+	map(0xf800, 0xffff).ram().share(m_sharedram_ab);
+}
 
-static ADDRESS_MAP_START( cpuc_map, AS_PROGRAM, 8, exzisus_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0x85ff) AM_RAM AM_SHARE("objectram1")
-	AM_RANGE(0x8600, 0x9fff) AM_RAM AM_SHARE("videoram1")
-	AM_RANGE(0xa000, 0xafff) AM_RAM AM_SHARE("sharedram_ac")
-	AM_RANGE(0xb000, 0xbfff) AM_RAM
-ADDRESS_MAP_END
+void exzisus_state::cpuc_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0x85ff).ram().share(m_objectram[1]);
+	map(0x8600, 0x9fff).ram().share(m_videoram[1]);
+	map(0xa000, 0xafff).ram().share(m_sharedram_ac);
+	map(0xb000, 0xbfff).ram();
+}
 
-static ADDRESS_MAP_START( sound_map, AS_PROGRAM, 8, exzisus_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0x8fff) AM_RAM
-	AM_RANGE(0x9000, 0x9001) AM_DEVREADWRITE("ymsnd", ym2151_device, read, write)
-	AM_RANGE(0xa000, 0xa000) AM_READNOP AM_DEVWRITE("tc0140syt", tc0140syt_device, slave_port_w)
-	AM_RANGE(0xa001, 0xa001) AM_DEVREADWRITE("tc0140syt", tc0140syt_device, slave_comm_r, slave_comm_w)
-ADDRESS_MAP_END
+void exzisus_state::sound_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0x8fff).ram();
+	map(0x9000, 0x9001).rw("ymsnd", FUNC(ym2151_device::read), FUNC(ym2151_device::write));
+	map(0xa000, 0xa000).nopr().w("ciu", FUNC(pc060ha_device::slave_port_w));
+	map(0xa001, 0xa001).rw("ciu", FUNC(pc060ha_device::slave_comm_r), FUNC(pc060ha_device::slave_comm_w));
+}
 
 
 /***************************************************************************
@@ -199,8 +343,8 @@ INPUT_PORTS_END
 
 void exzisus_state::machine_start()
 {
-	membank("cpuabank")->configure_entries(0, 16, memregion("cpua")->base(), 0x4000);
-	membank("cpubbank")->configure_entries(0, 16, memregion("cpub")->base(), 0x4000);
+	m_cpubank[0]->configure_entries(0, 16, memregion("cpua")->base(), 0x4000);
+	m_cpubank[1]->configure_entries(0, 16, memregion("cpub")->base(), 0x4000);
 }
 
 static const gfx_layout charlayout =
@@ -214,58 +358,58 @@ static const gfx_layout charlayout =
 	16*8
 };
 
-static GFXDECODE_START( exzisus )
+static GFXDECODE_START( gfx_exzisus )
 	GFXDECODE_ENTRY( "bg0", 0, charlayout,   0, 256 )
 	GFXDECODE_ENTRY( "bg1", 0, charlayout, 256, 256 )
 GFXDECODE_END
 
 
 
-/* All clocks are unconfirmed */
-static MACHINE_CONFIG_START( exzisus, exzisus_state )
+// All clocks are unconfirmed
+void exzisus_state::exzisus(machine_config &config)
+{
+	// basic machine hardware
+	z80_device &cpua(Z80(config, "cpua", 6000000));
+	cpua.set_addrmap(AS_PROGRAM, &exzisus_state::cpua_map);
+	cpua.set_vblank_int("screen", FUNC(exzisus_state::irq0_line_hold));
 
-	/* basic machine hardware */
-	MCFG_CPU_ADD("cpua", Z80, 6000000)
-	MCFG_CPU_PROGRAM_MAP(cpua_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", exzisus_state,  irq0_line_hold)
+	z80_device &cpub(Z80(config, "cpub", 6000000));
+	cpub.set_addrmap(AS_PROGRAM, &exzisus_state::cpub_map);
+	cpub.set_vblank_int("screen", FUNC(exzisus_state::irq0_line_hold));
 
-	MCFG_CPU_ADD("cpub", Z80, 6000000)
-	MCFG_CPU_PROGRAM_MAP(cpub_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", exzisus_state,  irq0_line_hold)
+	Z80(config, m_cpuc, 6000000);
+	m_cpuc->set_addrmap(AS_PROGRAM, &exzisus_state::cpuc_map);
+	m_cpuc->set_vblank_int("screen", FUNC(exzisus_state::irq0_line_hold));
 
-	MCFG_CPU_ADD("cpuc", Z80, 6000000)
-	MCFG_CPU_PROGRAM_MAP(cpuc_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", exzisus_state,  irq0_line_hold)
+	z80_device &audiocpu(Z80(config, "audiocpu", 4000000));
+	audiocpu.set_addrmap(AS_PROGRAM, &exzisus_state::sound_map);
 
-	MCFG_CPU_ADD("audiocpu", Z80, 4000000)
-	MCFG_CPU_PROGRAM_MAP(sound_map)
+	config.set_maximum_quantum(attotime::from_hz(600));   // 10 CPU slices per frame - enough for the sound CPU to read all commands
 
-	MCFG_QUANTUM_TIME(attotime::from_hz(600))   /* 10 CPU slices per frame - enough for the sound CPU to read all commands */
+	// video hardware
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_refresh_hz(60);
+	screen.set_vblank_time(ATTOSECONDS_IN_USEC(0));
+	screen.set_size(32*8, 32*8);
+	screen.set_visarea(0*8, 32*8-1, 2*8, 30*8-1);
+	screen.set_screen_update(FUNC(exzisus_state::screen_update));
+	screen.set_palette(m_palette);
 
-	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(60)
-	MCFG_SCREEN_VBLANK_TIME(ATTOSECONDS_IN_USEC(0))
-	MCFG_SCREEN_SIZE(32*8, 32*8)
-	MCFG_SCREEN_VISIBLE_AREA(0*8, 32*8-1, 2*8, 30*8-1)
-	MCFG_SCREEN_UPDATE_DRIVER(exzisus_state, screen_update)
-	MCFG_SCREEN_PALETTE("palette")
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_exzisus);
+	PALETTE(config, m_palette, palette_device::RGB_444_PROMS, "proms", 1024);
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", exzisus)
-	MCFG_PALETTE_ADD_RRRRGGGGBBBB_PROMS("palette", 1024)
+	// sound hardware
+	SPEAKER(config, "mono").front_center();
 
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+	ym2151_device &ymsnd(YM2151(config, "ymsnd", 4000000));
+	ymsnd.irq_handler().set_inputline("audiocpu", 0);
+	ymsnd.add_route(0, "mono", 0.50);
+	ymsnd.add_route(1, "mono", 0.50);
 
-	MCFG_YM2151_ADD("ymsnd", 4000000)
-	MCFG_YM2151_IRQ_HANDLER(INPUTLINE("audiocpu", 0))
-	MCFG_SOUND_ROUTE(0, "mono", 0.50)
-	MCFG_SOUND_ROUTE(1, "mono", 0.50)
-
-	MCFG_DEVICE_ADD("tc0140syt", TC0140SYT, 0)
-	MCFG_TC0140SYT_MASTER_CPU("cpub")
-	MCFG_TC0140SYT_SLAVE_CPU("audiocpu")
-MACHINE_CONFIG_END
+	pc060ha_device &ciu(PC060HA(config, "ciu", 0));
+	ciu.set_master_tag("cpub");
+	ciu.set_slave_tag("audiocpu");
+}
 
 
 /***************************************************************************
@@ -344,9 +488,9 @@ ROM_START( exzisusa )
 	ROM_LOAD( "b23-09.3d",  0x50000, 0x10000, CRC(6651617f) SHA1(6351a0b01589cb181b896285ade70e9dfcd799ec) )
 
 	ROM_REGION( 0x00c00, "proms", 0 )
-	/* These appear to be twice the correct size */
+	// These appear to be twice the correct size
 	ROM_LOAD( "b23-04.15l", 0x00000, 0x00400, CRC(5042cffa) SHA1(c969748866a12681cf2dbf25a46da2c4e4f92313) )
-	ROM_LOAD( "b23-03.14l", 0x00400, 0x00400, BAD_DUMP CRC(9458fd45) SHA1(7f7cdacf37bb6f15de1109fa73ba3c5fc88893d0) ) /* D0 is fixed */
+	ROM_LOAD( "b23-03.14l", 0x00400, 0x00400, BAD_DUMP CRC(9458fd45) SHA1(7f7cdacf37bb6f15de1109fa73ba3c5fc88893d0) ) // D0 is fixed
 	ROM_LOAD( "b23-05.16l", 0x00800, 0x00400, CRC(87f0f69a) SHA1(37df6fd56245fab9beaabfd86fd8f95d7c42c2a5) )
 ROM_END
 
@@ -381,12 +525,15 @@ ROM_START( exzisust )
 	ROM_LOAD( "b23-09.3d",  0x50000, 0x10000, CRC(6651617f) SHA1(6351a0b01589cb181b896285ade70e9dfcd799ec) )
 
 	ROM_REGION( 0x00c00, "proms", 0 )
-	/* These appear to be twice the correct size */
+	// These appear to be twice the correct size
 	ROM_LOAD( "b23-04.15l", 0x00000, 0x00400, CRC(5042cffa) SHA1(c969748866a12681cf2dbf25a46da2c4e4f92313) )
-	ROM_LOAD( "b23-03.14l", 0x00400, 0x00400, BAD_DUMP CRC(9458fd45) SHA1(7f7cdacf37bb6f15de1109fa73ba3c5fc88893d0) ) /* D0 is fixed */
+	ROM_LOAD( "b23-03.14l", 0x00400, 0x00400, BAD_DUMP CRC(9458fd45) SHA1(7f7cdacf37bb6f15de1109fa73ba3c5fc88893d0) ) // D0 is fixed
 	ROM_LOAD( "b23-05.16l", 0x00800, 0x00400, CRC(87f0f69a) SHA1(37df6fd56245fab9beaabfd86fd8f95d7c42c2a5) )
 ROM_END
 
-GAME( 1987, exzisus,  0,       exzisus, exzisus, driver_device, 0, ROT0, "Taito Corporation", "Exzisus (Japan, dedicated)",  MACHINE_SUPPORTS_SAVE )
-GAME( 1987, exzisusa, exzisus, exzisus, exzisus, driver_device, 0, ROT0, "Taito Corporation", "Exzisus (Japan, conversion)", MACHINE_SUPPORTS_SAVE )
-GAME( 1987, exzisust, exzisus, exzisus, exzisus, driver_device, 0, ROT0, "Taito Corporation (TAD license)", "Exzisus (TAD license)", MACHINE_SUPPORTS_SAVE )
+} // anonymous namespace
+
+
+GAME( 1987, exzisus,  0,       exzisus, exzisus, exzisus_state, empty_init, ROT0, "Taito Corporation",               "Exzisus (Japan, dedicated)",  MACHINE_SUPPORTS_SAVE )
+GAME( 1987, exzisusa, exzisus, exzisus, exzisus, exzisus_state, empty_init, ROT0, "Taito Corporation",               "Exzisus (Japan, conversion)", MACHINE_SUPPORTS_SAVE )
+GAME( 1987, exzisust, exzisus, exzisus, exzisus, exzisus_state, empty_init, ROT0, "Taito Corporation (TAD license)", "Exzisus (TAD license)",       MACHINE_SUPPORTS_SAVE )

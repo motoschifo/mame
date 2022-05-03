@@ -81,74 +81,92 @@ Notes:
 
     TODO:
 
-    - coin counters
+    - various unknown writes (NOPed out in the memory map)
 
 ***************************************************************************/
 
 #include "emu.h"
-#include "machine/konami1.h"
-#include "cpu/m6809/m6809.h"
-#include "sound/sn76496.h"
-#include "includes/konamipt.h"
 #include "includes/jailbrek.h"
+#include "includes/konamipt.h"
+#include "machine/konami1.h"
+
+#include "cpu/m6809/m6809.h"
+#include "machine/watchdog.h"
+#include "sound/sn76496.h"
+
+#include "screen.h"
+#include "speaker.h"
 
 
-WRITE8_MEMBER(jailbrek_state::ctrl_w)
+void jailbrek_state::ctrl_w(uint8_t data)
 {
 	m_nmi_enable = data & 0x01;
 	m_irq_enable = data & 0x02;
 	flip_screen_set(data & 0x08);
 }
 
-INTERRUPT_GEN_MEMBER(jailbrek_state::jb_interrupt)
+void jailbrek_state::coin_w(uint8_t data)
 {
-	if (m_irq_enable)
-		device.execute().set_input_line(0, HOLD_LINE);
+	machine().bookkeeping().coin_counter_w(0, data & 0x01);
+	machine().bookkeeping().coin_counter_w(1, data & 0x02);
 }
 
-INTERRUPT_GEN_MEMBER(jailbrek_state::jb_interrupt_nmi)
+WRITE_LINE_MEMBER(jailbrek_state::vblank_irq)
+{
+	if (state && m_irq_enable)
+		m_maincpu->set_input_line(0, HOLD_LINE);
+}
+
+INTERRUPT_GEN_MEMBER(jailbrek_state::interrupt_nmi)
 {
 	if (m_nmi_enable)
-		device.execute().set_input_line(INPUT_LINE_NMI, PULSE_LINE);
+		device.execute().pulse_input_line(INPUT_LINE_NMI, attotime::zero);
 }
 
 
-READ8_MEMBER(jailbrek_state::jailbrek_speech_r)
+uint8_t jailbrek_state::speech_r()
 {
 	return (m_vlm->bsy() ? 1 : 0);
 }
 
-WRITE8_MEMBER(jailbrek_state::jailbrek_speech_w)
+void jailbrek_state::speech_w(uint8_t data)
 {
 	/* bit 0 could be latch direction like in yiear */
 	m_vlm->st((data >> 1) & 1);
 	m_vlm->rst((data >> 2) & 1);
 }
 
-static ADDRESS_MAP_START( jailbrek_map, AS_PROGRAM, 8, jailbrek_state )
-	AM_RANGE(0x0000, 0x07ff) AM_RAM_WRITE(jailbrek_colorram_w) AM_SHARE("colorram")
-	AM_RANGE(0x0800, 0x0fff) AM_RAM_WRITE(jailbrek_videoram_w) AM_SHARE("videoram")
-	AM_RANGE(0x1000, 0x10bf) AM_RAM AM_SHARE("spriteram")
-	AM_RANGE(0x10c0, 0x14ff) AM_RAM /* ??? */
-	AM_RANGE(0x1500, 0x1fff) AM_RAM /* work ram */
-	AM_RANGE(0x2000, 0x203f) AM_RAM AM_SHARE("scroll_x")
-	AM_RANGE(0x2040, 0x2040) AM_WRITENOP /* ??? */
-	AM_RANGE(0x2041, 0x2041) AM_WRITENOP /* ??? */
-	AM_RANGE(0x2042, 0x2042) AM_RAM AM_SHARE("scroll_dir") /* bit 2 = scroll direction */
-	AM_RANGE(0x2043, 0x2043) AM_WRITENOP /* ??? */
-	AM_RANGE(0x2044, 0x2044) AM_WRITE(ctrl_w) /* irq, nmi enable, screen flip */
-	AM_RANGE(0x3000, 0x307f) AM_RAM /* related to sprites? */
-	AM_RANGE(0x3100, 0x3100) AM_READ_PORT("DSW2") AM_DEVWRITE("snsnd", sn76489a_device, write)
-	AM_RANGE(0x3200, 0x3200) AM_READ_PORT("DSW3") AM_WRITENOP /* mirror of the previous? */
-	AM_RANGE(0x3300, 0x3300) AM_READ_PORT("SYSTEM") AM_WRITE(watchdog_reset_w)
-	AM_RANGE(0x3301, 0x3301) AM_READ_PORT("P1")
-	AM_RANGE(0x3302, 0x3302) AM_READ_PORT("P2")
-	AM_RANGE(0x3303, 0x3303) AM_READ_PORT("DSW1")
-	AM_RANGE(0x4000, 0x4000) AM_WRITE(jailbrek_speech_w) /* speech pins */
-	AM_RANGE(0x5000, 0x5000) AM_DEVWRITE("vlm", vlm5030_device, data_w) /* speech data */
-	AM_RANGE(0x6000, 0x6000) AM_READ(jailbrek_speech_r)
-	AM_RANGE(0x8000, 0xffff) AM_ROM
-ADDRESS_MAP_END
+void jailbrek_state::jailbrek_map(address_map &map)
+{
+	map(0x0000, 0x07ff).ram().w(FUNC(jailbrek_state::colorram_w)).share("colorram");
+	map(0x0800, 0x0fff).ram().w(FUNC(jailbrek_state::videoram_w)).share("videoram");
+	map(0x1000, 0x10bf).ram().share("spriteram");
+	map(0x10c0, 0x14ff).ram(); /* ??? */
+	map(0x1500, 0x1fff).ram(); /* work ram */
+	map(0x2000, 0x203f).ram().share("scroll_x");
+	map(0x2040, 0x2040).nopw(); /* ??? */
+	map(0x2041, 0x2041).nopw(); /* ??? */
+	map(0x2042, 0x2042).ram().share("scroll_dir"); /* bit 2 = scroll direction */
+	map(0x2043, 0x2043).nopw(); /* ??? */
+	map(0x2044, 0x2044).w(FUNC(jailbrek_state::ctrl_w)); /* irq, nmi enable, screen flip */
+	map(0x3000, 0x3000).w(FUNC(jailbrek_state::coin_w));
+	map(0x3100, 0x3100).portr("DSW2").w("snsnd", FUNC(sn76489a_device::write));
+	map(0x3200, 0x3200).portr("DSW3").nopw(); /* mirror of the previous? */
+	map(0x3300, 0x3300).portr("SYSTEM").w("watchdog", FUNC(watchdog_timer_device::reset_w));
+	map(0x3301, 0x3301).portr("P1");
+	map(0x3302, 0x3302).portr("P2");
+	map(0x3303, 0x3303).portr("DSW1");
+	map(0x4000, 0x4000).w(FUNC(jailbrek_state::speech_w)); /* speech pins */
+	map(0x5000, 0x5000).w(m_vlm, FUNC(vlm5030_device::data_w)); /* speech data */
+	map(0x6000, 0x6000).r(FUNC(jailbrek_state::speech_r));
+	map(0x8000, 0xffff).rom();
+}
+
+void jailbrek_state::vlm_map(address_map &map)
+{
+	map.global_mask(0x1fff);
+	map(0x0000, 0x1fff).rom();
+}
 
 
 
@@ -225,7 +243,7 @@ static const gfx_layout spritelayout =
 	128*8   /* every sprite takes 128 consecutive bytes */
 };
 
-static GFXDECODE_START( jailbrek )
+static GFXDECODE_START( gfx_jailbrek )
 	GFXDECODE_ENTRY( "gfx1", 0, charlayout,   0, 16 ) /* characters */
 	GFXDECODE_ENTRY( "gfx2", 0, spritelayout, 16*16, 16 ) /* sprites */
 GFXDECODE_END
@@ -243,35 +261,34 @@ void jailbrek_state::machine_reset()
 	m_nmi_enable = 0;
 }
 
-static MACHINE_CONFIG_START( jailbrek, jailbrek_state )
-
+void jailbrek_state::jailbrek(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", KONAMI1, MASTER_CLOCK/12)
-	MCFG_CPU_PROGRAM_MAP(jailbrek_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", jailbrek_state,  jb_interrupt)
-	MCFG_CPU_PERIODIC_INT_DRIVER(jailbrek_state, jb_interrupt_nmi,  500) /* ? */
+	KONAMI1(config, m_maincpu, MASTER_CLOCK/12); // the bootleg uses a standard M6809 with separate decryption logic
+	m_maincpu->set_addrmap(AS_PROGRAM, &jailbrek_state::jailbrek_map);
+	m_maincpu->set_periodic_int(FUNC(jailbrek_state::interrupt_nmi), attotime::from_hz(500)); /* ? */
 
+	WATCHDOG_TIMER(config, "watchdog");
 
 	/* video hardware */
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", jailbrek)
-	MCFG_PALETTE_ADD("palette", 512)
-	MCFG_PALETTE_INDIRECT_ENTRIES(32)
-	MCFG_PALETTE_INIT_OWNER(jailbrek_state, jailbrek)
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_jailbrek);
+	PALETTE(config, m_palette, FUNC(jailbrek_state::jailbrek_palette), 512, 32);
 
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_RAW_PARAMS(MASTER_CLOCK/3, 396, 8, 248, 256, 16, 240)
-	MCFG_SCREEN_UPDATE_DRIVER(jailbrek_state, screen_update_jailbrek)
-	MCFG_SCREEN_PALETTE("palette")
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_raw(MASTER_CLOCK/3, 396, 8, 248, 256, 16, 240);
+	screen.set_screen_update(FUNC(jailbrek_state::screen_update));
+	screen.set_palette(m_palette);
+	screen.screen_vblank().set(FUNC(jailbrek_state::vblank_irq));
 
 	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+	SPEAKER(config, "mono").front_center();
 
-	MCFG_SOUND_ADD("snsnd", SN76489A, MASTER_CLOCK/12)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.0)
+	SN76489A(config, "snsnd", MASTER_CLOCK/12).add_route(ALL_OUTPUTS, "mono", 1.0);
 
-	MCFG_SOUND_ADD("vlm", VLM5030, VOICE_CLOCK)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.0)
-MACHINE_CONFIG_END
+	VLM5030(config, m_vlm, VOICE_CLOCK);
+	m_vlm->add_route(ALL_OUTPUTS, "mono", 1.0);
+	m_vlm->set_addrmap(0, &jailbrek_state::vlm_map);
+}
 
 
 /***************************************************************************
@@ -279,6 +296,15 @@ MACHINE_CONFIG_END
   Game driver(s)
 
 ***************************************************************************/
+
+	/*
+	   Check if the rom used for the speech is not a 2764, but a 27128.  If a
+	   27128 is used then the data is stored in the upper half of the eprom.
+	   (The schematics and board refer to a 2764, but all the boards I have seen
+	   use a 27128.  According to the schematics pin 26 is tied high so if a 2764
+	   is used then the pin is ignored, but if a 27128 is used then pin 26
+	   represents address line A13.)
+	*/
 
 ROM_START( jailbrek )
 	ROM_REGION( 0x10000, "maincpu", 0 )
@@ -302,7 +328,7 @@ ROM_START( jailbrek )
 	ROM_LOAD( "507j12.6f",  0x0140, 0x0100, CRC(0266c7db) SHA1(a8f21e86e6d974c9bfd92a147689d0e7316d66e2) ) /* sprites lookup */
 
 	ROM_REGION( 0x4000, "vlm", 0 ) /* speech rom */
-	ROM_LOAD( "507l01.8c",  0x0000, 0x4000, CRC(0c8a3605) SHA1(d886b66d3861c3a90a1825ccf5bf0011831ca366) )
+	ROM_LOAD( "507l01.8c",  0x0000, 0x4000, CRC(0c8a3605) SHA1(d886b66d3861c3a90a1825ccf5bf0011831ca366) ) // same data in both halves
 ROM_END
 
 ROM_START( manhatan )
@@ -327,44 +353,73 @@ ROM_START( manhatan )
 	ROM_LOAD( "507j12.6f",  0x0140, 0x0100, CRC(0266c7db) SHA1(a8f21e86e6d974c9bfd92a147689d0e7316d66e2) ) /* sprites lookup */
 
 	ROM_REGION( 0x4000, "vlm", 0 ) /* speech rom */
-	ROM_LOAD( "507p01.8c",  0x0000, 0x4000, CRC(973fa351) SHA1(ac360d05ed4d03334e00c80e70d5ae939d93af5f) )
+	ROM_LOAD( "507p01.8c",  0x2000, 0x2000, CRC(973fa351) SHA1(ac360d05ed4d03334e00c80e70d5ae939d93af5f) ) // top half is blank
+	ROM_CONTINUE( 0x0000, 0x2000 )
 ROM_END
 
-/*
-    Jail Break Bootleg Chip Locations Map (Not to scale)
 
-      |--------------------------------------------|
-      |                                            |
-    A |                                            |
-      |                                            |
-    B |                                            |
-      |                                            |
-    C |                                            |
-      |                                            |
-    D |                                            |
-      |                                            |
-    E |-|                                          |
-        |                                          |
-      |-|                                          |
-    F |                                            |
-      |     <=- Edge Connector                     |
-    G |                                            |
-      |-|                                          |
-        |                                          |
-    H |-|                                          |
-      |                                            |
-    I |                                            |
-      |                                            |
-    J |                                            |
-      |                                            |
-    K |                                            |
-      |                                            |
-    L |                                            |
-      |                                            |
-      |--------------------------------------------|
-         1  2  3  4  5  6  7  8  9  1  1  1  1  1
-                                    0  1  2  3  4
-*/
+/***************************************************************************
+
+Jail Break Bootleg
+Hardware Info by Guru
+
+PCB Number: A3001
+Note none of the Jail Break bootleg PCBs have numbers/letters along the edge of the PCB.
+These have been added so that chip locations can be documented.
+  |--------------------------------------------------------------------------------------------------------------|
+A |VOL    LM324     LS32    LS04    LS157          PAL16R4  LS669   LS669    LS32    LS86    LS04   LS109        |
+  |                                                                                                              |
+B |C1182H                   LS32    LS374   LS670   LS374   LS86    LS109    LS08    LS10    LS74   LS04    18MHz|
+  |                                                                                                              |
+C |                 LS00    LS283   LS174   LS670   LS374   LS86    LS374    LS92    LS11    LS107  LS74    LS32 |
+  |                                                                                                              |
+D |                 LS07    LS138   DSW3  82S129.D6 LS257   LS244   LS374    LS86    LS161   LS161          LS04 |
+  |                                                                                                              |
+E |1      LS253     DSW1    LS174   LS367 82S129.E6 LS257   LS374   LS374    LS85    LS161   LS257  6264    LS161|
+  |8                                                                                                             |
+F |W      LS253     DSW2    LS244   LS14     5.F6           LS374   LS374    LS374   LS161   LS257  6264    LS161|
+  |A                       |--------------|                                                                      |
+G |Y      LS253     LS08   |    VLM5030   |  4.G6           6264   PAL16R6   LS374   LS161   LS257  6264    LS08 |
+  |                        |--------------|                                                                      |
+H |       LS253     76489 3.579545  LS175    3.H6   LS10    LS367   LS32     LS283   LS161   LS257  6264    LS32 |
+  |                          MHz                                                                                 |
+I |      82S123.I2  LS374   LS367   LS139    2.I6           LS244   LS367    LS283   LS32    LS257  LS273   LS257|
+  |                                                                                                              |
+J |      82S123.J2  LS373           LS138   DIP28           LS244   LS367    LS245   LS04    LS139  LS174   LS257|
+  |                                                                                                              |
+K | LS74   LS86     LS244  PAL16L8  LS245    1.K6          PAL16L8  LS367    LS273   LS74    LS367  LS157   LS04 |
+  |                                |-------------|                                                               |
+L | LS74   LS04     LS245   LS273  |   MC6809    |  LS74    LS367   6116     LS245   LS174   LS125  LS175   LS21 |
+  |                                |-------------|                                                               |
+  |--------------------------------------------------------------------------------------------------------------|
+     1       2       3       4       5       6       7       8       9       10      11      12      13      14
+
+Notes: (All ICs shown)
+      6809 - Clock input 1.5000MHz [18/12]
+   VLM5030 - Sanyo VLM5030 Speech IC. Clock input 3.579545MHz
+     76489 - Texas Instruments SN76489A Digital Complex Sound Generator. Clock input 1.5000MHz [18/12]
+     HSync - 15.6609kHz
+     VSync - 57.5772Hz
+      1.K6 - 27C256 (main program)
+      2.I6 - 27C128 (speech data for VLM5030)
+      3.H6 - 27C256 (background character data)
+      4.G6 - 27C256 (sprite data)
+      5.F6 - 27C256 (sprite data)
+ 82S123.I2 - 32x8-bit bipolar PROM (blue color PROM)
+ 82S123.J2 - 32x8-bit bipolar PROM (red and green color PROM)
+ 82S129.D6 - 256x4-bit bipolar PROM (character lookup table)
+ 82S129.E6 - 256x4-bit bipolar PROM (sprite lookup table)
+      6264 - 8kBx8-bit SRAM
+      6116 - 2kBx8-bit SRAM
+    C1182H - NEC uPC1182H Audio Power Amplifier
+     LM324 - LM324 Quad Operational Amplifier
+     DIP28 - Unpopulated DIP28 position (no socket)
+PAL16R6.G9 - sprites not shown when removed
+PAL16R4.A7 - black screen when removed, coin/start works and game plays blind
+PAL16L8.K8 - no boot when removed, only static startup garbage shown
+PAL16L8.K4 - no boot when removed, only static startup garbage shown
+
+***************************************************************************/
 
 ROM_START( jailbrekb )
 	ROM_REGION( 0x10000, "maincpu", 0 )
@@ -386,36 +441,13 @@ ROM_START( jailbrekb )
 	ROM_REGION( 0x2000, "vlm", 0 ) /* speech rom */
 	ROM_LOAD( "2.i6",    0x0000, 0x2000, CRC(d91d15e3) SHA1(475fe50aafbf8f2fb79880ef0e2c25158eda5270) )
 
-	ROM_REGION( 0x0004, "plds", 0 )
-	ROM_LOAD( "k4.bin",  0x0000, 0x0001, NO_DUMP ) /* PAL16L8 */
-	ROM_LOAD( "a7.bin",  0x0000, 0x0001, NO_DUMP ) /* PAL16R4 */
-	ROM_LOAD( "g9.bin",  0x0000, 0x0001, NO_DUMP ) /* PAL16R6 */
-	ROM_LOAD( "k8.bin",  0x0000, 0x0001, NO_DUMP ) /* PAL16L8 */
+	ROM_REGION( 0x800, "plds", 0 )
+	ROM_LOAD( "pal16l8.k4", 0x000, 0x104, CRC(96e993c6) SHA1(bd6fd8a039fbf8c890c5ce6cea0fcc7649719b51) )
+	ROM_LOAD( "pal16r4.a7", 0x200, 0x104, CRC(3d074375) SHA1(8b2c8143e3540e265213a2d521e350ab71e1b26b) )
+	ROM_LOAD( "pal16r6.g9", 0x400, 0x104, CRC(b6c4f22d) SHA1(d445b1c806dd1bcbdd07c9fa8c5483e0d03496aa) )
+	ROM_LOAD( "pal16l8.k8", 0x600, 0x104, CRC(38783f49) SHA1(101621b378bb9b5faad7d8e3acdbaa42b5045d45) )
 ROM_END
 
-DRIVER_INIT_MEMBER(jailbrek_state,jailbrek)
-{
-	UINT8 *SPEECH_ROM = memregion("vlm")->base();
-	int ind;
-
-	/*
-	   Check if the rom used for the speech is not a 2764, but a 27128.  If a
-	   27128 is used then the data is stored in the upper half of the eprom.
-	   (The schematics and board refer to a 2764, but all the boards I have seen
-	   use a 27128.  According to the schematics pin 26 is tied high so if a 2764
-	   is used then the pin is ignored, but if a 27128 is used then pin 26
-	   represents address line A13.)
-	*/
-
-	if (memregion("vlm")->bytes() == 0x4000)
-	{
-		for (ind = 0; ind < 0x2000; ++ind)
-		{
-			SPEECH_ROM[ind] = SPEECH_ROM[ind + 0x2000];
-		}
-	}
-}
-
-GAME( 1986, jailbrek, 0,        jailbrek, jailbrek, jailbrek_state, jailbrek, ROT0, "Konami", "Jail Break", MACHINE_SUPPORTS_SAVE )
-GAME( 1986, jailbrekb,jailbrek, jailbrek, jailbrek, jailbrek_state, jailbrek, ROT0, "bootleg","Jail Break (bootleg)", MACHINE_SUPPORTS_SAVE )
-GAME( 1986, manhatan, jailbrek, jailbrek, jailbrek, jailbrek_state, jailbrek, ROT0, "Konami", "Manhattan 24 Bunsyo (Japan)", MACHINE_SUPPORTS_SAVE )
+GAME( 1986, jailbrek,  0,        jailbrek, jailbrek, jailbrek_state, empty_init, ROT0, "Konami",  "Jail Break",                  MACHINE_SUPPORTS_SAVE )
+GAME( 1986, jailbrekb, jailbrek, jailbrek, jailbrek, jailbrek_state, empty_init, ROT0, "bootleg", "Jail Break (bootleg)",        MACHINE_SUPPORTS_SAVE )
+GAME( 1986, manhatan,  jailbrek, jailbrek, jailbrek, jailbrek_state, empty_init, ROT0, "Konami",  "Manhattan 24 Bunsyo (Japan)", MACHINE_SUPPORTS_SAVE )

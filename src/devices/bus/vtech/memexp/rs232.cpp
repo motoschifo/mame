@@ -2,10 +2,11 @@
 // copyright-holders:Dirk Best
 /***************************************************************************
 
-    Dick Smith VZ-200/300 RS-232 Cartridge
+    Dick Smith VZ-200/300 RS-232 Cartridge (K-6317)
 
 ***************************************************************************/
 
+#include "emu.h"
 #include "rs232.h"
 
 
@@ -13,7 +14,19 @@
 //  DEVICE DEFINITIONS
 //**************************************************************************
 
-const device_type RS232_INTERFACE = &device_creator<rs232_interface_device>;
+DEFINE_DEVICE_TYPE(VTECH_RS232_INTERFACE, vtech_rs232_interface_device, "vtech_rs232", "DSE VZ-200/300 RS-232 Interface")
+
+//-------------------------------------------------
+//  mem_map - memory space address map
+//-------------------------------------------------
+
+void vtech_rs232_interface_device::mem_map(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x4000, 0x47ff).rom().region("software", 0);
+	map(0x5000, 0x5000).mirror(0x7ff).r(FUNC(vtech_rs232_interface_device::receive_data_r));
+	map(0x5800, 0x5800).mirror(0x7ff).w(FUNC(vtech_rs232_interface_device::transmit_data_w));
+}
 
 //-------------------------------------------------
 //  rom_region - device-specific ROM region
@@ -21,27 +34,28 @@ const device_type RS232_INTERFACE = &device_creator<rs232_interface_device>;
 
 ROM_START( rs232 )
 	ROM_REGION(0x800, "software", 0)
-	ROM_LOAD("rs232_v15.ic2", 0x000, 0x800, CRC(6545260d) SHA1(4042f6f1e09e383f3c92f628c6187dc5f072fdb2))
+	ROM_DEFAULT_BIOS("16")
+	ROM_SYSTEM_BIOS(0, "15", "Version 1.5") // 1985
+	ROMX_LOAD("rs232_v15.ic2", 0x000, 0x800, CRC(6545260d) SHA1(4042f6f1e09e383f3c92f628c6187dc5f072fdb2), ROM_BIOS(0))
+	ROM_SYSTEM_BIOS(1, "16", "Version 1.6") // 1987
+	ROMX_LOAD("rs232_v16.ic2", 0x000, 0x800, CRC(d761fc79) SHA1(28e00c7ff33143a948308330859bee54b474e114), ROM_BIOS(1))
 ROM_END
 
-const rom_entry *rs232_interface_device::device_rom_region() const
+const tiny_rom_entry *vtech_rs232_interface_device::device_rom_region() const
 {
 	return ROM_NAME( rs232 );
 }
 
 //-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-static MACHINE_CONFIG_FRAGMENT( rs232 )
-	MCFG_RS232_PORT_ADD("rs232", default_rs232_devices, nullptr)
-	MCFG_RS232_RXD_HANDLER(WRITELINE(rs232_interface_device, rs232_rx_w))
-MACHINE_CONFIG_END
-
-machine_config_constructor rs232_interface_device::device_mconfig_additions() const
+void vtech_rs232_interface_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( rs232 );
+	vtech_memexp_device::device_add_mconfig(config);
+
+	RS232_PORT(config, m_rs232, default_rs232_devices, nullptr);
+	m_rs232->rxd_handler().set([this](int state) { m_rx = state; });
 }
 
 
@@ -50,12 +64,11 @@ machine_config_constructor rs232_interface_device::device_mconfig_additions() co
 //**************************************************************************
 
 //-------------------------------------------------
-//  wordpro_device - constructor
+//  vtech_rs232_interface_device - constructor
 //-------------------------------------------------
 
-rs232_interface_device::rs232_interface_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	device_t(mconfig, RS232_INTERFACE, "DSE VZ-200/300 RS-232 Interface", tag, owner, clock, "vz_rs232", __FILE__),
-	device_memexp_interface(mconfig, *this),
+vtech_rs232_interface_device::vtech_rs232_interface_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	vtech_memexp_device(mconfig, VTECH_RS232_INTERFACE, tag, owner, clock),
 	m_rs232(*this, "rs232"),
 	m_rx(1)
 {
@@ -65,22 +78,12 @@ rs232_interface_device::rs232_interface_device(const machine_config &mconfig, co
 //  device_start - device-specific startup
 //-------------------------------------------------
 
-void rs232_interface_device::device_start()
+void vtech_rs232_interface_device::device_start()
 {
-}
+	vtech_memexp_device::device_start();
 
-//-------------------------------------------------
-//  device_reset - device-specific reset
-//-------------------------------------------------
-
-void rs232_interface_device::device_reset()
-{
-	// program
-	m_slot->m_program->install_rom(0x4000, 0x47ff, 0, 0x800, memregion("software")->base());
-
-	// data
-	m_slot->m_program->install_read_handler(0x5000, 0x57ff, read8_delegate(FUNC(rs232_interface_device::receive_data_r), this));
-	m_slot->m_program->install_write_handler(0x5800, 0x5fff, write8_delegate(FUNC(rs232_interface_device::transmit_data_w), this));
+	// register for save states
+	save_item(NAME(m_rx));
 }
 
 
@@ -88,17 +91,12 @@ void rs232_interface_device::device_reset()
 //  IMPLEMENTATION
 //**************************************************************************
 
-WRITE_LINE_MEMBER( rs232_interface_device::rs232_rx_w )
-{
-	m_rx = state;
-}
-
-READ8_MEMBER( rs232_interface_device::receive_data_r )
+uint8_t vtech_rs232_interface_device::receive_data_r()
 {
 	return 0x7f | (m_rx << 7);
 }
 
-WRITE8_MEMBER( rs232_interface_device::transmit_data_w )
+void vtech_rs232_interface_device::transmit_data_w(uint8_t data)
 {
 	m_rs232->write_txd(!BIT(data, 7));
 }

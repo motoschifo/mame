@@ -86,6 +86,8 @@
 #include "hashfile.h"
 #include "nes_slot.h"
 
+#include "cpu/m6502/m6502.h"
+
 #define NES_BATTERY_SIZE 0x2000
 
 
@@ -93,7 +95,7 @@
 //  GLOBAL VARIABLES
 //**************************************************************************
 
-const device_type NES_CART_SLOT = &device_creator<nes_cart_slot_device>;
+DEFINE_DEVICE_TYPE(NES_CART_SLOT, nes_cart_slot_device, "nes_cart_slot", "NES Cartridge Slot")
 
 
 //**************************************************************************
@@ -105,31 +107,41 @@ const device_type NES_CART_SLOT = &device_creator<nes_cart_slot_device>;
 //-------------------------------------------------
 
 device_nes_cart_interface::device_nes_cart_interface(const machine_config &mconfig, device_t &device)
-						: device_slot_card_interface(mconfig, device),
-						m_prg(nullptr),
-						m_vrom(nullptr),
-						m_ciram(nullptr),
-						m_prg_size(0),
-						m_vrom_size(0), m_maincpu(nullptr),
-						m_mapper_sram(nullptr),
-						m_mapper_sram_size(0),
-						m_ce_mask(0),
-						m_ce_state(0),
-						m_vrc_ls_prg_a(0),
-						m_vrc_ls_prg_b(0),
-						m_vrc_ls_chr(0),
-						m_mirroring(PPU_MIRROR_NONE),
-						m_pcb_ctrl_mirror(FALSE),
-						m_four_screen_vram(FALSE),
-						m_has_trainer(FALSE),
-						m_x1_005_alt_mirroring(FALSE),
-						m_bus_conflict(TRUE),
-						m_open_bus(0),
-						m_prg_chunks(0),
-						m_prg_mask(0xffff),
-						m_chr_source(CHRRAM),
-						m_vrom_chunks(0),
-						m_vram_chunks(0)
+	: device_interface(device, "nescart")
+	, m_prg(nullptr)
+	, m_vrom(nullptr)
+	, m_ciram(nullptr)
+	, m_prg_size(0)
+	, m_vrom_size(0)
+	// HACK: to reduce tagmap lookups for PPU-related IRQs, we add a hook to the
+	// main NES CPU here, even if it does not belong to this device.
+	, m_maincpu(*this, ":maincpu")
+	, m_mapper_sram(nullptr)
+	, m_misc_rom(nullptr)
+	, m_mapper_sram_size(0)
+	, m_misc_rom_size(0)
+	, m_ce_mask(0)
+	, m_ce_state(0)
+	, m_mmc1_type(mmc1_type::MMC1B)
+	, m_vrc_ls_prg_a(0)
+	, m_vrc_ls_prg_b(0)
+	, m_vrc_ls_chr(0)
+	, m_n163_vol(0)
+	, m_outer_prg_size(0)
+	, m_outer_chr_size(0)
+	, m_smd133_addr(0x6000)
+	, m_mirroring(PPU_MIRROR_HORZ)
+	, m_pcb_ctrl_mirror(false)
+	, m_four_screen_vram(false)
+	, m_has_trainer(false)
+	, m_x1_005_alt_mirroring(false)
+	, m_bus_conflict(true)
+	, m_open_bus(0)
+	, m_prg_chunks(0)
+	, m_prg_mask(0xffff)
+	, m_chr_source(CHRRAM)
+	, m_vrom_chunks(0)
+	, m_vram_chunks(0)
 {
 }
 
@@ -158,30 +170,28 @@ void device_nes_cart_interface::prg_alloc(size_t size, const char *tag)
 			// A few pirate carts have PRG made of 32K + 2K or some weird similar config
 			// in this case we treat the banking as if this 'extra' PRG is not present and
 			// the pcb code has to handle it by accessing directly m_prg!
-			printf("Warning! The loaded PRG has size not a multiple of 8KB (0x%X)\n", (UINT32)size);
+			printf("Warning! The loaded PRG has size not a multiple of 8KB (0x%X)\n", (uint32_t)size);
 			m_prg_chunks--;
 		}
 
-		m_prg_mask = ((m_prg_chunks << 1) - 1);
+		m_prg_mask = (m_prg_chunks << 1) - 1;
 
 //      printf("first mask %x!\n", m_prg_mask);
 		if ((m_prg_chunks << 1) & m_prg_mask)
 		{
-			int mask_bits = 0, temp = (m_prg_chunks << 1), mapsize;
+			int mask_bits = 0;
 			// contrary to what happens with later systems, like e.g. SNES or MD,
 			// only half a dozen of NES carts have PRG which is not a power of 2
 			// so we use this bank_map only as an exception
 //          printf("uneven rom!\n");
 
 			// 1. redefine mask as (next power of 2)-1
-			for (; temp; )
-			{
+			for (int temp = m_prg_chunks << 1; temp; temp >>= 1)
 				mask_bits++;
-				temp >>= 1;
-			}
+
 			m_prg_mask = (1 << mask_bits) - 1;
 //          printf("new mask %x!\n", m_prg_mask);
-			mapsize = (1 << mask_bits)/2;
+			int mapsize = (1 << mask_bits) / 2;
 
 			// 2. create a bank_map for banks in the range mask/2 -> mask
 			m_prg_bank_map.resize(mapsize);
@@ -194,7 +204,7 @@ void device_nes_cart_interface::prg_alloc(size_t size, const char *tag)
 			while (j % mapsize)
 			{
 				int k = 0, repeat_banks;
-				while ((j % (mapsize >> k)) && k < mask_bits)
+				while (j % (mapsize >> k) && k < mask_bits)
 					k++;
 				repeat_banks = j % (mapsize >> (k - 1));
 				for (int l = 0; l < repeat_banks; l++)
@@ -225,6 +235,17 @@ void device_nes_cart_interface::vrom_alloc(size_t size, const char *tag)
 	}
 }
 
+void device_nes_cart_interface::misc_rom_alloc(size_t size, const char *tag)
+{
+	if (m_misc_rom == nullptr)
+	{
+		std::string tempstring(tag);
+		tempstring.append(NESSLOT_MISC_ROM_REGION_TAG);
+		m_misc_rom = device().machine().memory().region_alloc(tempstring.c_str(), size, 1, ENDIANNESS_LITTLE)->base();
+		m_misc_rom_size = size;
+	}
+}
+
 void device_nes_cart_interface::prgram_alloc(size_t size)
 {
 	m_prgram.resize(size);
@@ -248,20 +269,20 @@ void device_nes_cart_interface::battery_alloc(size_t size)
 
 inline int device_nes_cart_interface::prg_8k_bank_num(int bank_8k)
 {
-	if (m_prg_mask == ((m_prg_chunks << 1) - 1))
+	if (m_prg_mask == (m_prg_chunks << 1) - 1)
 		return bank_8k & m_prg_mask;
 
 	// only a few pirate games (less than a dozen) have PRG which is not power of 2
 	// so we treat it here separately, rather than forcing all games to use m_prg_bank_map
 
 	// case 1: if we are accessing a bank before the end of the image, just return that bank
-	if (bank_8k < ((m_prg_chunks << 1) - 1))
+	if (bank_8k < (m_prg_chunks << 1) - 1)
 		return bank_8k;
 
 	// case 2: otherwise return a mirror using the bank_map!
-//  UINT8 temp = bank_8k;
+//  uint8_t temp = bank_8k;
 	bank_8k &= m_prg_mask;
-	bank_8k -= (m_prg_mask/2 + 1);
+	bank_8k -= m_prg_mask / 2 + 1;
 //  printf("bank: accessed %x (top: %x), returned %x\n", temp, (m_prg_chunks << 1) - 1, m_prg_bank_map[bank_8k]);
 	return m_prg_bank_map[bank_8k];
 }
@@ -271,8 +292,8 @@ inline void device_nes_cart_interface::update_prg_banks(int prg_bank_start, int 
 	for (int prg_bank = prg_bank_start; prg_bank <= prg_bank_end; prg_bank++)
 	{
 		assert(prg_bank >= 0);
-		assert(prg_bank < ARRAY_LENGTH(m_prg_bank));
-		assert(prg_bank < ARRAY_LENGTH(m_prg_bank_mem));
+		assert(prg_bank < std::size(m_prg_bank));
+		assert(prg_bank < std::size(m_prg_bank_mem));
 
 		m_prg_bank_mem[prg_bank]->set_entry(m_prg_bank[prg_bank]);
 	}
@@ -280,11 +301,11 @@ inline void device_nes_cart_interface::update_prg_banks(int prg_bank_start, int 
 
 void device_nes_cart_interface::prg32(int bank)
 {
-	/* if there is only 16k PRG, return */
+	// if there is only 16k PRG, return
 	if (!(m_prg_chunks >> 1))
 		return;
 
-	/* assumes that bank references a 32k chunk */
+	// assumes that bank references a 32k chunk
 	bank = prg_8k_bank_num(bank * 4);
 
 	m_prg_bank[0] = bank + 0;
@@ -296,7 +317,7 @@ void device_nes_cart_interface::prg32(int bank)
 
 void device_nes_cart_interface::prg16_89ab(int bank)
 {
-	/* assumes that bank references a 16k chunk */
+	// assumes that bank references a 16k chunk
 	bank = prg_8k_bank_num(bank * 2);
 
 	m_prg_bank[0] = bank + 0;
@@ -306,7 +327,7 @@ void device_nes_cart_interface::prg16_89ab(int bank)
 
 void device_nes_cart_interface::prg16_cdef(int bank)
 {
-	/* assumes that bank references a 16k chunk */
+	// assumes that bank references a 16k chunk
 	bank = prg_8k_bank_num(bank * 2);
 
 	m_prg_bank[2] = bank + 0;
@@ -314,48 +335,12 @@ void device_nes_cart_interface::prg16_cdef(int bank)
 	update_prg_banks(2, 3);
 }
 
-void device_nes_cart_interface::prg8_89(int bank)
-{
-	/* assumes that bank references an 8k chunk */
-	bank = prg_8k_bank_num(bank);
-
-	m_prg_bank[0] = bank;
-	update_prg_banks(0, 0);
-}
-
-void device_nes_cart_interface::prg8_ab(int bank)
-{
-	/* assumes that bank references an 8k chunk */
-	bank = prg_8k_bank_num(bank);
-
-	m_prg_bank[1] = bank;
-	update_prg_banks(1, 1);
-}
-
-void device_nes_cart_interface::prg8_cd(int bank)
-{
-	/* assumes that bank references an 8k chunk */
-	bank = prg_8k_bank_num(bank);
-
-	m_prg_bank[2] = bank;
-	update_prg_banks(2, 2);
-}
-
-void device_nes_cart_interface::prg8_ef(int bank)
-{
-	/* assumes that bank references an 8k chunk */
-	bank = prg_8k_bank_num(bank);
-
-	m_prg_bank[3] = bank;
-	update_prg_banks(3, 3);
-}
-
-/* We also define an additional helper to map 8k PRG-ROM to one of the banks (passed as parameter) */
+// We define a parameterized helper to map 8k PRG-ROM to one of the banks
 void device_nes_cart_interface::prg8_x(int start, int bank)
 {
 	assert(start < 4);
 
-	/* assumes that bank references an 8k chunk */
+	// assumes that bank references an 8k chunk
 	bank = prg_8k_bank_num(bank);
 
 	m_prg_bank[start] = bank;
@@ -366,110 +351,36 @@ void device_nes_cart_interface::prg8_x(int start, int bank)
 //  CHR helpers
 //-------------------------------------------------
 
-inline void device_nes_cart_interface::chr_sanity_check( int source )
+void device_nes_cart_interface::bank_chr(int shift, int start, int bank, int source)
 {
-	if (source == CHRRAM && m_vram.empty())
-		fatalerror("CHRRAM bankswitch with no VRAM\n");
-
-	if (source == CHRROM && m_vrom == nullptr)
-		fatalerror("CHRROM bankswitch with no VROM\n");
-}
-
-void device_nes_cart_interface::chr8(int bank, int source)
-{
-	chr_sanity_check(source);
+	uint8_t *base_ptr;
+	uint32_t chr_chunks;
 
 	if (source == CHRRAM)
 	{
-		bank &= (m_vram_chunks - 1);
-		for (int i = 0; i < 8; i++)
-		{
-			m_chr_src[i] = source;
-			m_chr_orig[i] = (bank * 0x2000) + (i * 0x400); // for save state uses!
-			m_chr_access[i] = &m_vram[m_chr_orig[i]];
-		}
-	}
-	else
-	{
-		bank &= (m_vrom_chunks - 1);
-		for (int i = 0; i < 8; i++)
-		{
-			m_chr_src[i] = source;
-			m_chr_orig[i] = (bank * 0x2000) + (i * 0x400); // for save state uses!
-			m_chr_access[i] = &m_vrom[m_chr_orig[i]];
-		}
-	}
-}
+		assert(!m_vram.empty());
 
-void device_nes_cart_interface::chr4_x(int start, int bank, int source)
-{
-	chr_sanity_check(source);
-
-	if (source == CHRRAM)
-	{
-		bank &= ((m_vram_chunks << 1) - 1);
-		for (int i = 0; i < 4; i++)
-		{
-			m_chr_src[i + start] = source;
-			m_chr_orig[i + start] = (bank * 0x1000) + (i * 0x400); // for save state uses!
-			m_chr_access[i + start] = &m_vram[m_chr_orig[i + start]];
-		}
+		base_ptr = &m_vram[0];
+		chr_chunks = m_vram_chunks;
 	}
-	else
+	else // source == CHRROM
 	{
-		bank &= ((m_vrom_chunks << 1) - 1);
-		for (int i = 0; i < 4; i++)
-		{
-			m_chr_src[i + start] = source;
-			m_chr_orig[i + start] = (bank * 0x1000) + (i * 0x400); // for save state uses!
-			m_chr_access[i + start] = &m_vrom[m_chr_orig[i + start]];
-		}
-	}
-}
+		assert(m_vrom != nullptr);
 
-void device_nes_cart_interface::chr2_x(int start, int bank, int source)
-{
-	chr_sanity_check(source);
-
-	if (source == CHRRAM)
-	{
-		bank &= ((m_vram_chunks << 2) - 1);
-		for (int i = 0; i < 2; i++)
-		{
-			m_chr_src[i + start] = source;
-			m_chr_orig[i + start] = (bank * 0x800) + (i * 0x400); // for save state uses!
-			m_chr_access[i + start] = &m_vram[m_chr_orig[i + start]];
-		}
+		base_ptr = m_vrom;
+		chr_chunks = m_vrom_chunks;
 	}
-	else
-	{
-		bank &= ((m_vrom_chunks << 2) - 1);
-		for (int i = 0; i < 2; i++)
-		{
-			m_chr_src[i + start] = source;
-			m_chr_orig[i + start] = (bank * 0x800) + (i * 0x400); // for save state uses!
-			m_chr_access[i + start] = &m_vrom[m_chr_orig[i + start]];
-		}
-	}
-}
 
-void device_nes_cart_interface::chr1_x(int start, int bank, int source)
-{
-	chr_sanity_check(source);
+	bank &= (chr_chunks << (3 - shift)) - 1;
+	int size = 0x400 << shift;
+	int bank_start = bank * size;
+	int kbyte = 1 << shift;
 
-	if (source == CHRRAM)
+	for (int i = 0; i < kbyte; i++)
 	{
-		bank &= ((m_vram_chunks << 3) - 1);
-		m_chr_src[start] = source;
-		m_chr_orig[start] = (bank * 0x400); // for save state uses!
-		m_chr_access[start] = &m_vram[m_chr_orig[start]];
-	}
-	else
-	{
-		bank &= ((m_vrom_chunks << 3) - 1);
-		m_chr_src[start] = source;
-		m_chr_orig[start] = (bank * 0x400); // for save state uses!
-		m_chr_access[start] = &m_vrom[m_chr_orig[start]];
+		m_chr_src[i + start] = source;
+		m_chr_orig[i + start] = bank_start + i * 0x400; // for save state uses!
+		m_chr_access[i + start] = &base_ptr[m_chr_orig[i + start]];
 	}
 }
 
@@ -479,7 +390,7 @@ void device_nes_cart_interface::chr1_x(int start, int bank, int source)
 
 void device_nes_cart_interface::set_nt_page(int page, int source, int bank, int writable)
 {
-	UINT8* base_ptr;
+	uint8_t *base_ptr;
 
 	switch (source)
 	{
@@ -487,7 +398,7 @@ void device_nes_cart_interface::set_nt_page(int page, int source, int bank, int 
 			base_ptr = &m_ext_ntram[0];
 			break;
 		case VROM:
-			bank &= ((m_vrom_chunks << 3) - 1);
+			bank &= (m_vrom_chunks << 3) - 1;
 			base_ptr = m_vrom;
 			break;
 		case EXRAM:
@@ -500,7 +411,7 @@ void device_nes_cart_interface::set_nt_page(int page, int source, int bank, int 
 			break;
 	}
 
-	page &= 3; /* mask down to the 4 logical pages */
+	page &= 3; // mask down to the 4 logical pages
 	m_nt_src[page] = source;
 
 	if (base_ptr)
@@ -514,20 +425,21 @@ void device_nes_cart_interface::set_nt_page(int page, int source, int bank, int 
 
 void device_nes_cart_interface::set_nt_mirroring(int mirroring)
 {
-	/* setup our videomem handlers based on mirroring */
+	// setup our videomem handlers based on mirroring
 	switch (mirroring)
 	{
-		case PPU_MIRROR_VERT:
-			set_nt_page(0, CIRAM, 0, 1);
-			set_nt_page(1, CIRAM, 1, 1);
-			set_nt_page(2, CIRAM, 0, 1);
-			set_nt_page(3, CIRAM, 1, 1);
-			break;
-
+		default:
 		case PPU_MIRROR_HORZ:
 			set_nt_page(0, CIRAM, 0, 1);
 			set_nt_page(1, CIRAM, 0, 1);
 			set_nt_page(2, CIRAM, 1, 1);
+			set_nt_page(3, CIRAM, 1, 1);
+			break;
+
+		case PPU_MIRROR_VERT:
+			set_nt_page(0, CIRAM, 0, 1);
+			set_nt_page(1, CIRAM, 1, 1);
+			set_nt_page(2, CIRAM, 0, 1);
 			set_nt_page(3, CIRAM, 1, 1);
 			break;
 
@@ -552,15 +464,18 @@ void device_nes_cart_interface::set_nt_mirroring(int mirroring)
 			set_nt_page(2, CART_NTRAM, 2, 1);
 			set_nt_page(3, CART_NTRAM, 3, 1);
 			break;
-
-		case PPU_MIRROR_NONE:
-		default:
-			set_nt_page(0, CIRAM, 0, 1);
-			set_nt_page(1, CIRAM, 0, 1);
-			set_nt_page(2, CIRAM, 1, 1);
-			set_nt_page(3, CIRAM, 1, 1);
-			break;
 	}
+}
+
+//-------------------------------------------------
+//  Interrupt helpers
+//-------------------------------------------------
+
+DECLARE_WRITE_LINE_MEMBER(device_nes_cart_interface::set_irq_line)
+{
+	assert(state == ASSERT_LINE || state == CLEAR_LINE);
+
+	m_maincpu->set_input_line(m6502_device::IRQ_LINE, state);
 }
 
 //-------------------------------------------------
@@ -570,9 +485,9 @@ void device_nes_cart_interface::set_nt_mirroring(int mirroring)
 // Helper function for the few mappers reading from 0x8000-0xffff for protection
 // so that they can access the ROM after the protection handling (which overwrites
 // the memory banks)
-UINT8 device_nes_cart_interface::hi_access_rom(UINT32 offset)
+uint8_t device_nes_cart_interface::hi_access_rom(uint32_t offset)
 {
-	int bank = (offset & 0x6000) >> 13;
+	int bank = BIT(offset, 13, 2);
 	return m_prg[m_prg_bank[bank] * 0x2000 + (offset & 0x1fff)];
 }
 
@@ -580,10 +495,10 @@ UINT8 device_nes_cart_interface::hi_access_rom(UINT32 offset)
 // Tests by blargg showed that in many of the boards suffering of CPU/ROM
 // conflicts the behaviour can be accurately emulated by writing not the
 // original data, but data & rom[offset]
-UINT8 device_nes_cart_interface::account_bus_conflict(UINT32 offset, UINT8 data)
+uint8_t device_nes_cart_interface::account_bus_conflict(uint32_t offset, uint8_t data)
 {
 	// pirate variants of boards subject to bus conflict are often not subject to it
-	// so we allow to set m_bus_conflict to FALSE at loading time when necessary
+	// so we allow to set m_bus_conflict to false at loading time when necessary
 	if (m_bus_conflict)
 		return data & hi_access_rom(offset);
 	else
@@ -595,34 +510,32 @@ UINT8 device_nes_cart_interface::account_bus_conflict(UINT32 offset, UINT8 data)
 //  PPU accessors
 //-------------------------------------------------
 
-WRITE8_MEMBER(device_nes_cart_interface::chr_w)
+void device_nes_cart_interface::chr_w(offs_t offset, uint8_t data)
 {
-	int bank = offset >> 10;
+	int bank = BIT(offset, 10, 3);
 
 	if (m_chr_src[bank] == CHRRAM)
 		m_chr_access[bank][offset & 0x3ff] = data;
 }
 
-READ8_MEMBER(device_nes_cart_interface::chr_r)
+uint8_t device_nes_cart_interface::chr_r(offs_t offset)
 {
-	int bank = offset >> 10;
+	int bank = BIT(offset, 10, 3);
 	return m_chr_access[bank][offset & 0x3ff];
 }
 
 
-WRITE8_MEMBER(device_nes_cart_interface::nt_w)
+void device_nes_cart_interface::nt_w(offs_t offset, uint8_t data)
 {
-	int page = ((offset & 0xc00) >> 10);
+	int page = BIT(offset, 10, 2);
 
-	if (!m_nt_writable[page])
-		return;
-
-	m_nt_access[page][offset & 0x3ff] = data;
+	if (m_nt_writable[page])
+		m_nt_access[page][offset & 0x3ff] = data;
 }
 
-READ8_MEMBER(device_nes_cart_interface::nt_r)
+uint8_t device_nes_cart_interface::nt_r(offs_t offset)
 {
-	int page = ((offset & 0xc00) >> 10);
+	int page = BIT(offset, 10, 2);
 	return m_nt_access[page][offset & 0x3ff];
 }
 
@@ -636,26 +549,26 @@ READ8_MEMBER(device_nes_cart_interface::nt_r)
 //  source)
 //-------------------------------------------------
 
-READ8_MEMBER(device_nes_cart_interface::read_l)
+uint8_t device_nes_cart_interface::read_l(offs_t offset)
 {
-	return m_open_bus;
+	return get_open_bus();
 }
 
-READ8_MEMBER(device_nes_cart_interface::read_m)
+uint8_t device_nes_cart_interface::read_m(offs_t offset)
 {
 	if (!m_battery.empty())
 		return m_battery[offset & (m_battery.size() - 1)];
 	if (!m_prgram.empty())
 		return m_prgram[offset & (m_prgram.size() - 1)];
 
-	return m_open_bus;
+	return get_open_bus();
 }
 
-WRITE8_MEMBER(device_nes_cart_interface::write_l)
+void device_nes_cart_interface::write_l(offs_t offset, uint8_t data)
 {
 }
 
-WRITE8_MEMBER(device_nes_cart_interface::write_m)
+void device_nes_cart_interface::write_m(offs_t offset, uint8_t data)
 {
 	if (!m_battery.empty())
 		m_battery[offset & (m_battery.size() - 1)] = data;
@@ -663,17 +576,13 @@ WRITE8_MEMBER(device_nes_cart_interface::write_m)
 		m_prgram[offset & (m_prgram.size() - 1)] = data;
 }
 
-WRITE8_MEMBER(device_nes_cart_interface::write_h)
+void device_nes_cart_interface::write_h(offs_t offset, uint8_t data)
 {
 }
 
 
-void device_nes_cart_interface::pcb_start(running_machine &machine, UINT8 *ciram_ptr, bool cart_mounted)
+void device_nes_cart_interface::pcb_start(running_machine &machine, uint8_t *ciram_ptr, bool cart_mounted)
 {
-	// HACK: to reduce tagmap lookups for PPU-related IRQs, we add a hook to the
-	// main NES CPU here, even if it does not belong to this device.
-	m_maincpu = machine.device<cpu_device>("maincpu");
-
 	if (cart_mounted)       // disksys expansion can arrive here without the memory banks!
 	{
 		// Setup PRG
@@ -701,7 +610,7 @@ void device_nes_cart_interface::pcb_start(running_machine &machine, UINT8 *ciram
 
 	if (m_four_screen_vram)
 	{
-		m_ext_ntram.resize(0x2000);
+		m_ext_ntram.resize(0x1000);
 		device().save_item(NAME(m_ext_ntram));
 	}
 
@@ -715,6 +624,9 @@ void device_nes_cart_interface::pcb_start(running_machine &machine, UINT8 *ciram
 		device().save_item(NAME(m_vram));
 	if (!m_battery.empty())
 		device().save_item(NAME(m_battery));
+
+	// open bus
+	device().save_item(NAME(m_open_bus));
 }
 
 void device_nes_cart_interface::pcb_reg_postload(running_machine &machine)
@@ -742,13 +654,13 @@ void device_nes_cart_interface::nes_banks_restore()
 //-------------------------------------------------
 //  nes_cart_slot_device - constructor
 //-------------------------------------------------
-nes_cart_slot_device::nes_cart_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-						device_t(mconfig, NES_CART_SLOT, "NES Cartridge Slot", tag, owner, clock, "nes_cart_slot", __FILE__),
-						device_image_interface(mconfig, *this),
-						device_slot_interface(mconfig, *this),
-						m_crc_hack(0), m_cart(nullptr),
-						m_pcb_id(NO_BOARD),
-						m_must_be_loaded(1)
+nes_cart_slot_device::nes_cart_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, NES_CART_SLOT, tag, owner, clock)
+	, device_cartrom_image_interface(mconfig, *this)
+	, device_single_card_slot_interface<device_nes_cart_interface>(mconfig, *this)
+	, m_crc_hack(0)
+	, m_cart(nullptr)
+	, m_pcb_id(NO_BOARD)
 {
 }
 
@@ -766,23 +678,11 @@ nes_cart_slot_device::~nes_cart_slot_device()
 
 void nes_cart_slot_device::device_start()
 {
-	m_cart = dynamic_cast<device_nes_cart_interface *>(get_card_device());
-}
-
-//-------------------------------------------------
-//  device_config_complete - perform any
-//  operations now that the configuration is
-//  complete
-//-------------------------------------------------
-
-void nes_cart_slot_device::device_config_complete()
-{
-	// set brief and instance name
-	update_names();
+	m_cart = get_card_device();
 }
 
 
-void nes_cart_slot_device::pcb_start(UINT8 *ciram_ptr)
+void nes_cart_slot_device::pcb_start(uint8_t *ciram_ptr)
 {
 	if (m_cart)
 		m_cart->pcb_start(machine(), ciram_ptr, exists());
@@ -805,8 +705,8 @@ void nes_cart_slot_device::pcb_reset()
 
  -------------------------------------------------*/
 
-/* Include emulation of NES PCBs for softlist */
-#include "nes_pcb.inc"
+// Include emulation of NES PCBs for softlist
+#include "nes_pcb.hxx"
 
 
 /*-------------------------------------------------
@@ -815,8 +715,8 @@ void nes_cart_slot_device::pcb_reset()
 
  -------------------------------------------------*/
 
-/* Include emulation of UNIF Boards for .unf files */
-#include "nes_unif.inc"
+// Include emulation of UNIF Boards for .unf files
+#include "nes_unif.hxx"
 
 
 /*-------------------------------------------------
@@ -825,38 +725,38 @@ void nes_cart_slot_device::pcb_reset()
 
  -------------------------------------------------*/
 
-/* Include emulation of iNES Mappers for .nes files */
-#include "nes_ines.inc"
+// Include emulation of iNES Mappers for .nes files
+#include "nes_ines.hxx"
 
 
-bool nes_cart_slot_device::call_load()
+image_init_result nes_cart_slot_device::call_load()
 {
 	if (m_cart)
 	{
-		if (software_entry() == nullptr)
+		if (!loaded_through_softlist())
 		{
 			char magic[4];
 
-			/* Check first 4 bytes of the image to decide if it is UNIF or iNES */
-			/* Unfortunately, many .unf files have been released as .nes, so we cannot rely on extensions only */
+			// Check first 4 bytes of the image to decide if it is UNIF or iNES
+			// Unfortunately, many .unf files have been released as .nes, so we cannot rely on extensions only
 			fread(magic, 4);
 
-			if ((magic[0] == 'N') && (magic[1] == 'E') && (magic[2] == 'S'))    /* If header starts with 'NES' it is iNES */
+			if ((magic[0] == 'N') && (magic[1] == 'E') && (magic[2] == 'S'))    // If header starts with 'NES' it is iNES
 			{
 				if (length() <= 0x10)
 				{
 					logerror("%s only contains the iNES header and no data.\n", filename());
-					return IMAGE_INIT_FAIL;
+					return image_init_result::FAIL;
 				}
 
 				call_load_ines();
 			}
-			else if ((magic[0] == 'U') && (magic[1] == 'N') && (magic[2] == 'I') && (magic[3] == 'F')) /* If header starts with 'UNIF' it is UNIF */
+			else if ((magic[0] == 'U') && (magic[1] == 'N') && (magic[2] == 'I') && (magic[3] == 'F')) // If header starts with 'UNIF' it is UNIF
 			{
 				if (length() <= 0x20)
 				{
 					logerror("%s only contains the UNIF header and no data.\n", filename());
-					return IMAGE_INIT_FAIL;
+					return image_init_result::FAIL;
 				}
 
 				call_load_unif();
@@ -864,14 +764,15 @@ bool nes_cart_slot_device::call_load()
 			else
 			{
 				logerror("%s is NOT a file in either iNES or UNIF format.\n", filename());
-				return IMAGE_INIT_FAIL;
+				seterror(image_error::INVALIDIMAGE, "File is neither iNES or UNIF format");
+				return image_init_result::FAIL;
 			}
 		}
 		else
 			call_load_pcb();
 	}
 
-	return IMAGE_INIT_PASS;
+	return image_init_result::PASS;
 }
 
 
@@ -885,8 +786,8 @@ void nes_cart_slot_device::call_unload()
 	{
 		if (m_cart->get_battery_size() || m_cart->get_mapper_sram_size())
 		{
-			UINT32 tot_size = m_cart->get_battery_size() + m_cart->get_mapper_sram_size();
-			dynamic_buffer temp_nvram(tot_size);
+			uint32_t tot_size = m_cart->get_battery_size() + m_cart->get_mapper_sram_size();
+			std::vector<uint8_t> temp_nvram(tot_size);
 			if (m_cart->get_battery_size())
 				memcpy(&temp_nvram[0], m_cart->get_battery_base(), m_cart->get_battery_size());
 			if (m_cart->get_mapper_sram_size())
@@ -899,36 +800,25 @@ void nes_cart_slot_device::call_unload()
 
 
 /*-------------------------------------------------
- call softlist load
- -------------------------------------------------*/
-
-bool nes_cart_slot_device::call_softlist_load(software_list_device &swlist, const char *swname, const rom_entry *start_entry)
-{
-	machine().rom_load().load_software_part_region(*this, swlist, swname, start_entry);
-	return TRUE;
-}
-
-/*-------------------------------------------------
  get default card software
  -------------------------------------------------*/
 
-std::string nes_cart_slot_device::get_default_card_software()
+std::string nes_cart_slot_device::get_default_card_software(get_default_card_software_hook &hook) const
 {
-	if (open_image_file(mconfig().options()))
+	if (hook.image_file())
 	{
+		uint64_t len;
+		hook.image_file()->length(len); // FIXME: check error return, guard against excessively large files
+		std::vector<uint8_t> rom(len);
+
+		size_t actual;
+		hook.image_file()->read(&rom[0], len, actual); // FIXME: check error return or read returning short
+
 		const char *slot_string = "nrom";
-		UINT32 len = m_file->size();
-		dynamic_buffer rom(len);
-
-		m_file->read(&rom[0], len);
-
 		if ((rom[0] == 'N') && (rom[1] == 'E') && (rom[2] == 'S'))
-			slot_string = get_default_card_ines(&rom[0], len);
-
-		if ((rom[0] == 'U') && (rom[1] == 'N') && (rom[2] == 'I') && (rom[3] == 'F'))
+			slot_string = get_default_card_ines(hook, &rom[0], len);
+		else if ((rom[0] == 'U') && (rom[1] == 'N') && (rom[2] == 'I') && (rom[3] == 'F'))
 			slot_string = get_default_card_unif(&rom[0], len);
-
-		clear();
 
 		return std::string(slot_string);
 	}
@@ -941,11 +831,11 @@ std::string nes_cart_slot_device::get_default_card_software()
  read
  -------------------------------------------------*/
 
-READ8_MEMBER(nes_cart_slot_device::read_l)
+uint8_t nes_cart_slot_device::read_l(offs_t offset)
 {
 	if (m_cart)
 	{
-		UINT8 val = m_cart->read_l(space, offset);
+		uint8_t val = m_cart->read_l(offset);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x4100) & 0xff00) >> 8);
 		return val;
@@ -954,11 +844,11 @@ READ8_MEMBER(nes_cart_slot_device::read_l)
 		return 0xff;
 }
 
-READ8_MEMBER(nes_cart_slot_device::read_m)
+uint8_t nes_cart_slot_device::read_m(offs_t offset)
 {
 	if (m_cart)
 	{
-		UINT8 val = m_cart->read_m(space, offset);
+		uint8_t val = m_cart->read_m(offset);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x6000) & 0xff00) >> 8);
 		return val;
@@ -967,11 +857,11 @@ READ8_MEMBER(nes_cart_slot_device::read_m)
 		return 0xff;
 }
 
-READ8_MEMBER(nes_cart_slot_device::read_h)
+uint8_t nes_cart_slot_device::read_h(offs_t offset)
 {
 	if (m_cart)
 	{
-		UINT8 val = m_cart->read_h(space, offset);
+		uint8_t val = m_cart->read_h(offset);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x8000) & 0xff00) >> 8);
 		return val;
@@ -980,11 +870,11 @@ READ8_MEMBER(nes_cart_slot_device::read_h)
 		return 0xff;
 }
 
-READ8_MEMBER(nes_cart_slot_device::read_ex)
+uint8_t nes_cart_slot_device::read_ex(offs_t offset)
 {
 	if (m_cart)
 	{
-		UINT8 val = m_cart->read_ex(space, offset);
+		uint8_t val = m_cart->read_ex(offset);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x4020) & 0xff00) >> 8);
 		return val;
@@ -998,56 +888,42 @@ READ8_MEMBER(nes_cart_slot_device::read_ex)
  write
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_cart_slot_device::write_l)
+void nes_cart_slot_device::write_l(offs_t offset, uint8_t data)
 {
 	if (m_cart)
 	{
-		m_cart->write_l(space, offset, data);
+		m_cart->write_l(offset, data);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x4100) & 0xff00) >> 8);
 	}
 }
 
-WRITE8_MEMBER(nes_cart_slot_device::write_m)
+void nes_cart_slot_device::write_m(offs_t offset, uint8_t data)
 {
 	if (m_cart)
 	{
-		m_cart->write_m(space, offset, data);
+		m_cart->write_m(offset, data);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x6000) & 0xff00) >> 8);
 	}
 }
 
-WRITE8_MEMBER(nes_cart_slot_device::write_h)
+void nes_cart_slot_device::write_h(offs_t offset, uint8_t data)
 {
 	if (m_cart)
 	{
-		m_cart->write_h(space, offset, data);
+		m_cart->write_h(offset, data);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x8000) & 0xff00) >> 8);
 	}
 }
 
-WRITE8_MEMBER(nes_cart_slot_device::write_ex)
+void nes_cart_slot_device::write_ex(offs_t offset, uint8_t data)
 {
 	if (m_cart)
 	{
-		m_cart->write_ex(space, offset, data);
+		m_cart->write_ex(offset, data);
 		// update open bus
 		m_cart->set_open_bus(((offset + 0x4020) & 0xff00) >> 8);
 	}
-}
-
-
-//-------------------------------------------------
-//  partial hash function to be used by
-//  device_image_partialhash_func
-//-------------------------------------------------
-
-void nes_partialhash(hash_collection &dest, const unsigned char *data,
-						unsigned long length, const char *functions)
-{
-	if (length <= 16)
-		return;
-	dest.compute(&data[16], length - 16, functions);
 }

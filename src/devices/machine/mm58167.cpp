@@ -8,26 +8,28 @@
 
 **********************************************************************/
 
+#include "emu.h"
 #include "mm58167.h"
+#include "machine/timehelp.h"
 
 //**************************************************************************
 //  LIVE DEVICE
 //**************************************************************************
 
 // device type definition
-const device_type MM58167 = &device_creator<mm58167_device>;
+DEFINE_DEVICE_TYPE(MM58167, mm58167_device, "mm58167", "National Semiconductor MM58167 RTC")
 
 // registers (0-7 are the live data, 8-f are the setting for the compare IRQ)
 typedef enum
 {
-	R_CNT_MILLISECONDS = 0, // 0 = milliseconds
-	R_CNT_HUNDTENTHS,       // 1 = hundreds and tenths of seconds
-	R_CNT_SECONDS,          // 2 = seconds
-	R_CNT_MINUTES,          // 3 = minutes
-	R_CNT_HOURS,            // 4 = hours
-	R_CNT_DAYOFWEEK,        // 5 = day of the week
-	R_CNT_DAYOFMONTH,       // 6 = day of the month
-	R_CNT_MONTH,            // 7 = month
+	R_CNT_MILLISECONDS = 0, // 0 = milliseconds [0..9]
+	R_CNT_HUNDTENTHS,       // 1 = hundreds and tenths of seconds [0..99]
+	R_CNT_SECONDS,          // 2 = seconds [0..59]
+	R_CNT_MINUTES,          // 3 = minutes [0..59]
+	R_CNT_HOURS,            // 4 = hours [0..23]
+	R_CNT_DAYOFWEEK,        // 5 = day of the week [1..7, Sunday = 1]
+	R_CNT_DAYOFMONTH,       // 6 = day of the month [1..31; but Feb 29 = Mar 0]
+	R_CNT_MONTH,            // 7 = month [1..12]
 	R_RAM_MILLISECONDS,     // 8 = milliseconds
 	R_RAM_HUNDTENTHS,       // 9 = hundreds and tenths of seconds
 	R_RAM_SECONDS,          // a = seconds
@@ -50,8 +52,8 @@ typedef enum
 //  mm58167_device - constructor
 //-------------------------------------------------
 
-mm58167_device::mm58167_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, MM58167, "National Semiconductor MM58167", tag, owner, clock, "mm58167", __FILE__),
+mm58167_device::mm58167_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, MM58167, tag, owner, clock),
 		device_rtc_interface(mconfig, *this),
 		m_irq_w(*this)
 {
@@ -83,8 +85,6 @@ void mm58167_device::device_start()
 
 void mm58167_device::device_reset()
 {
-	set_current_time(machine());
-
 	m_regs[R_CTL_STATUS] = 0;   // not busy
 	m_regs[R_CTL_IRQSTATUS] = 0;
 	m_regs[R_CTL_IRQCONTROL] = 0;
@@ -93,16 +93,11 @@ void mm58167_device::device_reset()
 }
 
 
-static inline UINT8 make_bcd(UINT8 data)
-{
-	return ((data / 10) << 4) | (data % 10);
-}
-
 //-------------------------------------------------
 //  device_timer - handler timer events
 //-------------------------------------------------
 
-void mm58167_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void mm58167_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	m_milliseconds++;
 
@@ -126,8 +121,8 @@ void mm58167_device::device_timer(emu_timer &timer, device_timer_id id, int para
 		if ((m_regs[R_CTL_IRQCONTROL] & 0x80) && m_regs[R_CNT_MONTH]      != old_month)         set_irq(7); // every month
 	}
 
-	m_regs[R_CNT_MILLISECONDS] = make_bcd(m_milliseconds % 10);
-	m_regs[R_CNT_HUNDTENTHS] = make_bcd(m_milliseconds / 10);
+	m_regs[R_CNT_MILLISECONDS] = time_helper::make_bcd(m_milliseconds % 10);
+	m_regs[R_CNT_HUNDTENTHS] = time_helper::make_bcd(m_milliseconds / 10);
 
 	// 10Hz IRQ
 	if ((m_regs[R_CTL_IRQCONTROL] & 0x02) && (m_milliseconds % 100) == 0)
@@ -160,12 +155,12 @@ void mm58167_device::device_timer(emu_timer &timer, device_timer_id id, int para
 
 void mm58167_device::rtc_clock_updated(int year, int month, int day, int day_of_week, int hour, int minute, int second)
 {
-	m_regs[R_CNT_SECONDS] = make_bcd(second);           // seconds (BCD)
-	m_regs[R_CNT_MINUTES] = make_bcd(minute);           // minutes (BCD)
-	m_regs[R_CNT_HOURS] = make_bcd(hour);               // hour (BCD)
-	m_regs[R_CNT_DAYOFWEEK] = make_bcd(day_of_week);    // day of the week (BCD)
-	m_regs[R_CNT_DAYOFMONTH] = make_bcd(day);           // day of the month (BCD)
-	m_regs[R_CNT_MONTH] = make_bcd(month);              // month (BCD)
+	m_regs[R_CNT_SECONDS] = time_helper::make_bcd(second);           // seconds (BCD)
+	m_regs[R_CNT_MINUTES] = time_helper::make_bcd(minute);           // minutes (BCD)
+	m_regs[R_CNT_HOURS] = time_helper::make_bcd(hour);               // hour (BCD)
+	m_regs[R_CNT_DAYOFWEEK] = time_helper::make_bcd(day_of_week);    // day of the week (BCD)
+	m_regs[R_CNT_DAYOFMONTH] = time_helper::make_bcd(day);           // day of the month (BCD)
+	m_regs[R_CNT_MONTH] = time_helper::make_bcd(month);              // month (BCD)
 }
 
 void mm58167_device::set_irq(int bit)
@@ -185,14 +180,14 @@ void mm58167_device::update_rtc()
 	m_milliseconds = (bcd_to_integer(m_regs[R_CNT_HUNDTENTHS]) * 10) + (bcd_to_integer(m_regs[R_CNT_MILLISECONDS] >> 4) % 10);
 }
 
-READ8_MEMBER(mm58167_device::read)
+uint8_t mm58167_device::read(offs_t offset)
 {
 //  printf("read reg %x = %02x\n", offset, m_regs[offset]);
 
-	if (offset == R_CTL_IRQSTATUS && !space.debugger_access())
+	if (offset == R_CTL_IRQSTATUS && !machine().side_effects_disabled())
 	{
 		// reading the IRQ status clears IRQ line and IRQ status
-		UINT8 data = m_regs[offset];
+		uint8_t data = m_regs[offset];
 		m_regs[R_CTL_IRQSTATUS] = 0;
 		m_irq_w(CLEAR_LINE);
 		return data;
@@ -201,7 +196,7 @@ READ8_MEMBER(mm58167_device::read)
 	return m_regs[offset];
 }
 
-WRITE8_MEMBER(mm58167_device::write)
+void mm58167_device::write(offs_t offset, uint8_t data)
 {
 //  printf("%02x to reg %x\n", data, offset);
 
@@ -252,10 +247,7 @@ WRITE8_MEMBER(mm58167_device::write)
 			break;
 
 		case R_CTL_IRQCONTROL:
-			if (data != 0)
-			{
-				logerror("MM58167: IRQs not implemented\n");
-			}
+			m_regs[R_CTL_IRQCONTROL]=data;
 			break;
 	}
 }

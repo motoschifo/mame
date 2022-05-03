@@ -7,17 +7,18 @@
 */
 
 #include "emu.h"
-
-#include "cpu/pdp1/tx0.h"
 #include "includes/tx0.h"
+
 #include "video/crt.h"
 
+#include <algorithm>
 
 
 
-inline void tx0_state::tx0_plot_pixel(bitmap_ind16 &bitmap, int x, int y, UINT32 color)
+
+inline void tx0_state::tx0_plot_pixel(bitmap_ind16 &bitmap, int x, int y, uint32_t color)
 {
-	bitmap.pix16(y, x) = color;
+	bitmap.pix(y, x) = color;
 }
 
 /*
@@ -39,7 +40,7 @@ void tx0_state::video_start()
 }
 
 
-void tx0_state::screen_eof_tx0(screen_device &screen, bool state)
+WRITE_LINE_MEMBER(tx0_state::screen_vblank_tx0)
 {
 	// rising edge
 	if (state)
@@ -55,8 +56,8 @@ void tx0_state::screen_eof_tx0(screen_device &screen, bool state)
 void tx0_state::tx0_plot(int x, int y)
 {
 	/* compute pixel coordinates and plot */
-	x = x*crt_window_width/0777;
-	y = y*crt_window_height/0777;
+	x = (x ^ 0400) * crt_window_width / 0777;
+	y = (y ^ 0400) * crt_window_height / 0777;
 	m_crt->plot(x, y);
 }
 
@@ -64,7 +65,7 @@ void tx0_state::tx0_plot(int x, int y)
 /*
     screen_update_tx0: effectively redraw the screen
 */
-UINT32 tx0_state::screen_update_tx0(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t tx0_state::screen_update_tx0(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	m_crt->update(bitmap);
 
@@ -221,14 +222,12 @@ void tx0_state::tx0_draw_vline(bitmap_ind16 &bitmap, int x, int y, int height, i
 		tx0_plot_pixel(bitmap, x, y++, color);
 }
 
-#ifdef UNUSED_FUNCTION
 /* draw a horizontal line */
 void tx0_state::tx0_draw_hline(bitmap_ind16 &bitmap, int x, int y, int width, int color)
 {
 	while (width--)
 		tx0_plot_pixel(bitmap, x++, y, color);
 }
-#endif
 
 /*
     draw the operator control panel (fixed backdrop)
@@ -343,12 +342,13 @@ enum
 
 void tx0_state::tx0_typewriter_linefeed()
 {
-	UINT8 buf[typewriter_window_width];
-	int y;
+	uint8_t buf[typewriter_window_width];
 
-	for (y=0; y<typewriter_window_height-typewriter_scroll_step; y++)
+	assert(typewriter_window_width <= m_typewriter_bitmap.width());
+	assert(typewriter_window_height <= m_typewriter_bitmap.height());
+	for (int y=0; y<typewriter_window_height-typewriter_scroll_step; y++)
 	{
-		extract_scanline8(m_typewriter_bitmap, 0, y+typewriter_scroll_step, typewriter_window_width, buf);
+		std::copy_n(&m_typewriter_bitmap.pix(y+typewriter_scroll_step, 0), typewriter_window_width, buf);
 		draw_scanline8(m_typewriter_bitmap, 0, y, typewriter_window_width, buf, m_palette->pens());
 	}
 

@@ -9,12 +9,11 @@
 
 ***************************************************************************/
 
+#ifndef MAME_BUS_VTECH_IOEXP_JOYSTICK_H
+#define MAME_BUS_VTECH_IOEXP_JOYSTICK_H
+
 #pragma once
 
-#ifndef __VTECH_IOEXP_JOYSTICK_H__
-#define __VTECH_IOEXP_JOYSTICK_H__
-
-#include "emu.h"
 #include "ioexp.h"
 
 
@@ -22,20 +21,21 @@
 //  TYPE DEFINITIONS
 //**************************************************************************
 
-// ======================> joystick_interface_device
+// ======================> vtech_joystick_interface_device
 
-class joystick_interface_device : public device_t, public device_ioexp_interface
+class vtech_joystick_interface_device : public vtech_ioexp_device
 {
 public:
 	// construction/destruction
-	joystick_interface_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	vtech_joystick_interface_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	DECLARE_READ8_MEMBER( joystick_r );
+	uint8_t joystick_r(offs_t offset);
 
 protected:
 	virtual ioport_constructor device_input_ports() const override;
 	virtual void device_start() override;
-	virtual void device_reset() override;
+
+	virtual void io_map(address_map &map) override;
 
 private:
 	required_ioport m_joy0;
@@ -45,6 +45,6 @@ private:
 };
 
 // device type definition
-extern const device_type JOYSTICK_INTERFACE;
+DECLARE_DEVICE_TYPE(VTECH_JOYSTICK_INTERFACE, vtech_joystick_interface_device)
 
-#endif // __VTECH_IOEXP_JOYSTICK_H__
+#endif // MAME_BUS_VTECH_IOEXP_JOYSTICK_H

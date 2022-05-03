@@ -1,20 +1,17 @@
 // license:BSD-3-Clause
 // copyright-holders:Aaron Giles, Brad Hughes
 /*
-* font_dwrite.c
+* font_dwrite.cpp
 *
 */
 
 #include "font_module.h"
 #include "modules/osdmodule.h"
+#include "modules/lib/osdlib.h"
 
-// We take dependencies on WRL client headers and
-// we can only build with a high enough version
-#if defined(OSD_WINDOWS) && (_WIN32_WINNT >= 0x0602)
+#if defined(OSD_WINDOWS)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <tchar.h>
 
 #include <memory>
 
@@ -25,7 +22,6 @@
 #include <initguid.h>
 
 // Direct2D
-#include <dxgi1_2.h>
 #include <d2d1_1.h>
 #include <dwrite_1.h>
 
@@ -33,14 +29,11 @@
 DEFINE_GUID(CLSID_WICImagingFactory, 0xcacaf262, 0x9370, 0x4615, 0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0xa);
 DEFINE_GUID(GUID_WICPixelFormat8bppAlpha, 0xe6cd0116, 0xeeba, 0x4161, 0xaa, 0x85, 0x27, 0xdd, 0x9f, 0xb3, 0xa8, 0x95);
 
-#include <wrl\client.h>
+#include <wrl/client.h>
 #undef interface
 
-#include "emu.h"
 #include "strconv.h"
 #include "corestr.h"
-#include "corealloc.h"
-#include "fileio.h"
 #include "winutil.h"
 
 using namespace Microsoft::WRL;
@@ -62,19 +55,15 @@ static const float POINTS_PER_DIP = (3.0f / 4.0f);
 
 // Macro to check for a failed HRESULT and if failed, return 0
 #define HR_RET( CALL, ret ) do { \
-    result = CALL; \
-    if (FAILED(result)) { \
-        osd_printf_error(#CALL " failed with error 0x%X\n", (unsigned int)result); \
-        return ret; } \
+	result = CALL; \
+	if (FAILED(result)) { \
+		osd_printf_error(#CALL " failed with error 0x%X\n", (unsigned int)result); \
+		return ret; } \
 } while (0)
 
 #define HR_RETHR( CALL ) HR_RET(CALL, result)
 #define HR_RET0( CALL ) HR_RET(CALL, 0)
 #define HR_RET1( CALL ) HR_RET(CALL, 1)
-
-// Typedefs for dynamically loaded functions
-typedef lazy_loaded_function_p4<HRESULT, D2D1_FACTORY_TYPE, REFIID, const D2D1_FACTORY_OPTIONS*, void**> d2d_create_factory_fn;
-typedef lazy_loaded_function_p3<HRESULT, DWRITE_FACTORY_TYPE, REFIID, IUnknown**> dwrite_create_factory_fn;
 
 // Debugging functions
 #ifdef DWRITE_DEBUGGING
@@ -83,7 +72,7 @@ typedef lazy_loaded_function_p3<HRESULT, DWRITE_FACTORY_TYPE, REFIID, IUnknown**
 //  Save image to file
 //-------------------------------------------------
 
-void SaveBitmap(IWICBitmap* bitmap, GUID pixelFormat, const WCHAR *filename)
+HRESULT SaveBitmap(IWICBitmap* bitmap, GUID pixelFormat, const WCHAR *filename)
 {
 	HRESULT result = S_OK;
 	ComPtr<IWICStream> stream;
@@ -91,76 +80,81 @@ void SaveBitmap(IWICBitmap* bitmap, GUID pixelFormat, const WCHAR *filename)
 	ComPtr<IDWriteFactory> dwriteFactory;
 	ComPtr<IWICImagingFactory> wicFactory;
 
-	d2d_create_factory_fn pfn_D2D1CreateFactory("D2D1CreateFactory", L"D2d1.dll");
-	dwrite_create_factory_fn pfn_DWriteCreateFactory("DWriteCreateFactory", L"Dwrite.dll");
-	HR_RET(pfn_D2D1CreateFactory.initialize());
-	HR_RET(pfn_DWriteCreateFactory.initialize());
+	OSD_DYNAMIC_API(dwrite, "dwrite.dll");
+	OSD_DYNAMIC_API(d2d1, "d2d1.dll");
+	OSD_DYNAMIC_API_FN(dwrite, HRESULT, WINAPI, DWriteCreateFactory, DWRITE_FACTORY_TYPE, REFIID, IUnknown **);
+	OSD_DYNAMIC_API_FN(d2d1, HRESULT, WINAPI, D2D1CreateFactory, D2D1_FACTORY_TYPE, REFIID, const D2D1_FACTORY_OPTIONS *, void **);
+
+	if (!OSD_DYNAMIC_API_TEST(D2D1CreateFactory) || !OSD_DYNAMIC_API_TEST(DWriteCreateFactory))
+		return ERROR_DLL_NOT_FOUND;
 
 	// Create a Direct2D factory
-	HR_RET(pfn_D2D1CreateFactory(
+	HR_RETHR(OSD_DYNAMIC_CALL(D2D1CreateFactory,
 		D2D1_FACTORY_TYPE_SINGLE_THREADED,
 		__uuidof(ID2D1Factory1),
 		nullptr,
 		reinterpret_cast<void**>(d2dfactory.GetAddressOf())));
 
 	// Initialize COM - ignore failure
-	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
 	// Create a DirectWrite factory.
-	HR_RET(pfn_DWriteCreateFactory(
+	HR_RETHR(OSD_DYNAMIC_CALL(DWriteCreateFactory,
 		DWRITE_FACTORY_TYPE_SHARED,
 		__uuidof(IDWriteFactory),
 		reinterpret_cast<IUnknown **>(dwriteFactory.GetAddressOf())));
 
-	HR_RET(CoCreateInstance(
+	HR_RETHR(CoCreateInstance(
 		CLSID_WICImagingFactory,
-		NULL,
+		nullptr,
 		CLSCTX_INPROC_SERVER,
 		__uuidof(IWICImagingFactory),
 		(void**)&wicFactory));
 
-	HR_RET(wicFactory->CreateStream(&stream));
-	HR_RET(stream->InitializeFromFilename(filename, GENERIC_WRITE));
+	HR_RETHR(wicFactory->CreateStream(&stream));
+	HR_RETHR(stream->InitializeFromFilename(filename, GENERIC_WRITE));
 
 	ComPtr<IWICBitmapEncoder> encoder;
-	HR_RET(wicFactory->CreateEncoder(GUID_ContainerFormatBmp, NULL, &encoder));
-	HR_RET(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache));
+	HR_RETHR(wicFactory->CreateEncoder(GUID_ContainerFormatBmp, nullptr, &encoder));
+	HR_RETHR(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache));
 
 	ComPtr<IWICBitmapFrameEncode> frameEncode;
-	HR_RET(encoder->CreateNewFrame(&frameEncode, NULL));
-	HR_RET(frameEncode->Initialize(NULL));
+	HR_RETHR(encoder->CreateNewFrame(&frameEncode, nullptr));
+	HR_RETHR(frameEncode->Initialize(nullptr));
 
 	UINT width, height;
-	HR_RET(bitmap->GetSize(&width, &height));
-	HR_RET(frameEncode->SetSize(width, height));
-	HR_RET(frameEncode->SetPixelFormat(&pixelFormat));
+	HR_RETHR(bitmap->GetSize(&width, &height));
+	HR_RETHR(frameEncode->SetSize(width, height));
+	HR_RETHR(frameEncode->SetPixelFormat(&pixelFormat));
 
-	HR_RET(frameEncode->WriteSource(bitmap, NULL));
+	HR_RETHR(frameEncode->WriteSource(bitmap, nullptr));
 
-	HR_RET(frameEncode->Commit());
-	HR_RET(encoder->Commit());
+	HR_RETHR(frameEncode->Commit());
+	HR_RETHR(encoder->Commit());
+
+	return S_OK;
 }
 
-void SaveBitmap2(bitmap_argb32 &bitmap, const WCHAR *filename)
+HRESULT SaveBitmap2(bitmap_argb32 &bitmap, const WCHAR *filename)
 {
 	HRESULT result;
 
 	// Convert the bitmap into a form we understand and save it
-	std::unique_ptr<UINT32> pBitmap(new UINT32[bitmap.width() * bitmap.height()]);
+	std::unique_ptr<uint32_t> pBitmap(new uint32_t[bitmap.width() * bitmap.height()]);
 	for (int y = 0; y < bitmap.height(); y++)
 	{
-		UINT32* pRow = pBitmap.get() + (y * bitmap.width());
+		uint32_t* pRow = pBitmap.get() + (y * bitmap.width());
 		for (int x = 0; x < bitmap.width(); x++)
 		{
-			UINT32 pixel = bitmap.pix32(y, x);
-			pRow[x] = (pixel == 0xFFFFFFFF) ? rgb_t(0xFF, 0x00, 0x00, 0x00) : pRow[x] = rgb_t(0xFF, 0xFF, 0xFF, 0xFF);
+			uint32_t pixel = bitmap.pix(y, x);
+			pRow[x] = (pixel == 0xFFFFFFFF) ? rgb_t(0xFF, 0x00, 0x00, 0x00) : rgb_t(0xFF, 0xFF, 0xFF, 0xFF);
 		}
 	}
 
 	ComPtr<IWICImagingFactory> wicFactory;
-	HR_RET(CoCreateInstance(
+	HR_RETHR(CoCreateInstance(
 		CLSID_WICImagingFactory,
-		NULL,
+		nullptr,
 		CLSCTX_INPROC_SERVER,
 		__uuidof(IWICImagingFactory),
 		(void**)&wicFactory));
@@ -171,12 +165,14 @@ void SaveBitmap2(bitmap_argb32 &bitmap, const WCHAR *filename)
 		bitmap.width(),
 		bitmap.height(),
 		GUID_WICPixelFormat32bppRGBA,
-		bitmap.width() * sizeof(UINT32),
-		bitmap.width() * bitmap.height() * sizeof(UINT32),
+		bitmap.width() * sizeof(uint32_t),
+		bitmap.width() * bitmap.height() * sizeof(uint32_t),
 		(BYTE*)pBitmap.get(),
 		&bmp2);
 
 	SaveBitmap(bmp2.Get(), GUID_WICPixelFormat32bppRGBA, filename);
+
+	return S_OK;
 }
 
 #endif
@@ -189,44 +185,44 @@ void SaveBitmap2(bitmap_argb32 &bitmap, const WCHAR *filename)
 class FontDimension
 {
 private:
-	UINT16  m_designUnitsPerEm;
+	uint16_t  m_designUnitsPerEm;
 	float   m_emSizeInDip;
 	float   m_designUnits;
 
 public:
-	FontDimension(UINT16 designUnitsPerEm, float emSizeInDip, float designUnits)
+	FontDimension(uint16_t designUnitsPerEm, float emSizeInDip, float designUnits)
 	{
 		m_designUnitsPerEm = designUnitsPerEm;
 		m_emSizeInDip = emSizeInDip;
 		m_designUnits = designUnits;
 	}
 
-	UINT16 DesignUnitsPerEm()
+	uint16_t DesignUnitsPerEm() const
 	{
 		return m_designUnitsPerEm;
 	}
 
-	float EmSizeInDip()
+	float EmSizeInDip() const
 	{
 		return m_emSizeInDip;
 	}
 
-	float DesignUnits()
+	float DesignUnits() const
 	{
 		return m_designUnits;
 	}
 
-	int Dips()
+	int Dips() const
 	{
-		return (int)floor((m_designUnits * m_emSizeInDip) / m_designUnitsPerEm);
+		return static_cast<int>(floor((m_designUnits * m_emSizeInDip) / m_designUnitsPerEm));
 	}
 
-	float Points()
+	float Points() const
 	{
 		return Dips() * POINTS_PER_DIP;
 	}
 
-	FontDimension operator-(const FontDimension &other)
+	FontDimension operator-(const FontDimension &other) const
 	{
 		if (m_designUnitsPerEm != other.m_designUnitsPerEm || m_emSizeInDip != other.m_emSizeInDip)
 		{
@@ -236,7 +232,7 @@ public:
 		return FontDimension(m_designUnitsPerEm, m_emSizeInDip, m_designUnits - other.m_designUnits);
 	}
 
-	FontDimension operator+(const FontDimension &other)
+	FontDimension operator+(const FontDimension &other) const
 	{
 		if (m_designUnitsPerEm != other.m_designUnitsPerEm || m_emSizeInDip != other.m_emSizeInDip)
 		{
@@ -267,12 +263,12 @@ public:
 	{
 	}
 
-	FontDimension advanceWidth() { return m_advanceWidth; }
-	FontDimension abcA() { return m_a; }
+	FontDimension advanceWidth() const { return m_advanceWidth; }
+	FontDimension abcA() const { return m_a; }
 
 	// Relationship between advanceWidth and B is ADV = A + B + C so B = ADV - A - C
-	FontDimension abcB() { return advanceWidth() - abcA() - abcC(); }
-	FontDimension abcC() { return m_c; }
+	FontDimension abcB() const { return advanceWidth() - abcA() - abcC(); }
+	FontDimension abcC() const { return m_c; }
 };
 
 //-------------------------------------------------
@@ -283,40 +279,40 @@ public:
 class FontDimensionFactory
 {
 private:
-	UINT16 m_designUnitsPerEm;
+	uint16_t m_designUnitsPerEm;
 	float m_emSizeInDip;
 
 public:
-	float EmSizeInDip()
+	float EmSizeInDip() const
 	{
 		return m_emSizeInDip;
 	}
 
-	FontDimensionFactory(UINT16 designUnitsPerEm, float emSizeInDip)
+	FontDimensionFactory(uint16_t designUnitsPerEm, float emSizeInDip)
 	{
 		m_designUnitsPerEm = designUnitsPerEm;
 		m_emSizeInDip = emSizeInDip;
 	}
 
-	FontDimension FromDip(float dip)
+	FontDimension FromDip(float dip) const
 	{
 		float sizeInDesignUnits = (dip / m_emSizeInDip) * m_designUnitsPerEm;
 		return FontDimension(m_designUnitsPerEm, m_emSizeInDip, sizeInDesignUnits);
 	}
 
-	FontDimension FromDesignUnit(float designUnits)
+	FontDimension FromDesignUnit(float designUnits) const
 	{
 		return FontDimension(m_designUnitsPerEm, m_emSizeInDip, designUnits);
 	}
 
-	FontDimension FromPoint(float pointSize)
+	FontDimension FromPoint(float pointSize) const
 	{
 		float sizeInDip = pointSize * (4.0f / 3.0f);
 		float sizeInDesignUnits = (sizeInDip / m_emSizeInDip) * m_designUnitsPerEm;
 		return FontDimension(m_designUnitsPerEm, m_emSizeInDip, sizeInDesignUnits);
 	}
 
-	FontABCWidths CreateAbcWidths(float advanceWidth, float leftSideBearing, float rightSideBearing)
+	FontABCWidths CreateAbcWidths(float advanceWidth, float leftSideBearing, float rightSideBearing) const
 	{
 		return FontABCWidths(
 			FromDesignUnit(advanceWidth),
@@ -333,19 +329,21 @@ public:
 class osd_font_dwrite : public osd_font
 {
 private:
-	ComPtr<ID2D1Factory>		    m_d2dfactory;
-	ComPtr<IDWriteFactory>		    m_dwriteFactory;
-	ComPtr<IWICImagingFactory>	    m_wicFactory;
+	ComPtr<ID2D1Factory>            m_d2dfactory;
+	ComPtr<IDWriteFactory>          m_dwriteFactory;
+	ComPtr<IWICImagingFactory>      m_wicFactory;
 	ComPtr<IDWriteFont>             m_font;
 	float                           m_fontEmHeightInDips;
 
 public:
 	osd_font_dwrite(ComPtr<ID2D1Factory> d2dfactory, ComPtr<IDWriteFactory> dwriteFactory, ComPtr<IWICImagingFactory> wicFactory)
-		: m_d2dfactory(d2dfactory), m_dwriteFactory(dwriteFactory), m_wicFactory(wicFactory)
+		: m_d2dfactory(d2dfactory), m_dwriteFactory(dwriteFactory), m_wicFactory(wicFactory), m_fontEmHeightInDips(0)
 	{
 	}
 
-	virtual bool open(const char *font_path, const char *_name, int &height) override
+	virtual ~osd_font_dwrite() { osd_font_dwrite::close(); }
+
+	virtual bool open(std::string const &font_path, std::string const &_name, int &height) override
 	{
 		if (m_d2dfactory == nullptr || m_dwriteFactory == nullptr || m_wicFactory == nullptr)
 			return false;
@@ -354,16 +352,17 @@ public:
 
 		// accept qualifiers from the name
 		std::string name(_name);
-		if (name.compare("default") == 0) name = "Tahoma";
+		if (name.compare("default") == 0)
+			name = "Segoe UI";
 		bool bold = (strreplace(name, "[B]", "") + strreplace(name, "[b]", "") > 0);
 		bool italic = (strreplace(name, "[I]", "") + strreplace(name, "[i]", "") > 0);
 
 		// convert the face name
-		auto familyName = std::wstring(std::unique_ptr<WCHAR, void(*)(void *)>(wstring_from_utf8(name.c_str()), osd_free).get());
+		std::wstring familyName = osd::text::to_wstring(name.c_str());
 
 		// find the font
 		HR_RET0(find_font(
-			familyName.c_str(),
+			familyName,
 			bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
 			DWRITE_FONT_STRETCH_NORMAL,
 			italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
@@ -373,7 +372,7 @@ public:
 		m_font->GetMetrics(&metrics);
 
 		m_fontEmHeightInDips = DEFAULT_EM_HEIGHT;
-		height = (int)round(m_fontEmHeightInDips * DIPS_PER_POINT);
+		height = static_cast<int>(round(m_fontEmHeightInDips * DIPS_PER_POINT));
 
 		return true;
 	}
@@ -397,7 +396,7 @@ public:
 	//  pixel of a black & white font
 	//-------------------------------------------------
 
-	virtual bool get_bitmap(unicode_char chnum, bitmap_argb32 &bitmap, INT32 &width, INT32 &xoffs, INT32 &yoffs) override
+	virtual bool get_bitmap(char32_t chnum, bitmap_argb32 &bitmap, std::int32_t &width, std::int32_t &xoffs, std::int32_t &yoffs) override
 	{
 		const int MEM_ALIGN_CONST = 31;
 		const int BITMAP_PAD = 50;
@@ -406,10 +405,10 @@ public:
 		UINT cbData;
 		BYTE* pixels = nullptr;
 
-		ComPtr<ID2D1BitmapRenderTarget>	    target;
-		ComPtr<ID2D1SolidColorBrush>		pWhiteBrush;
-		ComPtr<IWICBitmap>					wicBitmap;
-		ComPtr<IWICBitmapLock>				lock;
+		ComPtr<ID2D1BitmapRenderTarget>     target;
+		ComPtr<ID2D1SolidColorBrush>        pWhiteBrush;
+		ComPtr<IWICBitmap>                  wicBitmap;
+		ComPtr<IWICBitmapLock>              lock;
 
 		ComPtr<IDWriteFontFace> face;
 		HR_RET0(m_font->CreateFontFace(face.GetAddressOf()));
@@ -424,9 +423,9 @@ public:
 
 		FontDimensionFactory fdf(gdi_metrics.designUnitsPerEm, m_fontEmHeightInDips);
 
-		UINT32 tempChar = chnum;
-		UINT16 glyphIndex;
-		HR_RET0(face->GetGlyphIndicesW(&tempChar, 1, &glyphIndex));
+		uint32_t tempChar = chnum;
+		uint16_t glyphIndex;
+		HR_RET0(face->GetGlyphIndices(&tempChar, 1, &glyphIndex));
 
 		// get the width of this character
 		DWRITE_GLYPH_METRICS glyph_metrics = { 0 };
@@ -493,7 +492,7 @@ public:
 		target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
 		// now draw the character
-		DWRITE_GLYPH_RUN run = { 0 };
+		DWRITE_GLYPH_RUN run = { nullptr };
 		DWRITE_GLYPH_OFFSET offsets;
 		offsets.advanceOffset = 0;
 		offsets.ascenderOffset = 0;
@@ -528,13 +527,13 @@ public:
 		// Lock the bitmap and get the data pointer
 		WICRect rect = { 0, 0, bmwidth, bmheight };
 		HR_RET0(wicBitmap->Lock(&rect, WICBitmapLockRead, lock.GetAddressOf()));
-		HR_RET0(lock->GetDataPointer(&cbData, (BYTE**)&pixels));
+		HR_RET0(lock->GetDataPointer(&cbData, static_cast<BYTE**>(&pixels)));
 
 		// determine the actual left of the character
 		for (actbounds.min_x = 0; actbounds.min_x < bmwidth; actbounds.min_x++)
 		{
 			BYTE *offs = pixels + actbounds.min_x;
-			UINT8 summary = 0;
+			uint8_t summary = 0;
 			for (int y = 0; y < bmheight; y++)
 				summary |= offs[y * bmwidth];
 			if (summary != 0)
@@ -548,7 +547,7 @@ public:
 		for (actbounds.max_x = bmwidth - 1; actbounds.max_x >= 0; actbounds.max_x--)
 		{
 			BYTE *offs = pixels + actbounds.max_x;
-			UINT8 summary = 0;
+			uint8_t summary = 0;
 
 			// Go through the entire column and build a summary
 			for (int y = 0; y < bmheight; y++)
@@ -567,8 +566,8 @@ public:
 			// copy the bits into it
 			for (int y = 0; y < bitmap.height(); y++)
 			{
-				UINT32 *dstrow = &bitmap.pix32(y);
-				UINT8 *srcrow = &pixels[(y + actbounds.min_y) * bmwidth];
+				uint32_t *dstrow = &bitmap.pix(y);
+				uint8_t *srcrow = &pixels[(y + actbounds.min_y) * bmwidth];
 				for (int x = 0; x < bitmap.width(); x++)
 				{
 					int effx = x + actbounds.min_x;
@@ -610,9 +609,9 @@ private:
 	//  find_font - finds a font, given attributes
 	//-------------------------------------------------
 
-	HRESULT find_font(std::wstring familyName, DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STRETCH stretch, DWRITE_FONT_STYLE style, IDWriteFont ** ppfont)
+	HRESULT find_font(std::wstring familyName, DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STRETCH stretch, DWRITE_FONT_STYLE style, IDWriteFont ** ppfont) const
 	{
-		HRESULT result = S_OK;
+		HRESULT result;
 
 		ComPtr<IDWriteFontCollection> fonts;
 		HR_RETHR(m_dwriteFactory->GetSystemFontCollection(fonts.GetAddressOf()));
@@ -621,7 +620,7 @@ private:
 		HR_RETHR(fonts->FindFamilyName(familyName.c_str(), &family_index, &exists));
 		if (!exists)
 		{
-			osd_printf_error("Font with family name %S does not exist", familyName.c_str());
+			osd_printf_error("Font with family name %s does not exist.\n", osd::text::from_wstring(familyName));
 			return E_FAIL;
 		}
 
@@ -643,18 +642,20 @@ private:
 class font_dwrite : public osd_module, public font_module
 {
 private:
-	d2d_create_factory_fn			m_pfnD2D1CreateFactory;
-	dwrite_create_factory_fn		m_pfnDWriteCreateFactory;
-	ComPtr<ID2D1Factory>		    m_d2dfactory;
-	ComPtr<IDWriteFactory>		    m_dwriteFactory;
-	ComPtr<IWICImagingFactory>	    m_wicFactory;
+	OSD_DYNAMIC_API(dwrite, "dwrite.dll");
+	OSD_DYNAMIC_API(d2d1, "d2d1.dll");
+	OSD_DYNAMIC_API(locale, "kernel32.dll");
+	OSD_DYNAMIC_API_FN(dwrite, HRESULT, WINAPI, DWriteCreateFactory, DWRITE_FACTORY_TYPE, REFIID, IUnknown **);
+	OSD_DYNAMIC_API_FN(d2d1, HRESULT, WINAPI, D2D1CreateFactory, D2D1_FACTORY_TYPE, REFIID, const D2D1_FACTORY_OPTIONS *, void **);
+	OSD_DYNAMIC_API_FN(locale, int, WINAPI, GetUserDefaultLocaleName, LPWSTR, int);
+	ComPtr<ID2D1Factory>         m_d2dfactory;
+	ComPtr<IDWriteFactory>       m_dwriteFactory;
+	ComPtr<IWICImagingFactory>   m_wicFactory;
 
 public:
 	font_dwrite() :
 		osd_module(OSD_FONT_PROVIDER, "dwrite"),
 		font_module(),
-		m_pfnD2D1CreateFactory("D2D1CreateFactory", L"D2d1.dll"),
-		m_pfnDWriteCreateFactory("DWriteCreateFactory", L"Dwrite.dll"),
 		m_d2dfactory(nullptr),
 		m_dwriteFactory(nullptr),
 		m_wicFactory(nullptr)
@@ -664,11 +665,8 @@ public:
 	virtual bool probe() override
 	{
 		// This module is available if it can load the expected API Functions
-		if (m_pfnD2D1CreateFactory.initialize() != 0
-			|| m_pfnDWriteCreateFactory.initialize() != 0)
-		{
+		if (!OSD_DYNAMIC_API_TEST(D2D1CreateFactory) || !OSD_DYNAMIC_API_TEST(DWriteCreateFactory))
 			return false;
-		}
 
 		return true;
 	}
@@ -680,43 +678,128 @@ public:
 		osd_printf_verbose("FontProvider: Initializing DirectWrite\n");
 
 		// Make sure we can initialize our api functions
-		if (m_pfnD2D1CreateFactory.initialize()
-			|| m_pfnDWriteCreateFactory.initialize())
+		if (!OSD_DYNAMIC_API_TEST(D2D1CreateFactory) || !OSD_DYNAMIC_API_TEST(DWriteCreateFactory))
 		{
 			osd_printf_error("ERROR: FontProvider: Failed to load DirectWrite functions.\n");
 			return -1;
 		}
 
+		assert(OSD_DYNAMIC_API_TEST(GetUserDefaultLocaleName));
+
 		// Create a Direct2D factory.
-		HR_RET1(m_pfnD2D1CreateFactory(
+		HR_RET1(OSD_DYNAMIC_CALL(D2D1CreateFactory,
 			D2D1_FACTORY_TYPE_SINGLE_THREADED,
 			__uuidof(ID2D1Factory),
 			nullptr,
 			reinterpret_cast<void**>(this->m_d2dfactory.GetAddressOf())));
 
 		// Initialize COM
-		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+		CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
 		// Create a DirectWrite factory.
-		HR_RET1(m_pfnDWriteCreateFactory(
+		HR_RET1(OSD_DYNAMIC_CALL(DWriteCreateFactory,
 			DWRITE_FACTORY_TYPE_SHARED,
 			__uuidof(IDWriteFactory),
 			reinterpret_cast<IUnknown **>(m_dwriteFactory.GetAddressOf())));
 
 		HR_RET1(CoCreateInstance(
 			CLSID_WICImagingFactory,
-			NULL,
+			nullptr,
 			CLSCTX_INPROC_SERVER,
 			__uuidof(IWICImagingFactory),
-			(void**)&m_wicFactory));
+			static_cast<void**>(&m_wicFactory)));
 
 		osd_printf_verbose("FontProvider: DirectWrite initialized successfully.\n");
 		return 0;
 	}
 
-	virtual osd_font *font_alloc() override
+	virtual osd_font::ptr font_alloc() override
 	{
-		return global_alloc(osd_font_dwrite(m_d2dfactory, m_dwriteFactory, m_wicFactory));
+		return std::make_unique<osd_font_dwrite>(m_d2dfactory, m_dwriteFactory, m_wicFactory);
+	}
+
+	virtual bool get_font_families(std::string const &font_path, std::vector<std::pair<std::string, std::string> > &fontresult) override
+	{
+		HRESULT result;
+		ComPtr<IDWriteFontFamily> family;
+		ComPtr<IDWriteLocalizedStrings> names;
+
+		// For now, we're just enumerating system fonts, if we want to support custom font
+		// collections, there's more work that neeeds to be done
+		ComPtr<IDWriteFontCollection> fonts;
+		HR_RET0(m_dwriteFactory->GetSystemFontCollection(fonts.GetAddressOf()));
+
+		int family_count = fonts->GetFontFamilyCount();
+		for (int i = 0; i < family_count; i++)
+		{
+			HR_RET0(fonts->GetFontFamily(i, family.ReleaseAndGetAddressOf()));
+
+			HR_RET0(family->GetFamilyNames(names.ReleaseAndGetAddressOf()));
+
+			std::unique_ptr<WCHAR[]> name = nullptr;
+			HR_RET0(get_localized_familyname(names, name));
+
+			std::string utf8_name = osd::text::from_wstring(name.get());
+			name.reset();
+
+			// Review: should the config name, be unlocalized?
+			// maybe the english name?
+			fontresult.emplace_back(make_pair(utf8_name, utf8_name));
+		}
+
+		std::stable_sort(fontresult.begin(), fontresult.end());
+		return true;
+	}
+
+private:
+	HRESULT get_family_for_locale(ComPtr<IDWriteLocalizedStrings> family_names, const std::wstring &locale, std::unique_ptr<WCHAR[]> &family_name) const
+	{
+		HRESULT result;
+		uint32_t index;
+		BOOL exists = false;
+
+		result = family_names->FindLocaleName(locale.c_str(), &index, &exists);
+
+		// if the above find did not find a match, retry with US English
+		if (SUCCEEDED(result) && !exists)
+			family_names->FindLocaleName(L"en-us", &index, &exists);
+
+		// If the specified locale doesn't exist, select the first on the list.
+		if (!exists)
+			index = 0;
+
+		// Get the length and allocate our buffer
+		uint32_t name_length = 0;
+		HR_RETHR(family_names->GetStringLength(index, &name_length));
+		auto name_buffer = std::make_unique<WCHAR[]>(name_length + 1);
+
+		// Get the name
+		HR_RETHR(family_names->GetString(index, name_buffer.get(), name_length + 1));
+
+		family_name = std::move(name_buffer);
+		return S_OK;
+	}
+
+	HRESULT get_localized_familyname(ComPtr<IDWriteLocalizedStrings> family_names, std::unique_ptr<WCHAR[]> &family_name)
+	{
+		std::wstring locale_name;
+
+		// Get the default locale for this user if possible.
+		// GetUserDefaultLocaleName doesn't exist on XP, so don't assume.
+		if (OSD_DYNAMIC_API_TEST(GetUserDefaultLocaleName))
+		{
+			wchar_t name_buffer[LOCALE_NAME_MAX_LENGTH];
+			int len = OSD_DYNAMIC_CALL(GetUserDefaultLocaleName, name_buffer, LOCALE_NAME_MAX_LENGTH);
+			if (len != 0)
+				locale_name = name_buffer;
+		}
+
+		// If the default locale is returned, find that locale name
+		if (!locale_name.empty())
+			return get_family_for_locale(family_names, locale_name, family_name);
+
+		// If locale can't be determined, fall back to US English
+		return get_family_for_locale(family_names, L"en-us", family_name);
 	}
 };
 

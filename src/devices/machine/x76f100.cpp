@@ -30,11 +30,12 @@ inline void ATTR_PRINTF( 3, 4 ) x76f100_device::verboselog( int n_level, const c
 }
 
 // device type definition
-const device_type X76F100 = &device_creator<x76f100_device>;
+DEFINE_DEVICE_TYPE(X76F100, x76f100_device, "x76f100", "X76F100 Secure SerialFlash")
 
-x76f100_device::x76f100_device( const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock )
-	: device_t( mconfig, X76F100, "X76F100 Flash", tag, owner, clock, "x76f100", __FILE__ ),
+x76f100_device::x76f100_device( const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock )
+	: device_t( mconfig, X76F100, tag, owner, clock ),
 	device_nvram_interface(mconfig, *this),
+	m_region(*this, DEVICE_SELF),
 	m_cs( 0 ),
 	m_rst( 0 ),
 	m_scl( 0 ),
@@ -44,13 +45,15 @@ x76f100_device::x76f100_device( const machine_config &mconfig, const char *tag, 
 	m_shift( 0 ),
 	m_bit( 0 ),
 	m_byte( 0 ),
-	m_command( 0 )
+	m_command( 0 ),
+	m_password_retry_counter( 0 ),
+	m_is_password_accepted ( false )
 {
 }
 
 void x76f100_device::device_start()
 {
-	memset( m_write_buffer, 0, sizeof( m_write_buffer ) );
+	std::fill( std::begin( m_write_buffer ), std::end( m_write_buffer ), 0 );
 
 	save_item( NAME( m_cs ) );
 	save_item( NAME( m_rst ) );
@@ -62,11 +65,31 @@ void x76f100_device::device_start()
 	save_item( NAME( m_bit ) );
 	save_item( NAME( m_byte ) );
 	save_item( NAME( m_command ) );
+	save_item( NAME( m_password_retry_counter ) );
+	save_item( NAME( m_is_password_accepted ) );
 	save_item( NAME( m_write_buffer ) );
 	save_item( NAME( m_response_to_reset ) );
 	save_item( NAME( m_write_password ) );
 	save_item( NAME( m_read_password ) );
 	save_item( NAME( m_data ) );
+}
+
+void x76f100_device::device_reset()
+{
+	std::fill( std::begin( m_write_buffer ), std::end( m_write_buffer ), 0 );
+
+	m_cs = 0;
+	m_rst = 0;
+	m_scl = 0;
+	m_sdaw = 0;
+	m_sdar = 0;
+	m_state = STATE_STOP;
+	m_shift = 0;
+	m_bit = 0;
+	m_byte = 0;
+	m_command = 0;
+	m_password_retry_counter = 0;
+	m_is_password_accepted = false;
 }
 
 WRITE_LINE_MEMBER( x76f100_device::write_cs )
@@ -111,7 +134,7 @@ WRITE_LINE_MEMBER( x76f100_device::write_rst )
 	m_rst = state;
 }
 
-UINT8 *x76f100_device::password()
+uint8_t *x76f100_device::password()
 {
 	if( ( m_command & 0xe1 ) == COMMAND_READ )
 	{
@@ -123,11 +146,13 @@ UINT8 *x76f100_device::password()
 
 void x76f100_device::password_ok()
 {
-	if( ( m_command & 0xe1 ) == COMMAND_READ )
+	m_password_retry_counter = 0;
+
+	if( ( m_command & 0x81 ) == COMMAND_READ )
 	{
 		m_state = STATE_READ_DATA;
 	}
-	else if( ( m_command & 0xe1 ) == COMMAND_WRITE )
+	else if( ( m_command & 0x81 ) == COMMAND_WRITE )
 	{
 		m_state = STATE_WRITE_DATA;
 	}
@@ -140,8 +165,15 @@ void x76f100_device::password_ok()
 int x76f100_device::data_offset()
 {
 	int block_offset = ( m_command >> 1 ) & 0x0f;
+	int offset = ( block_offset * sizeof( m_write_buffer ) ) + m_byte;
 
-	return ( block_offset * sizeof( m_write_buffer ) ) + m_byte;
+	// Technically there are 4 bits assigned to sector values but since the data array is only 112 bytes,
+	// it will try reading out of bounds when the sector is 14 (= starts at 112) or 15 (= starts at 120).
+	// TODO: Verify what happens on real hardware when reading/writing sectors 14 and 15
+	if( offset >= sizeof ( m_data ) )
+		return -1;
+
+	return offset;
 }
 
 WRITE_LINE_MEMBER( x76f100_device::write_scl )
@@ -188,6 +220,9 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 		case STATE_LOAD_PASSWORD:
 		case STATE_VERIFY_PASSWORD:
 		case STATE_WRITE_DATA:
+			// FIXME: Processing on the rising edge of the clock causes sda to change state while clock is high
+			// which is not allowed. Also need to ensure that only valid device-id's and commands
+			// are acknowledged.
 			if( m_scl == 0 && state != 0 )
 			{
 				if( m_bit < 8 )
@@ -222,6 +257,25 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 						if( m_byte == sizeof( m_write_buffer ) )
 						{
 							m_state = STATE_VERIFY_PASSWORD;
+
+							// Perform the password acceptance check before verify password because
+							// password verify ack is spammed and will quickly overflow the
+							// retry counter. This becomes an issue with System 573 games that use the
+							// X76F100 as an install cartridge. The boot process first tries to use the
+							// game cartridge password and if not accepted will try the install cartridge
+							// password and then enter installation mode if accepted.
+							m_is_password_accepted = memcmp( password(), m_write_buffer, sizeof( m_write_buffer ) ) == 0;
+							if( !m_is_password_accepted )
+							{
+								m_password_retry_counter++;
+								if( m_password_retry_counter >= 8 )
+								{
+									std::fill( std::begin( m_read_password ), std::end( m_read_password ), 0 );
+									std::fill( std::begin( m_write_password ), std::end( m_write_password ), 0 );
+									std::fill( std::begin( m_data ), std::end( m_data ), 0 );
+									m_password_retry_counter = 0;
+								}
+							}
 						}
 						break;
 
@@ -232,7 +286,7 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 						if( m_shift == COMMAND_ACK_PASSWORD )
 						{
 							/* todo: this should take 10ms before it returns ok. */
-							if( memcmp( password(), m_write_buffer, sizeof( m_write_buffer ) ) == 0 )
+							if( m_is_password_accepted )
 							{
 								password_ok();
 							}
@@ -249,11 +303,31 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 
 						if( m_byte == sizeof( m_write_buffer ) )
 						{
-							for( m_byte = 0; m_byte < sizeof( m_write_buffer ); m_byte++ )
+							if( m_command == COMMAND_CHANGE_WRITE_PASSWORD )
 							{
-								int offset = data_offset();
-								verboselog( 1, "-> data[ %03x ]: %02x\n", offset, m_write_buffer[ m_byte ] );
-								m_data[ offset ] = m_write_buffer[ m_byte ];
+								std::copy( std::begin( m_write_buffer ), std::end( m_write_buffer ), std::begin( m_write_password ) );
+							}
+							else if( m_command == COMMAND_CHANGE_READ_PASSWORD )
+							{
+								std::copy( std::begin( m_write_buffer ), std::end( m_write_buffer ), std::begin( m_read_password ) );
+							}
+							else
+							{
+								for( m_byte = 0; m_byte < sizeof( m_write_buffer ); m_byte++ )
+								{
+									int offset = data_offset();
+
+									if( offset != -1 )
+									{
+										verboselog( 1, "-> data[ %03x ]: %02x\n", offset, m_write_buffer[ m_byte ] );
+										m_data[ offset ] = m_write_buffer[ m_byte ];
+									}
+									else
+									{
+										verboselog( 1, "-> attempted to write %02x out of bounds\n", m_write_buffer[m_byte] );
+										break;
+									}
+								}
 							}
 
 							m_byte = 0;
@@ -270,6 +344,8 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 			break;
 
 		case STATE_READ_DATA:
+			// FIXME: Processing on the rising edge of the clock causes sda to change state while clock is high
+			// which is not allowed.
 			if( m_scl == 0 && state != 0 )
 			{
 				if( m_bit < 8 )
@@ -282,8 +358,18 @@ WRITE_LINE_MEMBER( x76f100_device::write_scl )
 						{
 						case STATE_READ_DATA:
 							offset = data_offset();
-							m_shift = m_data[ offset ];
-							verboselog( 1, "<- data[ %02x ]: %02x\n", offset, m_shift );
+
+							if( offset != -1 )
+							{
+								m_shift = m_data[ offset ];
+								verboselog( 1, "<- data[ %02x ]: %02x\n", offset, m_shift );
+							}
+							else
+							{
+								m_shift = 0;
+								verboselog( 1, "<- attempted to read out of bounds\n" );
+							}
+
 							break;
 						}
 					}
@@ -391,7 +477,7 @@ void x76f100_device::nvram_default()
 
 	int expected_size = sizeof( m_response_to_reset ) + sizeof( m_write_password ) + sizeof( m_read_password ) + sizeof( m_data );
 
-	if( !m_region )
+	if (!m_region.found())
 	{
 		logerror( "x76f100(%s) region not found\n", tag() );
 	}
@@ -401,7 +487,7 @@ void x76f100_device::nvram_default()
 	}
 	else
 	{
-		UINT8 *region = m_region->base();
+		uint8_t *region = m_region->base();
 
 		memcpy( m_response_to_reset, region, sizeof( m_response_to_reset )); region += sizeof( m_response_to_reset );
 		memcpy( m_write_password, region, sizeof( m_write_password )); region += sizeof( m_write_password );
@@ -410,18 +496,22 @@ void x76f100_device::nvram_default()
 	}
 }
 
-void x76f100_device::nvram_read( emu_file &file )
+bool x76f100_device::nvram_read( util::read_stream &file )
 {
-	file.read( m_response_to_reset, sizeof( m_response_to_reset ) );
-	file.read( m_write_password, sizeof( m_write_password ) );
-	file.read( m_read_password, sizeof( m_read_password ) );
-	file.read( m_data, sizeof( m_data ) );
+	size_t actual;
+	bool result = !file.read( m_response_to_reset, sizeof( m_response_to_reset ), actual ) && actual == sizeof( m_response_to_reset );
+	result = result && !file.read( m_write_password, sizeof( m_write_password ), actual ) && actual == sizeof( m_write_password );
+	result = result && !file.read( m_read_password, sizeof( m_read_password ), actual ) && actual == sizeof( m_read_password );
+	result = result && !file.read( m_data, sizeof( m_data ), actual ) && actual == sizeof( m_data );
+	return result;
 }
 
-void x76f100_device::nvram_write( emu_file &file )
+bool x76f100_device::nvram_write( util::write_stream &file )
 {
-	file.write( m_response_to_reset, sizeof( m_response_to_reset ) );
-	file.write( m_write_password, sizeof( m_write_password ) );
-	file.write( m_read_password, sizeof( m_read_password ) );
-	file.write( m_data, sizeof( m_data ) );
+	size_t actual;
+	bool result = !file.write( m_response_to_reset, sizeof( m_response_to_reset ), actual ) && actual == sizeof( m_response_to_reset );
+	result = result && !file.write( m_write_password, sizeof( m_write_password ), actual ) && actual == sizeof( m_write_password );
+	result = result && !file.write( m_read_password, sizeof( m_read_password ), actual ) && actual == sizeof( m_read_password );
+	result = result && !file.write( m_data, sizeof( m_data ), actual ) && actual == sizeof( m_data );
+	return result;
 }

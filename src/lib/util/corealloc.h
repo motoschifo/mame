@@ -8,100 +8,42 @@
 
 ***************************************************************************/
 
+#ifndef MAME_LIB_UTIL_COREALLOC_H
+#define MAME_LIB_UTIL_COREALLOC_H
+
 #pragma once
 
-#ifndef __COREALLOC_H__
-#define __COREALLOC_H__
-
-#include <stdlib.h>
+#include <cassert>
+#include <cstddef>
+#include <cstring>
+#include <memory>
 #include <new>
 #include <type_traits>
-#include <utility>
-#include <memory>
-#include "osdcore.h"
 
 
-//**************************************************************************
-//  MACROS
-//**************************************************************************
+// global allocation helpers
 
-// global allocation helpers -- use these instead of new and delete
-#define global_alloc(_type)                         new _type
-#define global_alloc_nothrow(_type)                 new (std::nothrow) _type
-#define global_alloc_array(_type, _num)             new _type[_num]
-#define global_alloc_array_nothrow(_type, _num)     new (std::nothrow) _type[_num]
-#define global_free(_ptr)                           do { delete _ptr; } while (0)
-#define global_free_array(_ptr)                     do { delete[] _ptr; } while (0)
+namespace util {
 
+namespace detail {
 
+template <typename Tp> struct make_unique_clear_traits { };
+template <typename Tp> struct make_unique_clear_traits<Tp []> { using unbounded_array_ptr = std::unique_ptr<Tp []>; };
+template <typename Tp, size_t Bound> struct make_unique_clear_traits<Tp [Bound]> { };
 
-template<typename _Tp, typename... _Args>
-inline _Tp* global_alloc_clear(_Args&&... __args)
-{
-	unsigned char * ptr = new unsigned char[sizeof(_Tp)]; // allocate memory
-	memset(ptr, 0, sizeof(_Tp));
-	return new(ptr) _Tp(std::forward<_Args>(__args)...);
-}
-
-template<typename _Tp>
-inline _Tp* global_alloc_array_clear(size_t __num)
-{
-	auto size = sizeof(_Tp) * __num;
-	unsigned char* ptr = new unsigned char[size]; // allocate memory
-	memset(ptr, 0, size);
-	return new(ptr) _Tp[__num]();
-}
-
-
-
-template<typename _Tp>
-struct _MakeUniqClear
-{
-	typedef std::unique_ptr<_Tp> __single_object;
-};
-
-template<typename _Tp>
-struct _MakeUniqClear<_Tp[]>
-{
-	typedef std::unique_ptr<_Tp[]> __array;
-};
-
-template<typename _Tp, size_t _Bound>
-struct _MakeUniqClear<_Tp[_Bound]>
-{
-	struct __invalid_type { };
-};
-
-/// make_unique_clear for single objects
-template<typename _Tp, typename... _Args>
-inline typename _MakeUniqClear<_Tp>::__single_object make_unique_clear(_Args&&... __args)
-{
-	unsigned char* ptr = new unsigned char[sizeof(_Tp)]; // allocate memory
-	memset(ptr, 0, sizeof(_Tp));
-	return std::unique_ptr<_Tp>(new(ptr) _Tp(std::forward<_Args>(__args)...));
-}
+} // namespace detail
 
 /// make_unique_clear for arrays of unknown bound
-template<typename _Tp>
-inline typename _MakeUniqClear<_Tp>::__array make_unique_clear(size_t __num)
+template <typename Tp>
+inline typename detail::make_unique_clear_traits<Tp>::unbounded_array_ptr make_unique_clear(size_t num)
 {
-	auto size = sizeof(std::remove_extent_t<_Tp>) * __num;
-	unsigned char* ptr = new unsigned char[size]; // allocate memory
-	memset(ptr, 0, size);
-	return std::unique_ptr<_Tp>(new(ptr) std::remove_extent_t<_Tp>[__num]());
+	static_assert(std::is_trivially_constructible_v<std::remove_extent_t<Tp> >, "make_unique_clear is only suitable for trivially constructible types");
+	auto const size = sizeof(std::remove_extent_t<Tp>) * num;
+	unsigned char* ptr = new unsigned char [size]; // allocate memory - this assumes new expression overhead is the same for all array types
+	std::memset(ptr, 0, size);
+	return std::unique_ptr<Tp>(new (ptr) std::remove_extent_t<Tp> [num]);
 }
 
-template<typename _Tp, unsigned char _F>
-inline typename _MakeUniqClear<_Tp>::__array make_unique_clear(size_t __num)
-{
-	auto size = sizeof(std::remove_extent_t<_Tp>) * __num;
-	unsigned char* ptr = new unsigned char[size]; // allocate memory
-	memset(ptr, _F, size);
-	return std::unique_ptr<_Tp>(new(ptr) std::remove_extent_t<_Tp>[__num]());
-}
+} // namespace util
 
-/// Disable make_unique_clear for arrays of known bound
-template<typename _Tp, typename... _Args>
-inline typename _MakeUniqClear<_Tp>::__invalid_type make_unique_clear(_Args&&...) = delete;
-
-#endif  /* __COREALLOC_H__ */
+#endif  // MAME_LIB_UTIL_COREALLOC_H

@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:Nicola Salmoria
+// copyright-holders:Nicola Salmoria, Stephane Humbert
 /***************************************************************************
 
 Fire Trap memory map
@@ -48,7 +48,7 @@ the 8751 triggers IRQ
 8000-ffff ROM
 
 read:
-3400      command from the main cpu
+3400      command from the main CPU
 
 write:
 1000-1001 YM3526
@@ -137,7 +137,6 @@ Stephh's notes (based on the games Z80 code and some tests) :
 1) 'firetrap' :
 
   - US version, licensed to Data East.
-  - MCU missing and simulated (init command = 0x13).
   - No warning screen.
   - Instructions in English
   - Initials : 3 letters.
@@ -148,7 +147,6 @@ Stephh's notes (based on the games Z80 code and some tests) :
 2) 'firetrapj' :
 
   - Japan version.
-  - MCU missing and simulated (init command = 0xf5).
   - Additional warning screen.
   - Instructions in Japanese
   - Initials : 5 letters.
@@ -166,46 +164,482 @@ Stephh's notes (based on the games Z80 code and some tests) :
   - Bugs in test mode :
       * when lives are set to "2", it displays "1".
 
+Many interrupt-related gates, flip-flops and connections are crossed out
+on the schematics. Coins were once supposed to trigger IRQs on the main
+CPU, and the YM3526 was intended to drive the 6502 IRQ line directly, with
+the MSM5205-derived interrupt assigned to the NMI line instead.
+
 ***************************************************************************/
 
 #include "emu.h"
-#include "cpu/z80/z80.h"
+
 #include "cpu/m6502/m6502.h"
-#include "sound/3526intf.h"
+#include "cpu/mcs51/mcs51.h"
+#include "cpu/z80/z80.h"
+#include "machine/74157.h"
+#include "machine/gen_latch.h"
+#include "machine/timer.h"
 #include "sound/msm5205.h"
-#include "includes/firetrap.h"
+#include "sound/ymopl.h"
 
-#define FIRETRAP_XTAL XTAL_12MHz
+#include "emupal.h"
+#include "screen.h"
+#include "speaker.h"
+#include "tilemap.h"
 
 
-WRITE8_MEMBER(firetrap_state::firetrap_nmi_disable_w)
+namespace {
+
+class base_state : public driver_device
+{
+public:
+	base_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
+		m_maincpu(*this, "maincpu"),
+		m_audiocpu(*this, "audiocpu"),
+		m_msm(*this, "msm"),
+		m_adpcm_select(*this, "adpcm_select"),
+		m_gfxdecode(*this, "gfxdecode"),
+		m_palette(*this, "palette"),
+		m_bgvideoram(*this, "bgvideoram%u", 1U),
+		m_fgvideoram(*this, "fgvideoram"),
+		m_spriteram(*this, "spriteram"),
+		m_mainbank(*this, "mainbank"),
+		m_audiobank(*this, "audiobank")
+	{ }
+
+	void base(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
+	virtual void machine_reset() override;
+	virtual void video_start() override;
+
+	required_device<cpu_device> m_maincpu;
+
+	uint8_t m_nmi_enable = 0;
+
+	void base_main_map(address_map &map);
+
+private:
+	// devices
+	required_device<cpu_device> m_audiocpu;
+	required_device<msm5205_device> m_msm;
+	required_device<ls157_device> m_adpcm_select;
+	required_device<gfxdecode_device> m_gfxdecode;
+	required_device<palette_device> m_palette;
+
+	// memory pointers
+	required_shared_ptr_array<uint8_t, 2> m_bgvideoram;
+	required_shared_ptr<uint8_t> m_fgvideoram;
+	required_shared_ptr<uint8_t> m_spriteram;
+	required_memory_bank m_mainbank;
+	required_memory_bank m_audiobank;
+
+	// video-related
+	tilemap_t *m_fg_tilemap = nullptr;
+	tilemap_t *m_bg_tilemap[2]{};
+	uint8_t m_scroll_x[2][2]{};
+	uint8_t m_scroll_y[2][2]{};
+
+	// misc
+	uint8_t m_sound_irq_enable = 0U;
+	uint8_t m_adpcm_toggle = 0;
+
+	void nmi_disable_w(uint8_t data);
+	void bankselect_w(uint8_t data);
+	void irqack_w(uint8_t data);
+	void sound_command_w(uint8_t data);
+	void sound_flip_flop_w(uint8_t data);
+	void sound_bankselect_w(uint8_t data);
+	void adpcm_data_w(uint8_t data);
+	void flip_screen_w(uint8_t data);
+	void fgvideoram_w(offs_t offset, uint8_t data);
+	template <uint8_t Which> void bgvideoram_w(offs_t offset, uint8_t data);
+	template <uint8_t Which> void bg_scrollx_w(offs_t offset, uint8_t data);
+	template <uint8_t Which> void bg_scrolly_w(offs_t offset, uint8_t data);
+	TILEMAP_MAPPER_MEMBER(get_fg_memory_offset);
+	TILEMAP_MAPPER_MEMBER(get_bg_memory_offset);
+	TILE_GET_INFO_MEMBER(get_fg_tile_info);
+	template <uint8_t Which> TILE_GET_INFO_MEMBER(get_bg_tile_info);
+	void palette(palette_device &palette) const;
+	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect);
+	DECLARE_WRITE_LINE_MEMBER(adpcm_int);
+
+	void sound_map(address_map &map);
+};
+
+class original_state : public base_state
+{
+public:
+	original_state(const machine_config &mconfig, device_type type, const char *tag) :
+		base_state(mconfig, type, tag),
+		m_mcu(*this, "mcu"),
+		m_coins(*this, "COINS")
+	{ }
+
+	void firetrap(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
+
+private:
+	// devices
+	required_device<i8751_device> m_mcu;
+
+	required_ioport m_coins;
+
+	uint8_t m_mcu_p3 = 0;
+	uint8_t m_maincpu_to_mcu = 0;
+	uint8_t m_mcu_to_maincpu = 0;
+
+	uint8_t mcu_r();
+	void mcu_w(uint8_t data);
+	uint8_t mcu_p0_r();
+	void mcu_p3_w(uint8_t data);
+	TIMER_DEVICE_CALLBACK_MEMBER(interrupt);
+
+	void main_map(address_map &map);
+};
+
+class bootleg_state : public base_state
+{
+public:
+	bootleg_state(const machine_config &mconfig, device_type type, const char *tag) :
+		base_state(mconfig, type, tag),
+		m_in2(*this, "IN2")
+	{ }
+
+	void firetrapbl(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
+	virtual void machine_reset() override;
+
+private:
+	// misc
+	uint8_t m_coin_command_pending = 0;
+
+	required_ioport m_in2;
+
+	uint8_t coin_r();
+	TIMER_DEVICE_CALLBACK_MEMBER(interrupt);
+
+	void main_map(address_map &map);
+};
+
+
+// video
+
+/***************************************************************************
+
+  Convert the color PROMs into a more useable format.
+
+  Fire Trap has one 256x8 and one 256x4 palette PROMs.
+  I don't know for sure how the palette PROMs are connected to the RGB
+  output, but it's probably the usual:
+
+  bit 7 -- 220 ohm resistor  -- GREEN
+        -- 470 ohm resistor  -- GREEN
+        -- 1  kohm resistor  -- GREEN
+        -- 2.2kohm resistor  -- GREEN
+        -- 220 ohm resistor  -- RED
+        -- 470 ohm resistor  -- RED
+        -- 1  kohm resistor  -- RED
+  bit 0 -- 2.2kohm resistor  -- RED
+
+  bit 3 -- 220 ohm resistor  -- BLUE
+        -- 470 ohm resistor  -- BLUE
+        -- 1  kohm resistor  -- BLUE
+  bit 0 -- 2.2kohm resistor  -- BLUE
+
+***************************************************************************/
+
+void base_state::palette(palette_device &palette) const
+{
+	uint8_t const *const color_prom = memregion("proms")->base();
+
+	for (int i = 0; i < palette.entries(); i++)
+	{
+		int bit0 = (color_prom[i] >> 0) & 0x01;
+		int bit1 = (color_prom[i] >> 1) & 0x01;
+		int bit2 = (color_prom[i] >> 2) & 0x01;
+		int bit3 = (color_prom[i] >> 3) & 0x01;
+		int const r = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		bit0 = (color_prom[i] >> 4) & 0x01;
+		bit1 = (color_prom[i] >> 5) & 0x01;
+		bit2 = (color_prom[i] >> 6) & 0x01;
+		bit3 = (color_prom[i] >> 7) & 0x01;
+		int const g = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		bit0 = (color_prom[i + palette.entries()] >> 0) & 0x01;
+		bit1 = (color_prom[i + palette.entries()] >> 1) & 0x01;
+		bit2 = (color_prom[i + palette.entries()] >> 2) & 0x01;
+		bit3 = (color_prom[i + palette.entries()] >> 3) & 0x01;
+		int const b = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+
+		palette.set_pen_color(i, rgb_t(r, g, b));
+	}
+}
+
+
+/***************************************************************************
+
+  Callbacks for the TileMap code
+
+***************************************************************************/
+
+TILEMAP_MAPPER_MEMBER(base_state::get_fg_memory_offset)
+{
+	return (row ^ 0x1f) + (col << 5);
+}
+
+TILEMAP_MAPPER_MEMBER(base_state::get_bg_memory_offset)
+{
+	return ((row & 0x0f) ^ 0x0f) | ((col & 0x0f) << 4) |
+			// hole at bit 8
+			((row & 0x10) << 5) | ((col & 0x10) << 6);
+}
+
+TILE_GET_INFO_MEMBER(base_state::get_fg_tile_info)
+{
+	int code = m_fgvideoram[tile_index];
+	int color = m_fgvideoram[tile_index + 0x400];
+	tileinfo.set(0,
+			code | ((color & 0x01) << 8),
+			color >> 4,
+			0);
+}
+
+template <uint8_t Which>
+TILE_GET_INFO_MEMBER(base_state::get_bg_tile_info)
+{
+	int code = m_bgvideoram[Which][tile_index];
+	int color = m_bgvideoram[Which][tile_index + 0x100];
+	tileinfo.set(Which + 1,
+			code + ((color & 0x03) << 8),
+			(color & 0x30) >> 4,
+			TILE_FLIPXY((color & 0x0c) >> 2));
+}
+
+
+/***************************************************************************
+
+  Start the video hardware emulation.
+
+***************************************************************************/
+
+void base_state::video_start()
+{
+	m_fg_tilemap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(base_state::get_fg_tile_info)), tilemap_mapper_delegate(*this, FUNC(base_state::get_fg_memory_offset)), 8, 8, 32, 32);
+	m_bg_tilemap[0] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(base_state::get_bg_tile_info<0>)), tilemap_mapper_delegate(*this, FUNC(base_state::get_bg_memory_offset)), 16, 16, 32, 32);
+	m_bg_tilemap[1] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(base_state::get_bg_tile_info<1>)), tilemap_mapper_delegate(*this, FUNC(base_state::get_bg_memory_offset)), 16, 16, 32, 32);
+
+	m_fg_tilemap->set_transparent_pen(0);
+	m_bg_tilemap[0]->set_transparent_pen(0);
+}
+
+
+/***************************************************************************
+
+  Memory handlers
+
+***************************************************************************/
+
+void base_state::fgvideoram_w(offs_t offset, uint8_t data)
+{
+	m_fgvideoram[offset] = data;
+	m_fg_tilemap->mark_tile_dirty(offset & 0x3ff);
+}
+
+template <uint8_t Which>
+void base_state::bgvideoram_w(offs_t offset, uint8_t data)
+{
+	m_bgvideoram[Which][offset] = data;
+	m_bg_tilemap[Which]->mark_tile_dirty(offset & 0x6ff);
+}
+
+template <uint8_t Which>
+void base_state::bg_scrollx_w(offs_t offset, uint8_t data)
+{
+	m_scroll_x[Which][offset] = data;
+	m_bg_tilemap[Which]->set_scrollx(0, m_scroll_x[Which][0] | (m_scroll_x[Which][1] << 8));
+}
+
+template <uint8_t Which>
+void base_state::bg_scrolly_w(offs_t offset, uint8_t data)
+{
+	m_scroll_y[Which][offset] = data;
+	m_bg_tilemap[Which]->set_scrolly(0, -(m_scroll_y[Which][0] | (m_scroll_y[Which][1] << 8)));
+}
+
+
+/***************************************************************************
+
+  Display refresh
+
+***************************************************************************/
+
+void base_state::draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	for (int offs = 0; offs < m_spriteram.bytes(); offs += 4)
+	{
+		// the meaning of bit 3 of [offs] is unknown
+
+		int sy = m_spriteram[offs];
+		int sx = m_spriteram[offs + 2];
+		int code = m_spriteram[offs + 3] + 4 * (m_spriteram[offs + 1] & 0xc0);
+		int color = ((m_spriteram[offs + 1] & 0x08) >> 2) | (m_spriteram[offs + 1] & 0x01);
+		int flipx = m_spriteram[offs + 1] & 0x04;
+		int flipy = m_spriteram[offs + 1] & 0x02;
+		if (flip_screen())
+		{
+			sx = 240 - sx;
+			sy = 240 - sy;
+			flipx = !flipx;
+			flipy = !flipy;
+		}
+
+		if (m_spriteram[offs + 1] & 0x10)    // double width
+		{
+			if (flip_screen()) sy -= 16;
+
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code & ~1,
+					color,
+					flipx, flipy,
+					sx, flipy ? sy : sy + 16, 0);
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code | 1,
+					color,
+					flipx, flipy,
+					sx, flipy ? sy + 16 : sy, 0);
+
+			// redraw with wraparound
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code & ~1,
+					color,
+					flipx, flipy,
+					sx - 256, flipy ? sy : sy + 16, 0);
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code | 1,
+					color,
+					flipx, flipy,
+					sx - 256, flipy ? sy + 16 : sy, 0);
+		}
+		else
+		{
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code,
+					color,
+					flipx, flipy,
+					sx, sy, 0);
+
+			// redraw with wraparound
+			m_gfxdecode->gfx(3)->transpen(bitmap, cliprect,
+					code,
+					color,
+					flipx, flipy,
+					sx - 256, sy, 0);
+		}
+	}
+}
+
+uint32_t base_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	m_bg_tilemap[1]->draw(screen, bitmap, cliprect, 0, 0);
+	m_bg_tilemap[0]->draw(screen, bitmap, cliprect, 0, 0);
+	draw_sprites(bitmap, cliprect);
+	m_fg_tilemap->draw(screen, bitmap, cliprect, 0, 0);
+	return 0;
+}
+
+
+// machine
+
+void base_state::nmi_disable_w(uint8_t data)
 {
 	m_nmi_enable = ~data & 1;
+	if (!m_nmi_enable)
+		m_maincpu->set_input_line(INPUT_LINE_NMI, CLEAR_LINE);
 }
 
-WRITE8_MEMBER(firetrap_state::firetrap_bankselect_w)
+void base_state::bankselect_w(uint8_t data)
 {
-	membank("bank1")->set_entry(data & 0x03);
+	m_mainbank->set_entry(data & 0x03);
 }
 
-READ8_MEMBER(firetrap_state::firetrap_8751_bootleg_r)
+void base_state::irqack_w(uint8_t data)
 {
-	/* Check for coin insertion */
-	/* the following only works in the bootleg version, which doesn't have an */
-	/* 8751 - the real thing is much more complicated than that. */
-	UINT8 coin = 0;
-	UINT8 port = ioport("IN2")->read() & 0x70;
+	m_maincpu->set_input_line(INPUT_LINE_IRQ0, CLEAR_LINE);
+}
 
-	if (space.device().safe_pc() == 0x1188)
+//**************************************************************************
+//  PROTECTION MCU
+//**************************************************************************
+
+uint8_t original_state::mcu_r()
+{
+	return m_mcu_to_maincpu;
+}
+
+void original_state::mcu_w(uint8_t data)
+{
+	m_maincpu_to_mcu = data;
+	m_mcu->set_input_line(MCS51_INT0_LINE, ASSERT_LINE);
+}
+
+uint8_t original_state::mcu_p0_r()
+{
+	// 7654----  unused
+	// ----3---  coin2
+	// -----2--  coin1
+	// ------1-  service coin
+	// -------0  coin inserted
+
+	int coin_inserted = ((m_coins->read() & 0x0e) == 0x0e) ? 1 : 0;
+
+	return (m_coins->read() & 0x0e) | coin_inserted;
+}
+
+void original_state::mcu_p3_w(uint8_t data)
+{
+	// 765-----  unused
+	// ---4----  coin flip-flop reset
+	// ----3---  mcu int1
+	// -----2--  mcu int0
+	// ------1-  mcu int0 ack
+	// -------0  maincpu int
+
+	if (BIT(m_mcu_p3, 0) == 1 && BIT(data, 0) == 0)
+		m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
+
+	if (BIT(m_mcu_p3, 1) == 1 && BIT(data, 1) == 0)
+		m_mcu->set_input_line(MCS51_INT0_LINE, CLEAR_LINE);
+
+//  if (BIT(m_mcu_p3, 4) == 1 && BIT(data, 4) == 0)
+
+	m_mcu_p3 = data;
+}
+
+uint8_t bootleg_state::coin_r()
+{
+	/* Check for coin insertion
+	   the following only works in the bootleg version, which doesn't have an
+	   8751 - the real thing is much more complicated than that. */
+	uint8_t coin = 0;
+	uint8_t port = m_in2->read() & 0x70;
+
+	if (m_maincpu->pc() == 0x1188)
 		return ~m_coin_command_pending;
 
 	if (port != 0x70)
 	{
-		if (!(port & 0x20)) /* COIN1 */
+		if (!(port & 0x20)) // COIN1
 			coin = 1;
-		if (!(port & 0x40)) /* COIN2 */
+		if (!(port & 0x40)) // COIN2
 			coin = 2;
-		if (!(port & 0x10)) /* SERVICE1 */
+		if (!(port & 0x10)) // SERVICE1
 			coin = 3;
 		m_coin_command_pending = coin;
 		return 0xff;
@@ -214,218 +648,98 @@ READ8_MEMBER(firetrap_state::firetrap_8751_bootleg_r)
 	return 0;
 }
 
-READ8_MEMBER(firetrap_state::firetrap_8751_r)
+void base_state::sound_flip_flop_w(uint8_t data)
 {
-	//logerror("PC:%04x read from 8751\n",space.device().safe_pc());
-	return m_i8751_return;
+	m_msm->reset_w(!BIT(data, 0));
+	m_sound_irq_enable = BIT(data, 1);
+	if (!m_sound_irq_enable)
+		m_audiocpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
 }
 
-WRITE8_MEMBER(firetrap_state::firetrap_8751_w)
+void base_state::sound_bankselect_w(uint8_t data)
 {
-	static const UINT8 i8751_init_data[]={
-		0xf5,0xd5,0xdd,0x21,0x05,0xc1,0x87,0x5f,0x87,0x83,0x5f,0x16,0x00,0xdd,0x19,0xd1,
-		0xf1,0xc9,0xf5,0xd5,0xfd,0x21,0x2f,0xc1,0x87,0x5f,0x16,0x00,0xfd,0x19,0xd1,0xf1,
-		0xc9,0xe3,0xd5,0xc5,0xf5,0xdd,0xe5,0xfd,0xe5,0xe9,0xe1,0xfd,0xe1,0xdd,0xe1,0xf1,
-		0xc1,0xd1,0xe3,0xc9,0xf5,0xc5,0xe5,0xdd,0xe5,0xc5,0x78,0xe6,0x0f,0x47,0x79,0x48,
-		0x06,0x00,0xdd,0x21,0x00,0xd0,0xdd,0x09,0xe6,0x0f,0x6f,0x26,0x00,0x29,0x29,0x29,
-		0x29,0xeb,0xdd,0x19,0xc1,0x78,0xe6,0xf0,0x28,0x05,0x11,0x00,0x02,0xdd,0x19,0x79,
-		0xe6,0xf0,0x28,0x05,0x11,0x00,0x04,0xdd,0x19,0xdd,0x5e,0x00,0x01,0x00,0x01,0xdd,
-		0x09,0xdd,0x56,0x00,0xdd,0xe1,0xe1,0xc1,0xf1,0xc9,0xf5,0x3e,0x01,0x32,0x04,0xf0,
-		0xf1,0xc9,0xf5,0x3e,0x00,0x32,0x04,0xf0,0xf1,0xc9,0xf5,0xd5,0xdd,0x21,0x05,0xc1,
-		0x87,0x5f,0x87,0x83,0x5f,0x16,0x00,0xdd,0x19,0xd1,0xf1,0xc9,0xf5,0xd5,0xfd,0x21,
-		0x2f,0xc1,0x87,0x5f,0x16,0x00,0xfd,0x19,0xd1,0xf1,0xc9,0xe3,0xd5,0xc5,0xf5,0xdd,
-		0xe5,0xfd,0xe5,0xe9,0xe1,0xfd,0xe1,0xdd,0xe1,0xf1,0xc1,0xd1,0xe3,0xc9,0xf5,0xc5,
-		0xe5,0xdd,0xe5,0xc5,0x78,0xe6,0x0f,0x47,0x79,0x48,0x06,0x00,0xdd,0x21,0x00,0xd0,
-		0xdd,0x09,0xe6,0x0f,0x6f,0x26,0x00,0x29,0x29,0x29,0x29,0xeb,0xdd,0x19,0xc1,0x78,
-		0xe6,0xf0,0x28,0x05,0x11,0x00,0x02,0xdd,0x19,0x79,0xe6,0xf0,0x28,0x05,0x11,0x00,
-		0x04,0xdd,0x19,0xdd,0x5e,0x00,0x01,0x00,0x01,0xdd,0x09,0xdd,0x56,0x00,0xdd,0x00
-	};
-	static const int i8751_coin_data[]={ 0x00, 0xb7 };
-	static const int i8751_36_data[]={ 0x00, 0xbc };
+	m_audiobank->set_entry(data & 0x01);
+}
 
-	/* End of command - important to note, as coin input is supressed while commands are pending */
-	if (data == 0x26)
+WRITE_LINE_MEMBER(base_state::adpcm_int)
+{
+	if (state)
 	{
-		m_i8751_current_command = 0;
-		m_i8751_return = 0xff; /* This value is XOR'd and must equal 0 */
-		m_maincpu->set_input_line_and_vector(0, HOLD_LINE, 0xff);
-		return;
+		m_adpcm_toggle ^= 1;
+		m_adpcm_select->select_w(m_adpcm_toggle);
+
+		if (m_sound_irq_enable && m_adpcm_toggle)
+			m_audiocpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
 	}
-
-	/* Init sequence command (0x13 : US - 0xf5 : Japan) */
-	else if ((data == 0x13) || (data == 0xf5))
-	{
-		if (!m_i8751_current_command)
-			m_i8751_init_ptr = 0;
-		m_i8751_return = i8751_init_data[m_i8751_init_ptr++];
-	}
-
-	/* Used to calculate a jump address when coins are inserted */
-	else if (data == 0xbd)
-	{
-		if (!m_i8751_current_command)
-			m_i8751_init_ptr = 0;
-		m_i8751_return = i8751_coin_data[m_i8751_init_ptr++];
-	}
-
-	else if (data == 0x36)
-	{
-		if (!m_i8751_current_command)
-			m_i8751_init_ptr = 0;
-		m_i8751_return = i8751_36_data[m_i8751_init_ptr++];
-	}
-
-	/* Static value commands */
-	else if (data == 0x14)
-		m_i8751_return = 1;
-	else if (data == 0x02)
-		m_i8751_return = 0;
-	else if (data == 0x72)
-		m_i8751_return = 3;
-	else if (data == 0x69)
-		m_i8751_return = 2;
-	else if (data == 0xcb)
-		m_i8751_return = 0;
-	else if (data == 0x49)
-		m_i8751_return = 1;
-	else if (data == 0x17)
-		m_i8751_return = 2;
-	else if (data == 0x88)
-		m_i8751_return = 3;
-	else
-	{
-		m_i8751_return = 0xff;
-		logerror("%04x: Unknown i8751 command %02x!\n",space.device().safe_pc(),data);
-	}
-
-	/* Signal main cpu task is complete */
-	m_maincpu->set_input_line_and_vector(0, HOLD_LINE, 0xff);
-	m_i8751_current_command=data;
 }
 
-WRITE8_MEMBER(firetrap_state::firetrap_sound_command_w)
+void base_state::adpcm_data_w(uint8_t data)
 {
-	soundlatch_byte_w(space, offset, data);
-	m_audiocpu->set_input_line(INPUT_LINE_NMI, PULSE_LINE);
+	m_audiocpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+	m_adpcm_select->ba_w(data);
 }
 
-WRITE8_MEMBER(firetrap_state::firetrap_sound_2400_w)
-{
-	m_msm->reset_w(~data & 0x01);
-	m_sound_irq_enable = data & 0x02;
-}
-
-WRITE8_MEMBER(firetrap_state::firetrap_sound_bankselect_w)
-{
-	membank("bank2")->set_entry(data & 0x01);
-}
-
-WRITE_LINE_MEMBER(firetrap_state::firetrap_adpcm_int)
-{
-	m_msm->data_w(m_msm5205next >> 4);
-	m_msm5205next <<= 4;
-
-	m_adpcm_toggle ^= 1;
-	if (m_sound_irq_enable && m_adpcm_toggle)
-		m_audiocpu->set_input_line(M6502_IRQ_LINE, HOLD_LINE);
-}
-
-WRITE8_MEMBER(firetrap_state::firetrap_adpcm_data_w)
-{
-	m_msm5205next = data;
-}
-
-WRITE8_MEMBER(firetrap_state::flip_screen_w)
+void base_state::flip_screen_w(uint8_t data)
 {
 	flip_screen_set(data);
 }
 
-
-static ADDRESS_MAP_START( firetrap_map, AS_PROGRAM, 8, firetrap_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0xbfff) AM_ROMBANK("bank1")
-	AM_RANGE(0xc000, 0xcfff) AM_RAM
-	AM_RANGE(0xd000, 0xd7ff) AM_RAM_WRITE(firetrap_bg1videoram_w) AM_SHARE("bg1videoram")
-	AM_RANGE(0xd800, 0xdfff) AM_RAM_WRITE(firetrap_bg2videoram_w) AM_SHARE("bg2videoram")
-	AM_RANGE(0xe000, 0xe7ff) AM_RAM_WRITE(firetrap_fgvideoram_w) AM_SHARE("fgvideoram")
-	AM_RANGE(0xe800, 0xe97f) AM_RAM AM_SHARE("spriteram")
-	AM_RANGE(0xf000, 0xf000) AM_WRITENOP    /* IRQ acknowledge */
-	AM_RANGE(0xf001, 0xf001) AM_WRITE(firetrap_sound_command_w)
-	AM_RANGE(0xf002, 0xf002) AM_WRITE(firetrap_bankselect_w)
-	AM_RANGE(0xf003, 0xf003) AM_WRITE(flip_screen_w)
-	AM_RANGE(0xf004, 0xf004) AM_WRITE(firetrap_nmi_disable_w)
-	AM_RANGE(0xf005, 0xf005) AM_WRITE(firetrap_8751_w)
-	AM_RANGE(0xf008, 0xf009) AM_WRITE(firetrap_bg1_scrollx_w)
-	AM_RANGE(0xf00a, 0xf00b) AM_WRITE(firetrap_bg1_scrolly_w)
-	AM_RANGE(0xf00c, 0xf00d) AM_WRITE(firetrap_bg2_scrollx_w)
-	AM_RANGE(0xf00e, 0xf00f) AM_WRITE(firetrap_bg2_scrolly_w)
-	AM_RANGE(0xf010, 0xf010) AM_READ_PORT("IN0")
-	AM_RANGE(0xf011, 0xf011) AM_READ_PORT("IN1")
-	AM_RANGE(0xf012, 0xf012) AM_READ_PORT("IN2")
-	AM_RANGE(0xf013, 0xf013) AM_READ_PORT("DSW0")
-	AM_RANGE(0xf014, 0xf014) AM_READ_PORT("DSW1")
-	AM_RANGE(0xf016, 0xf016) AM_READ(firetrap_8751_r)
-ADDRESS_MAP_END
-
-static ADDRESS_MAP_START( firetrap_bootleg_map, AS_PROGRAM, 8, firetrap_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0xbfff) AM_ROMBANK("bank1")
-	AM_RANGE(0xc000, 0xcfff) AM_RAM
-	AM_RANGE(0xd000, 0xd7ff) AM_RAM_WRITE(firetrap_bg1videoram_w) AM_SHARE("bg1videoram")
-	AM_RANGE(0xd800, 0xdfff) AM_RAM_WRITE(firetrap_bg2videoram_w) AM_SHARE("bg2videoram")
-	AM_RANGE(0xe000, 0xe7ff) AM_RAM_WRITE(firetrap_fgvideoram_w) AM_SHARE("fgvideoram")
-	AM_RANGE(0xe800, 0xe97f) AM_RAM AM_SHARE("spriteram")
-	AM_RANGE(0xf000, 0xf000) AM_WRITENOP    /* IRQ acknowledge */
-	AM_RANGE(0xf001, 0xf001) AM_WRITE(firetrap_sound_command_w)
-	AM_RANGE(0xf002, 0xf002) AM_WRITE(firetrap_bankselect_w)
-	AM_RANGE(0xf003, 0xf003) AM_WRITE(flip_screen_w)
-	AM_RANGE(0xf004, 0xf004) AM_WRITE(firetrap_nmi_disable_w)
-	AM_RANGE(0xf005, 0xf005) AM_WRITENOP
-	AM_RANGE(0xf008, 0xf009) AM_WRITE(firetrap_bg1_scrollx_w)
-	AM_RANGE(0xf00a, 0xf00b) AM_WRITE(firetrap_bg1_scrolly_w)
-	AM_RANGE(0xf00c, 0xf00d) AM_WRITE(firetrap_bg2_scrollx_w)
-	AM_RANGE(0xf00e, 0xf00f) AM_WRITE(firetrap_bg2_scrolly_w)
-	AM_RANGE(0xf010, 0xf010) AM_READ_PORT("IN0")
-	AM_RANGE(0xf011, 0xf011) AM_READ_PORT("IN1")
-	AM_RANGE(0xf012, 0xf012) AM_READ_PORT("IN2")
-	AM_RANGE(0xf013, 0xf013) AM_READ_PORT("DSW0")
-	AM_RANGE(0xf014, 0xf014) AM_READ_PORT("DSW1")
-	AM_RANGE(0xf016, 0xf016) AM_READ(firetrap_8751_bootleg_r)
-	AM_RANGE(0xf800, 0xf8ff) AM_ROM /* extra ROM in the bootleg with unprotection code */
-ADDRESS_MAP_END
-
-static ADDRESS_MAP_START( sound_map, AS_PROGRAM, 8, firetrap_state )
-	AM_RANGE(0x0000, 0x07ff) AM_RAM
-	AM_RANGE(0x1000, 0x1001) AM_DEVWRITE("ymsnd", ym3526_device, write)
-	AM_RANGE(0x2000, 0x2000) AM_WRITE(firetrap_adpcm_data_w)    /* ADPCM data for the MSM5205 chip */
-	AM_RANGE(0x2400, 0x2400) AM_WRITE(firetrap_sound_2400_w)
-	AM_RANGE(0x2800, 0x2800) AM_WRITE(firetrap_sound_bankselect_w)
-	AM_RANGE(0x3400, 0x3400) AM_READ(soundlatch_byte_r)
-	AM_RANGE(0x4000, 0x7fff) AM_ROMBANK("bank2")
-	AM_RANGE(0x8000, 0xffff) AM_ROM
-ADDRESS_MAP_END
-
-INPUT_CHANGED_MEMBER(firetrap_state::coin_inserted)
+void base_state::base_main_map(address_map &map)
 {
-	/* coin insertion causes an IRQ */
-	if(newval)
-	{
-		m_coin_command_pending = (UINT8)(FPTR)(param);
-
-		/* Make sure coin IRQ's aren't generated when another command is pending, the main cpu
-		    definitely doesn't expect them as it locks out the coin routine */
-		if (m_coin_command_pending && !m_i8751_current_command)
-		{
-			m_i8751_return = m_coin_command_pending;
-			m_maincpu->set_input_line_and_vector(0, HOLD_LINE, 0xff);
-			m_coin_command_pending = 0;
-		}
-	}
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0xbfff).bankr(m_mainbank);
+	map(0xc000, 0xcfff).ram();
+	map(0xd000, 0xd7ff).ram().w(FUNC(base_state::bgvideoram_w<0>)).share(m_bgvideoram[0]);
+	map(0xd800, 0xdfff).ram().w(FUNC(base_state::bgvideoram_w<1>)).share(m_bgvideoram[1]);
+	map(0xe000, 0xe7ff).ram().w(FUNC(base_state::fgvideoram_w)).share(m_fgvideoram);
+	map(0xe800, 0xe97f).ram().share(m_spriteram);
+	map(0xf000, 0xf000).w(FUNC(base_state::irqack_w));
+	map(0xf001, 0xf001).w("soundlatch", FUNC(generic_latch_8_device::write));
+	map(0xf002, 0xf002).w(FUNC(base_state::bankselect_w));
+	map(0xf003, 0xf003).w(FUNC(base_state::flip_screen_w));
+	map(0xf004, 0xf004).w(FUNC(base_state::nmi_disable_w));
+	map(0xf008, 0xf009).w(FUNC(base_state::bg_scrollx_w<0>));
+	map(0xf00a, 0xf00b).w(FUNC(base_state::bg_scrolly_w<0>));
+	map(0xf00c, 0xf00d).w(FUNC(base_state::bg_scrollx_w<1>));
+	map(0xf00e, 0xf00f).w(FUNC(base_state::bg_scrolly_w<1>));
+	map(0xf010, 0xf010).portr("IN0");
+	map(0xf011, 0xf011).portr("IN1");
+	map(0xf012, 0xf012).portr("IN2");
+	map(0xf013, 0xf013).portr("DSW0");
+	map(0xf014, 0xf014).portr("DSW1");
 }
 
-/* verified from Z80 code */
+void original_state::main_map(address_map &map)
+{
+	base_main_map(map);
+
+	map(0xf005, 0xf005).w(FUNC(original_state::mcu_w));
+	map(0xf016, 0xf016).r(FUNC(original_state::mcu_r));
+}
+
+void bootleg_state::main_map(address_map &map)
+{
+	base_main_map(map);
+
+	map(0xf016, 0xf016).r(FUNC(bootleg_state::coin_r));
+	map(0xf800, 0xf8ff).rom(); // extra ROM in the bootleg with unprotection code
+}
+
+void base_state::sound_map(address_map &map)
+{
+	map(0x0000, 0x07ff).ram();
+	map(0x1000, 0x1001).w("ymsnd", FUNC(ym3526_device::write));
+	map(0x2000, 0x2000).w(FUNC(base_state::adpcm_data_w));
+	map(0x2400, 0x2400).w(FUNC(base_state::sound_flip_flop_w));
+	map(0x2800, 0x2800).w(FUNC(base_state::sound_bankselect_w));
+	map(0x3400, 0x3400).r("soundlatch", FUNC(generic_latch_8_device::read));
+	map(0x4000, 0x7fff).bankr(m_audiobank);
+	map(0x8000, 0xffff).rom().region("audiocpu", 0);
+}
+
+// verified from Z80 code
 static INPUT_PORTS_START( firetrap )
-	PORT_START("IN0")   /* IN0 */
+	PORT_START("IN0")
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP )     PORT_4WAY
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN )   PORT_4WAY
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT )   PORT_4WAY
@@ -435,7 +749,7 @@ static INPUT_PORTS_START( firetrap )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_LEFT )  PORT_4WAY
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_RIGHT ) PORT_4WAY
 
-	PORT_START("IN1")   /* IN1 */
+	PORT_START("IN1")
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP )     PORT_4WAY PORT_COCKTAIL
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN )   PORT_4WAY PORT_COCKTAIL
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT )   PORT_4WAY PORT_COCKTAIL
@@ -445,7 +759,7 @@ static INPUT_PORTS_START( firetrap )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_LEFT )  PORT_4WAY PORT_COCKTAIL
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_RIGHT ) PORT_4WAY PORT_COCKTAIL
 
-	PORT_START("IN2")   /* IN2 */
+	PORT_START("IN2")
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON1 )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_START1 )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_COCKTAIL
@@ -455,13 +769,13 @@ static INPUT_PORTS_START( firetrap )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_CUSTOM ) PORT_VBLANK("screen")
 
-	PORT_START("DSW0")  /* DSW0 */
+	PORT_START("DSW0")
 	PORT_DIPNAME( 0x07, 0x07, DEF_STR( Coin_A ) )       PORT_DIPLOCATION("SW1:1,2,3")
 	PORT_DIPSETTING(    0x07, DEF_STR( 1C_1C ) )
 	PORT_DIPSETTING(    0x06, DEF_STR( 1C_2C ) )
 	PORT_DIPSETTING(    0x05, DEF_STR( 1C_3C ) )
 	PORT_DIPSETTING(    0x03, DEF_STR( 1C_4C ) )
-	PORT_DIPSETTING(    0x04, DEF_STR( 1C_6C ) )        /* Manual shows 1C_5C */
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_6C ) )        // Manual shows 1C_5C
 	PORT_DIPNAME( 0x18, 0x18, DEF_STR( Coin_B ) )       PORT_DIPLOCATION("SW1:4,5")
 	PORT_DIPSETTING(    0x00, DEF_STR( 4C_1C ) )
 	PORT_DIPSETTING(    0x08, DEF_STR( 3C_1C ) )
@@ -477,18 +791,18 @@ static INPUT_PORTS_START( firetrap )
 	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 
-	PORT_START("DSW1")  /* DSW1 */
+	PORT_START("DSW1")
 	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Difficulty ) )   PORT_DIPLOCATION("SW2:1,2")
 	PORT_DIPSETTING(    0x02, DEF_STR( Easy ) )
 	PORT_DIPSETTING(    0x03, DEF_STR( Normal ) )
 	PORT_DIPSETTING(    0x01, DEF_STR( Hard ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( Hardest ) )
 	PORT_DIPNAME( 0x0c, 0x0c, DEF_STR( Lives ) )        PORT_DIPLOCATION("SW2:3,4")
-	PORT_DIPSETTING(    0x00, "2" )                         /* "1" in the "test mode" but manual states "Infinite" */
+	PORT_DIPSETTING(    0x00, "2" )                         // "1" in the "test mode" but manual states "Infinite"
 	PORT_DIPSETTING(    0x0c, "3" )
 	PORT_DIPSETTING(    0x08, "4" )
 	PORT_DIPSETTING(    0x04, "5" )
-	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Bonus_Life ) )   PORT_DIPLOCATION("SW2:5,6") /* table at 0x0ca3 - 4*30 bytes */
+	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Bonus_Life ) )   PORT_DIPLOCATION("SW2:5,6") // table at 0x0ca3 - 4*30 bytes
 	PORT_DIPSETTING(    0x10, "30k and 70k" )
 	PORT_DIPSETTING(    0x00, "50k and 100k" )
 	PORT_DIPSETTING(    0x30, "30k only" )
@@ -498,25 +812,26 @@ static INPUT_PORTS_START( firetrap )
 	PORT_DIPSETTING(    0x40, DEF_STR( Yes ) )
 	PORT_SERVICE_DIPLOC(  0x80, IP_ACTIVE_LOW, "SW2:8" )
 
-	PORT_START("COIN")  /* Connected to i8751 directly */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_COIN1 ) PORT_CHANGED_MEMBER(DEVICE_SELF, firetrap_state,coin_inserted, 1)
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_COIN2 ) PORT_CHANGED_MEMBER(DEVICE_SELF, firetrap_state,coin_inserted, 2)
-	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_SERVICE1 ) PORT_CHANGED_MEMBER(DEVICE_SELF, firetrap_state,coin_inserted, 3)
+	PORT_START("COINS")
+	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_CUSTOM) // any coin input active
+	PORT_BIT(0x02, IP_ACTIVE_LOW, IPT_SERVICE1)
+	PORT_BIT(0x04, IP_ACTIVE_LOW, IPT_COIN1)
+	PORT_BIT(0x08, IP_ACTIVE_LOW, IPT_COIN2)
 INPUT_PORTS_END
 
-/* verified from Z80 code */
+// verified from Z80 code
 static INPUT_PORTS_START( firetrapj )
 	PORT_INCLUDE( firetrap )
 
 	PORT_MODIFY("DSW1")
-	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Bonus_Life ) )   PORT_DIPLOCATION("SW2:5,6") /* table at 0x0ca3 - 4*30 bytes */
-	PORT_DIPSETTING(    0x30, "50k & Every 70k" )             /* last bonus life at 960k */
-	PORT_DIPSETTING(    0x20, "60k & Every 80k" )             /* last bonus life at 940k */
-	PORT_DIPSETTING(    0x10, "80k & Every 100k" )            /* last bonus life at 980k */
+	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Bonus_Life ) )   PORT_DIPLOCATION("SW2:5,6") // table at 0x0ca3 - 4*30 bytes
+	PORT_DIPSETTING(    0x30, "50k & Every 70k" )             // last bonus life at 960k
+	PORT_DIPSETTING(    0x20, "60k & Every 80k" )             // last bonus life at 940k
+	PORT_DIPSETTING(    0x10, "80k & Every 100k" )            // last bonus life at 980k
 	PORT_DIPSETTING(    0x00, "50k only" )
 INPUT_PORTS_END
 
-/* verified from Z80 code */
+// verified from Z80 code
 static INPUT_PORTS_START( firetrapbl )
 	PORT_INCLUDE( firetrapj )
 
@@ -525,10 +840,9 @@ static INPUT_PORTS_START( firetrapbl )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
 
-	PORT_MODIFY("COIN")
-	PORT_BIT( 0x07, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_MODIFY("COINS")
+	PORT_BIT( 0xff, IP_ACTIVE_LOW, IPT_UNUSED )
 INPUT_PORTS_END
-
 
 static const gfx_layout charlayout =
 {
@@ -540,6 +854,7 @@ static const gfx_layout charlayout =
 	{ 7*8, 6*8, 5*8, 4*8, 3*8, 2*8, 1*8, 0*8 },
 	8*8
 };
+
 static const gfx_layout tilelayout =
 {
 	16,16,
@@ -552,6 +867,7 @@ static const gfx_layout tilelayout =
 			7*8, 6*8, 5*8, 4*8, 3*8, 2*8, 1*8, 0*8 },
 	32*8
 };
+
 static const gfx_layout spritelayout =
 {
 	16,16,
@@ -565,140 +881,155 @@ static const gfx_layout spritelayout =
 	32*8
 };
 
-static GFXDECODE_START( firetrap )
-	GFXDECODE_ENTRY( "gfx1", 0, charlayout,   0x00, 16 )    /* colors 0x00-0x3f */
-	GFXDECODE_ENTRY( "gfx2", 0, tilelayout,   0x80,  4 )    /* colors 0x80-0xbf */
-	GFXDECODE_ENTRY( "gfx3", 0, tilelayout,   0xc0,  4 )    /* colors 0xc0-0xff */
-	GFXDECODE_ENTRY( "gfx4", 0, spritelayout, 0x40,  4 )    /* colors 0x40-0x7f */
+static GFXDECODE_START( gfx_firetrap )
+	GFXDECODE_ENTRY( "chars",   0, charlayout,   0x00, 16 )    // colors 0x00-0x3f
+	GFXDECODE_ENTRY( "tiles1",  0, tilelayout,   0x80,  4 )    // colors 0x80-0xbf
+	GFXDECODE_ENTRY( "tiles2",  0, tilelayout,   0xc0,  4 )    // colors 0xc0-0xff
+	GFXDECODE_ENTRY( "sprites", 0, spritelayout, 0x40,  4 )    // colors 0x40-0x7f
 GFXDECODE_END
 
-
-INTERRUPT_GEN_MEMBER(firetrap_state::firetrap_irq)
+TIMER_DEVICE_CALLBACK_MEMBER(original_state::interrupt)
 {
-	if (m_nmi_enable)
-		device.execute().set_input_line(INPUT_LINE_NMI, PULSE_LINE);
+	if (param == 0 && m_nmi_enable)
+		m_maincpu->set_input_line(INPUT_LINE_NMI, ASSERT_LINE);
+
+	if (param == 0)
+		m_mcu->set_input_line(MCS51_INT1_LINE, ASSERT_LINE);
+
+	if (param == 1)
+		m_mcu->set_input_line(MCS51_INT1_LINE, CLEAR_LINE);
 }
 
-
-void firetrap_state::machine_start()
+TIMER_DEVICE_CALLBACK_MEMBER(bootleg_state::interrupt)
 {
-	UINT8 *MAIN = memregion("maincpu")->base();
-	UINT8 *SOUND = memregion("audiocpu")->base();
+	if (param == 0 && m_nmi_enable)
+		m_maincpu->set_input_line(INPUT_LINE_NMI, ASSERT_LINE);
+}
 
-	membank("bank1")->configure_entries(0, 4, &MAIN[0x10000], 0x4000);
-	membank("bank2")->configure_entries(0, 2, &SOUND[0x10000], 0x4000);
+void base_state::machine_start()
+{
+	uint8_t *main = memregion("maincpu")->base();
+	uint8_t *sound = memregion("audiocpu")->base();
 
-	save_item(NAME(m_i8751_current_command));
+	m_mainbank->configure_entries(0, 4, &main[0x10000], 0x4000);
+	m_audiobank->configure_entries(0, 2, &sound[0x8000], 0x4000);
+
 	save_item(NAME(m_sound_irq_enable));
 	save_item(NAME(m_nmi_enable));
-	save_item(NAME(m_i8751_return));
-	save_item(NAME(m_i8751_init_ptr));
-	save_item(NAME(m_msm5205next));
 	save_item(NAME(m_adpcm_toggle));
-	save_item(NAME(m_coin_command_pending));
-	save_item(NAME(m_scroll1_x));
-	save_item(NAME(m_scroll1_y));
-	save_item(NAME(m_scroll2_x));
-	save_item(NAME(m_scroll2_y));
+	save_item(NAME(m_scroll_x));
+	save_item(NAME(m_scroll_y));
 }
 
-void firetrap_state::machine_reset()
+void original_state::machine_start()
 {
-	int i;
+	base_state::machine_start();
 
-	for (i = 0; i < 2; i++)
+	save_item(NAME(m_mcu_p3));
+	save_item(NAME(m_maincpu_to_mcu));
+	save_item(NAME(m_mcu_to_maincpu));
+}
+
+void bootleg_state::machine_start()
+{
+	base_state::machine_start();
+
+	save_item(NAME(m_coin_command_pending));
+}
+
+void base_state::machine_reset()
+{
+	for (int i = 0; i < 2; i++)
 	{
-		m_scroll1_x[i] = 0;
-		m_scroll1_y[i] = 0;
-		m_scroll2_x[i] = 0;
-		m_scroll2_y[i] = 0;
+		m_scroll_x[0][i] = 0;
+		m_scroll_y[0][i] = 0;
+		m_scroll_x[1][i] = 0;
+		m_scroll_y[1][i] = 0;
 	}
 
-	m_i8751_current_command = 0;
 	m_sound_irq_enable = 0;
 	m_nmi_enable = 0;
-	m_i8751_return = 0;
-	m_i8751_init_ptr = 0;
-	m_msm5205next = 0xff;
 	m_adpcm_toggle = 0;
+}
+
+void bootleg_state::machine_reset()
+{
+	base_state::machine_reset();
+
 	m_coin_command_pending = 0;
 }
 
-static MACHINE_CONFIG_START( firetrap, firetrap_state )
+void base_state::base(machine_config &config)
+{
+	constexpr XTAL FIRETRAP_XTAL = XTAL(12'000'000);
 
-	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", Z80, FIRETRAP_XTAL/2)       // 6 MHz
-	MCFG_CPU_PROGRAM_MAP(firetrap_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", firetrap_state, firetrap_irq)
+	// basic machine hardware
+	Z80(config, m_maincpu, FIRETRAP_XTAL / 2);    // 6 MHz
 
-	MCFG_CPU_ADD("audiocpu", M6502, FIRETRAP_XTAL/8)    // 1.5 MHz
-	MCFG_CPU_PROGRAM_MAP(sound_map)
-							/* IRQs are caused by the ADPCM chip */
-							/* NMIs are caused by the main CPU */
+	M6502(config, m_audiocpu, FIRETRAP_XTAL / 8); // 1.5 MHz
+	m_audiocpu->set_addrmap(AS_PROGRAM, &base_state::sound_map);
+	// IRQs are caused by the ADPCM chip
+	// NMIs are caused by the main CPU
 
+	// video hardware
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+//  screen.set_refresh_hz(57.4034); // PCB measurement
+//  screen.set_vblank_time(ATTOSECONDS_IN_USEC(2500)); // not accurate
+//  screen.set_size(32*8, 32*8);
+//  screen.set_visarea(0*8, 32*8-1, 1*8, 31*8-1);
+	// DECO video CRTC, unverified
+	screen.set_raw(FIRETRAP_XTAL / 2, 384, 0, 256, 272, 8, 248);
+	screen.set_screen_update(FUNC(base_state::screen_update));
+	screen.set_palette(m_palette);
 
-	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(57.4034) // PCB measurement
-	MCFG_SCREEN_VBLANK_TIME(ATTOSECONDS_IN_USEC(2500) /* not accurate */)
-	MCFG_SCREEN_SIZE(32*8, 32*8)
-	MCFG_SCREEN_VISIBLE_AREA(0*8, 32*8-1, 1*8, 31*8-1)
-	MCFG_SCREEN_UPDATE_DRIVER(firetrap_state, screen_update_firetrap)
-	MCFG_SCREEN_PALETTE("palette")
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_firetrap);
+	PALETTE(config, m_palette, FUNC(base_state::palette), 256);
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", firetrap)
-	MCFG_PALETTE_ADD("palette", 256)
-	MCFG_PALETTE_INIT_OWNER(firetrap_state, firetrap)
+	// sound hardware
+	SPEAKER(config, "mono").front_center();
 
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+	GENERIC_LATCH_8(config, "soundlatch").data_pending_callback().set_inputline(m_audiocpu, INPUT_LINE_NMI);
 
-	MCFG_SOUND_ADD("ymsnd", YM3526, FIRETRAP_XTAL/4)    // 3 MHz
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.0)
+	ym3526_device &ymsnd(YM3526(config, "ymsnd", FIRETRAP_XTAL / 4));    // 3 MHz
+	ymsnd.add_route(ALL_OUTPUTS, "mono", 1.0);
 
-	MCFG_SOUND_ADD("msm", MSM5205, FIRETRAP_XTAL/32)    // 375 kHz
-	MCFG_MSM5205_VCLK_CB(WRITELINE(firetrap_state, firetrap_adpcm_int)) /* interrupt function */
-	MCFG_MSM5205_PRESCALER_SELECTOR(MSM5205_S48_4B)      /* 7.8125kHz          */
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.30)
-MACHINE_CONFIG_END
+	LS157(config, m_adpcm_select, 0);
+	m_adpcm_select->out_callback().set("msm", FUNC(msm5205_device::data_w));
 
-static MACHINE_CONFIG_START( firetrapbl, firetrap_state )
+	MSM5205(config, m_msm, FIRETRAP_XTAL / 32);   // 375 kHz
+	m_msm->vck_callback().set(FUNC(base_state::adpcm_int));
+	m_msm->set_prescaler_selector(msm5205_device::S48_4B);  // 7.8125kHz
+	m_msm->add_route(ALL_OUTPUTS, "mono", 0.30);
+}
 
-	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", Z80, FIRETRAP_XTAL/2)       // 6 MHz
-	MCFG_CPU_PROGRAM_MAP(firetrap_bootleg_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", firetrap_state,  firetrap_irq)
+void original_state::firetrap(machine_config &config)
+{
+	base(config);
 
-	MCFG_CPU_ADD("audiocpu", M6502, FIRETRAP_XTAL/8)    // 1.5 MHz
-	MCFG_CPU_PROGRAM_MAP(sound_map)
-							/* IRQs are caused by the ADPCM chip */
-							/* NMIs are caused by the main CPU */
+	// basic machine hardware
+	m_maincpu->set_addrmap(AS_PROGRAM, &original_state::main_map);
 
+	TIMER(config, "scantimer", 0).configure_scanline(FUNC(original_state::interrupt), "screen", 0, 1);
 
-	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(57.4034)
-	MCFG_SCREEN_VBLANK_TIME(ATTOSECONDS_IN_USEC(2500) /* not accurate */)
-	MCFG_SCREEN_SIZE(32*8, 32*8)
-	MCFG_SCREEN_VISIBLE_AREA(0*8, 32*8-1, 1*8, 31*8-1)
-	MCFG_SCREEN_UPDATE_DRIVER(firetrap_state, screen_update_firetrap)
-	MCFG_SCREEN_PALETTE("palette")
+	I8751(config, m_mcu, 8_MHz_XTAL);
+	m_mcu->port_in_cb<0>().set(FUNC(original_state::mcu_p0_r));
+	m_mcu->port_out_cb<1>().set([this] (u8 data) { m_mcu_to_maincpu = data; });
+	m_mcu->port_in_cb<2>().set([this] () { return m_maincpu_to_mcu; });
+	m_mcu->port_out_cb<3>().set(FUNC(original_state::mcu_p3_w));
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", firetrap)
-	MCFG_PALETTE_ADD("palette", 256)
-	MCFG_PALETTE_INIT_OWNER(firetrap_state, firetrap)
+	// needs a tight sync with the MCU
+	config.set_perfect_quantum(m_maincpu);
+}
 
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+void bootleg_state::firetrapbl(machine_config &config)
+{
+	base(config);
 
-	MCFG_SOUND_ADD("ymsnd", YM3526, FIRETRAP_XTAL/4)    // 3 MHz
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.0)
+	// basic machine hardware
+	m_maincpu->set_addrmap(AS_PROGRAM, &bootleg_state::main_map);
 
-	MCFG_SOUND_ADD("msm", MSM5205, FIRETRAP_XTAL/32)    // 375 kHz
-	MCFG_MSM5205_VCLK_CB(WRITELINE(firetrap_state, firetrap_adpcm_int)) /* interrupt function */
-	MCFG_MSM5205_PRESCALER_SELECTOR(MSM5205_S48_4B)      /* 7.8125kHz          */
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.30)
-MACHINE_CONFIG_END
+	TIMER(config, "scantimer", 0).configure_scanline(FUNC(bootleg_state::interrupt), "screen", 0, 1);
+}
 
 
 
@@ -709,22 +1040,22 @@ MACHINE_CONFIG_END
 ***************************************************************************/
 
 ROM_START( firetrap )
-	ROM_REGION( 0x20000, "maincpu", 0 ) /* 64k for code + 64k for banked ROMs */
+	ROM_REGION( 0x20000, "maincpu", 0 )
 	ROM_LOAD( "di-02.4a",     0x00000, 0x8000, CRC(3d1e4bf7) SHA1(ee903b469619f49edb1727fb545c9a6085f50746) )
 	ROM_LOAD( "di-01.3a",     0x10000, 0x8000, CRC(9bbae38b) SHA1(dc1d3ed5da71bfb104fd54fc70c56833f31d281f) )
-	ROM_LOAD( "di-00.2a",     0x18000, 0x8000, CRC(d0dad7de) SHA1(8783ebf6ddfef32f6036913d403f76c1545b813d) )
+	ROM_LOAD( "di-00-a.2a",   0x18000, 0x8000, CRC(f39e2cf4) SHA1(ce77a65089937906d8a41076a3f29ad6f45fda9d) ) // this ROM has data at 3FD7 where it seems to be blanked out in firetrapa, as well as other changes
 
-	ROM_REGION( 0x18000, "audiocpu", 0 )    /* 64k for the sound CPU + 32k for banked ROMs */
-	ROM_LOAD( "di-17.10j",    0x08000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
-	ROM_LOAD( "di-18.12j",    0x10000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
+	ROM_REGION( 0x10000, "audiocpu", 0 )
+	ROM_LOAD( "di-17.10j",    0x00000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
+	ROM_LOAD( "di-18.12j",    0x08000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
 
-	ROM_REGION( 0x1000, "mcu", 0 )  /* 8751 protection MCU */
-	ROM_LOAD( "di-12.16h",    0x00000, 0x1000, NO_DUMP )
+	ROM_REGION( 0x1000, "mcu", 0 )  // 8751 protection MCU
+	ROM_LOAD( "di-12.16h",    0x00000, 0x1000, CRC(6340a4d7) SHA1(3c896015a2416e3d664fedd07e42bdd40078c700) )
 
-	ROM_REGION( 0x02000, "gfx1", 0 )    /* characters */
+	ROM_REGION( 0x02000, "chars", 0 )
 	ROM_LOAD( "di-03.17c",    0x00000, 0x2000, CRC(46721930) SHA1(a605fe993166e95c1602a35b548649ceae77bff2) )
 
-	ROM_REGION( 0x20000, "gfx2", 0 )    /* tiles */
+	ROM_REGION( 0x20000, "tiles1", 0 )
 	ROM_LOAD( "di-06.3e",     0x00000, 0x2000, CRC(441d9154) SHA1(340804e82d4aba8e9fcdd08cce0cfecefd2f77a9) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -742,7 +1073,7 @@ ROM_START( firetrap )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx3", 0 )
+	ROM_REGION( 0x20000, "tiles2", 0 )
 	ROM_LOAD( "di-09.3j",     0x00000, 0x2000, CRC(d11e28e8) SHA1(3e91764f74d551e0984bac92daeab4e094e8dc13) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -760,35 +1091,35 @@ ROM_START( firetrap )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx4", 0 )    /* sprites */
+	ROM_REGION( 0x20000, "sprites", 0 )
 	ROM_LOAD( "di-16.17h",    0x00000, 0x8000, CRC(0de055d7) SHA1(ef763237c317545520c659f438b572b11c342d5a) )
 	ROM_LOAD( "di-13.13h",    0x08000, 0x8000, CRC(869219da) SHA1(9ab2439d6d1c62fce24c4f78ac7887f34c86cd75) )
 	ROM_LOAD( "di-14.14h",    0x10000, 0x8000, CRC(6b65812e) SHA1(209e07b2fced6b033c6d5398a998374588a35f46) )
 	ROM_LOAD( "di-15.15h",    0x18000, 0x8000, CRC(3e27f77d) SHA1(9ceccb1f56a8d0e05f6dea45d102690a1370624e) )
 
 	ROM_REGION( 0x0300, "proms", 0 )
-	ROM_LOAD( "firetrap.3b",  0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) /* palette red and green component */
-	ROM_LOAD( "firetrap.4b",  0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) /* palette blue component */
+	ROM_LOAD( "firetrap.3b",  0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) // palette red and green component
+	ROM_LOAD( "firetrap.4b",  0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) // palette blue component
 	ROM_LOAD( "firetrap.1a",  0x0200,  0x0100, CRC(d67f3514) SHA1(afadda6111fea663fe1373a81e184e51afc601df) ) // ?
 ROM_END
 
 ROM_START( firetrapa )
-	ROM_REGION( 0x20000, "maincpu", 0 ) /* 64k for code + 64k for banked ROMs */
+	ROM_REGION( 0x20000, "maincpu", 0 )
 	ROM_LOAD( "di-02.4a",     0x00000, 0x8000, CRC(3d1e4bf7) SHA1(ee903b469619f49edb1727fb545c9a6085f50746) )
 	ROM_LOAD( "di-01.3a",     0x10000, 0x8000, CRC(9bbae38b) SHA1(dc1d3ed5da71bfb104fd54fc70c56833f31d281f) )
-	ROM_LOAD( "di-00-a.2a.bin",     0x18000, 0x8000, CRC(f39e2cf4) SHA1(ce77a65089937906d8a41076a3f29ad6f45fda9d) ) // this rom has data at 3FD7 where it seems to be blanked out in firetrap, as well as other changes
+	ROM_LOAD( "di-00.2a",     0x18000, 0x8000, CRC(d0dad7de) SHA1(8783ebf6ddfef32f6036913d403f76c1545b813d) )
 
-	ROM_REGION( 0x18000, "audiocpu", 0 )    /* 64k for the sound CPU + 32k for banked ROMs */
-	ROM_LOAD( "di-17.10j",    0x08000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
-	ROM_LOAD( "di-18.12j",    0x10000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
+	ROM_REGION( 0x10000, "audiocpu", 0 )
+	ROM_LOAD( "di-17.10j",    0x00000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
+	ROM_LOAD( "di-18.12j",    0x08000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
 
-	ROM_REGION( 0x1000, "mcu", 0 )  /* 8751 protection MCU */
-	ROM_LOAD( "di-12.16h",    0x00000, 0x1000, NO_DUMP )
+	ROM_REGION( 0x1000, "mcu", 0 )  // 8751 protection MCU
+	ROM_LOAD( "di-12.16h",    0x00000, 0x1000, CRC(6340a4d7) SHA1(3c896015a2416e3d664fedd07e42bdd40078c700) )
 
-	ROM_REGION( 0x02000, "gfx1", 0 )    /* characters */
+	ROM_REGION( 0x02000, "chars", 0 )
 	ROM_LOAD( "di-03.17c",    0x00000, 0x2000, CRC(46721930) SHA1(a605fe993166e95c1602a35b548649ceae77bff2) )
 
-	ROM_REGION( 0x20000, "gfx2", 0 )    /* tiles */
+	ROM_REGION( 0x20000, "tiles1", 0 )
 	ROM_LOAD( "di-06.3e",     0x00000, 0x2000, CRC(441d9154) SHA1(340804e82d4aba8e9fcdd08cce0cfecefd2f77a9) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -806,7 +1137,7 @@ ROM_START( firetrapa )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx3", 0 )
+	ROM_REGION( 0x20000, "tiles2", 0 )
 	ROM_LOAD( "di-09.3j",     0x00000, 0x2000, CRC(d11e28e8) SHA1(3e91764f74d551e0984bac92daeab4e094e8dc13) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -824,35 +1155,35 @@ ROM_START( firetrapa )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx4", 0 )    /* sprites */
+	ROM_REGION( 0x20000, "sprites", 0 )
 	ROM_LOAD( "di-16.17h",    0x00000, 0x8000, CRC(0de055d7) SHA1(ef763237c317545520c659f438b572b11c342d5a) )
 	ROM_LOAD( "di-13.13h",    0x08000, 0x8000, CRC(869219da) SHA1(9ab2439d6d1c62fce24c4f78ac7887f34c86cd75) )
 	ROM_LOAD( "di-14.14h",    0x10000, 0x8000, CRC(6b65812e) SHA1(209e07b2fced6b033c6d5398a998374588a35f46) )
 	ROM_LOAD( "di-15.15h",    0x18000, 0x8000, CRC(3e27f77d) SHA1(9ceccb1f56a8d0e05f6dea45d102690a1370624e) )
 
 	ROM_REGION( 0x0300, "proms", 0 )
-	ROM_LOAD( "firetrap.3b",  0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) /* palette red and green component */
-	ROM_LOAD( "firetrap.4b",  0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) /* palette blue component */
+	ROM_LOAD( "firetrap.3b",  0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) // palette red and green component
+	ROM_LOAD( "firetrap.4b",  0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) // palette blue component
 	ROM_LOAD( "firetrap.1a",  0x0200,  0x0100, CRC(d67f3514) SHA1(afadda6111fea663fe1373a81e184e51afc601df) ) // ?
 ROM_END
 
 ROM_START( firetrapj )
-	ROM_REGION( 0x20000, "maincpu", 0 ) /* 64k for code + 64k for banked ROMs */
+	ROM_REGION( 0x20000, "maincpu", 0 )
 	ROM_LOAD( "fi-03.4a",     0x00000, 0x8000, CRC(20b2a4ff) SHA1(7c5de0789c5d3459063eb791f62d41c05ab474cc) )
 	ROM_LOAD( "fi-02.3a",     0x10000, 0x8000, CRC(5c8a0562) SHA1(856766851faa4353445d944b7705e348fd1379e4) )
 	ROM_LOAD( "fi-01.2a",     0x18000, 0x8000, CRC(f2412fe8) SHA1(28a9143e36c31fe34f40888dc848aed3d572d801) )
 
-	ROM_REGION( 0x18000, "audiocpu", 0 )    /* 64k for the sound CPU + 32k for banked ROMs */
-	ROM_LOAD( "fi-18.10j",    0x08000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
-	ROM_LOAD( "fi-19.12j",    0x10000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
+	ROM_REGION( 0x10000, "audiocpu", 0 )
+	ROM_LOAD( "fi-18.10j",    0x00000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
+	ROM_LOAD( "fi-19.12j",    0x08000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
 
-	ROM_REGION( 0x1000, "mcu", 0 )  /* 8751 protection MCU */
-	ROM_LOAD( "fi-13.16h",    0x00000, 0x1000, NO_DUMP )
+	ROM_REGION( 0x1000, "mcu", 0 )  // 8751 protection MCU
+	ROM_LOAD( "fi-13.16h",    0x00000, 0x1000, CRC(e531a633) SHA1(f21349f4e1147643204ae9735c304129f49911e7) )
 
-	ROM_REGION( 0x02000, "gfx1", 0 )    /* characters */
+	ROM_REGION( 0x02000, "chars", 0 )
 	ROM_LOAD( "fi-04.17c",    0x00000, 0x2000, CRC(a584fc16) SHA1(6ac3692a14cb7c70799c23f8f6726fa5be1ac0d8) )
 
-	ROM_REGION( 0x20000, "gfx2", 0 )    /* tiles */
+	ROM_REGION( 0x20000, "tiles1", 0 )
 	ROM_LOAD( "fi-06.3e",     0x00000, 0x2000, CRC(441d9154) SHA1(340804e82d4aba8e9fcdd08cce0cfecefd2f77a9) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -870,7 +1201,7 @@ ROM_START( firetrapj )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx3", 0 )
+	ROM_REGION( 0x20000, "tiles2", 0 )
 	ROM_LOAD( "fi-10.3j",     0x00000, 0x2000, CRC(d11e28e8) SHA1(3e91764f74d551e0984bac92daeab4e094e8dc13) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -888,33 +1219,33 @@ ROM_START( firetrapj )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx4", 0 )    /* sprites */
+	ROM_REGION( 0x20000, "sprites", 0 )
 	ROM_LOAD( "fi-17.17h",    0x00000, 0x8000, CRC(0de055d7) SHA1(ef763237c317545520c659f438b572b11c342d5a) )
 	ROM_LOAD( "fi-14.13h",    0x08000, 0x8000, CRC(dbcdd3df) SHA1(99a7722e818a0f12ece1abd038531cdcb60f1181) )
 	ROM_LOAD( "fi-15.14h",    0x10000, 0x8000, CRC(6b65812e) SHA1(209e07b2fced6b033c6d5398a998374588a35f46) )
 	ROM_LOAD( "fi-16.15h",    0x18000, 0x8000, CRC(3e27f77d) SHA1(9ceccb1f56a8d0e05f6dea45d102690a1370624e) )
 
 	ROM_REGION( 0x0300, "proms", 0 )
-	ROM_LOAD( "fi-2.3b",      0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) /* palette red and green component */
-	ROM_LOAD( "fi-3.4b",      0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) /* palette blue component */
+	ROM_LOAD( "fi-2.3b",      0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) // palette red and green component
+	ROM_LOAD( "fi-3.4b",      0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) // palette blue component
 	ROM_LOAD( "fi-1.1a",      0x0200,  0x0100, CRC(d67f3514) SHA1(afadda6111fea663fe1373a81e184e51afc601df) ) // ?
 ROM_END
 
 ROM_START( firetrapbl )
-	ROM_REGION( 0x28000, "maincpu", 0 ) /* 64k for code + 96k for banked ROMs */
+	ROM_REGION( 0x28000, "maincpu", 0 )
 	ROM_LOAD( "ft0d.bin",     0x00000, 0x8000, CRC(793ef849) SHA1(5a2c587370733d43484ba0a38a357260cdde8357) )
-	ROM_LOAD( "ft0a.bin",     0x08000, 0x8000, CRC(613313ee) SHA1(54e386b2b1faada3441e3e0bb7822a63eab36930) )   /* unprotection code */
+	ROM_LOAD( "ft0a.bin",     0x08000, 0x8000, CRC(613313ee) SHA1(54e386b2b1faada3441e3e0bb7822a63eab36930) )   // unprotection code
 	ROM_LOAD( "fi-02.3a",     0x10000, 0x8000, CRC(5c8a0562) SHA1(856766851faa4353445d944b7705e348fd1379e4) )
 	ROM_LOAD( "fi-01.2a",     0x18000, 0x8000, CRC(f2412fe8) SHA1(28a9143e36c31fe34f40888dc848aed3d572d801) )
 
-	ROM_REGION( 0x18000, "audiocpu", 0 )    /* 64k for the sound CPU + 32k for banked ROMs */
-	ROM_LOAD( "fi-18.10j",    0x08000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
-	ROM_LOAD( "fi-19.12j",    0x10000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
+	ROM_REGION( 0x10000, "audiocpu", 0 )
+	ROM_LOAD( "fi-18.10j",    0x00000, 0x8000, CRC(8605f6b9) SHA1(4fba88f34afd91d2cbc578b3b70f5399b8844390) )
+	ROM_LOAD( "fi-19.12j",    0x08000, 0x8000, CRC(49508c93) SHA1(3812b0b1a33a1506d2896d2b676ed6aabb29dac0) )
 
-	ROM_REGION( 0x02000, "gfx1", 0 )    /* characters */
+	ROM_REGION( 0x02000, "chars", 0 )
 	ROM_LOAD( "fi-04.17c",    0x00000, 0x2000, CRC(a584fc16) SHA1(6ac3692a14cb7c70799c23f8f6726fa5be1ac0d8) )
 
-	ROM_REGION( 0x20000, "gfx2", 0 )    /* tiles */
+	ROM_REGION( 0x20000, "tiles1", 0 )
 	ROM_LOAD( "fi-06.3e",     0x00000, 0x2000, CRC(441d9154) SHA1(340804e82d4aba8e9fcdd08cce0cfecefd2f77a9) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -932,7 +1263,7 @@ ROM_START( firetrapbl )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx3", 0 )
+	ROM_REGION( 0x20000, "tiles2", 0 )
 	ROM_LOAD( "fi-10.3j",     0x00000, 0x2000, CRC(d11e28e8) SHA1(3e91764f74d551e0984bac92daeab4e094e8dc13) )
 	ROM_CONTINUE(             0x08000, 0x2000 )
 	ROM_CONTINUE(             0x02000, 0x2000 )
@@ -950,21 +1281,22 @@ ROM_START( firetrapbl )
 	ROM_CONTINUE(             0x16000, 0x2000 )
 	ROM_CONTINUE(             0x1e000, 0x2000 )
 
-	ROM_REGION( 0x20000, "gfx4", 0 )    /* sprites */
+	ROM_REGION( 0x20000, "sprites", 0 )
 	ROM_LOAD( "fi-17.17h",    0x00000, 0x8000, CRC(0de055d7) SHA1(ef763237c317545520c659f438b572b11c342d5a) )
 	ROM_LOAD( "fi-14.13h",    0x08000, 0x8000, CRC(869219da) SHA1(9ab2439d6d1c62fce24c4f78ac7887f34c86cd75) ) // sldh
 	ROM_LOAD( "fi-15.14h",    0x10000, 0x8000, CRC(6b65812e) SHA1(209e07b2fced6b033c6d5398a998374588a35f46) )
 	ROM_LOAD( "fi-16.15h",    0x18000, 0x8000, CRC(3e27f77d) SHA1(9ceccb1f56a8d0e05f6dea45d102690a1370624e) )
 
 	ROM_REGION( 0x0300, "proms", 0 )
-	ROM_LOAD( "fi-2.3b",      0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) /* palette red and green component */
-	ROM_LOAD( "fi-3.4b",      0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) /* palette blue component */
+	ROM_LOAD( "fi-2.3b",      0x0000,  0x0100, CRC(8bb45337) SHA1(deaf6ea53eb3955230db1fdcb870079758a0c996) ) // palette red and green component
+	ROM_LOAD( "fi-3.4b",      0x0100,  0x0100, CRC(d5abfc64) SHA1(6c808c1d6087804214dc29d35280f42382c40b18) ) // palette blue component
 	ROM_LOAD( "fi-1.1a",      0x0200,  0x0100, CRC(d67f3514) SHA1(afadda6111fea663fe1373a81e184e51afc601df) ) // ?
 ROM_END
 
+} // anonymous namespace
 
 
-GAME( 1986, firetrap,   0,        firetrap,   firetrap, driver_device,   0, ROT90, "Wood Place Inc. (Data East USA license)", "Fire Trap (US, set 1)", MACHINE_SUPPORTS_SAVE )
-GAME( 1986, firetrapa,  firetrap, firetrap,   firetrap, driver_device,   0, ROT90, "Wood Place Inc. (Data East USA license)", "Fire Trap (US, set 2)", MACHINE_SUPPORTS_SAVE )
-GAME( 1986, firetrapj,  firetrap, firetrap,   firetrapj, driver_device,  0, ROT90, "Wood Place Inc.", "Fire Trap (Japan)", MACHINE_SUPPORTS_SAVE )
-GAME( 1986, firetrapbl, firetrap, firetrapbl, firetrapbl, driver_device, 0, ROT90, "bootleg", "Fire Trap (Japan bootleg)", MACHINE_SUPPORTS_SAVE )
+GAME( 1986, firetrap,   0,        firetrap,   firetrap,   original_state, empty_init, ROT90, "Woodplace Inc. (Data East USA license)", "Fire Trap (US, rev A)", MACHINE_SUPPORTS_SAVE )
+GAME( 1986, firetrapa,  firetrap, firetrap,   firetrap,   original_state, empty_init, ROT90, "Woodplace Inc. (Data East USA license)", "Fire Trap (US)", MACHINE_SUPPORTS_SAVE )
+GAME( 1986, firetrapj,  firetrap, firetrap,   firetrapj,  original_state, empty_init, ROT90, "Woodplace Inc.",                         "Fire Trap (Japan)", MACHINE_SUPPORTS_SAVE )
+GAME( 1986, firetrapbl, firetrap, firetrapbl, firetrapbl, bootleg_state,  empty_init, ROT90, "bootleg",                                "Fire Trap (Japan bootleg)", MACHINE_SUPPORTS_SAVE )

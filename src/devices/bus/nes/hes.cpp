@@ -30,27 +30,13 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_HES = &device_creator<nes_hes_device>;
+DEFINE_DEVICE_TYPE(NES_HES, nes_hes_device, "nes_hes", "NES Cart HES PCB")
 
 
-nes_hes_device::nes_hes_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_HES, "NES Cart HES PCB", tag, owner, clock, "nes_hes", __FILE__)
+nes_hes_device::nes_hes_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, NES_HES, tag, owner, clock)
 {
 }
-
-
-void nes_hes_device::device_start()
-{
-	common_start();
-}
-
-void nes_hes_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
-}
-
 
 
 /*-------------------------------------------------
@@ -69,19 +55,19 @@ void nes_hes_device::pcb_reset()
 
  iNES: mapper 113
 
- In MESS: Supported.
+ In MAME: Supported.
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_hes_device::write_l)
+void nes_hes_device::write_l(offs_t offset, u8 data)
 {
 	LOG_MMC(("hes write_l, offset: %04x, data: %02x\n", offset, data));
 
-	if (!(offset & 0x100))
+	offset += 0x100;
+	if (BIT(offset, 8)) // $41xx, $43xx, ... $5fxx
 	{
-		prg32((data & 0x38) >> 3);
-		chr8((data & 0x07) | ((data & 0x40) >> 3), CHRROM);
-		if (m_pcb_ctrl_mirror)
-			set_nt_mirroring(BIT(data, 7) ? PPU_MIRROR_VERT : PPU_MIRROR_HORZ);
+		prg32(BIT(data, 3, 3));
+		chr8(bitswap<4>(data, 6, 2, 1, 0), CHRROM);
+		set_nt_mirroring(BIT(data, 7) ? PPU_MIRROR_VERT : PPU_MIRROR_HORZ);
 	}
 }

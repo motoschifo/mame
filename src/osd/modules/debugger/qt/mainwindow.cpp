@@ -1,22 +1,24 @@
 // license:BSD-3-Clause
 // copyright-holders:Andrew Gardner
-#include <QtWidgets/QAction>
-#include <QtWidgets/QMenu>
-#include <QtWidgets/QMenuBar>
-#include <QtWidgets/QDockWidget>
-#include <QtWidgets/QScrollBar>
-#include <QtWidgets/QFileDialog>
-#include <QtGui/QCloseEvent>
-
+#include "emu.h"
 #include "mainwindow.h"
 
 #include "debug/debugcon.h"
 #include "debug/debugcpu.h"
 #include "debug/dvdisasm.h"
+#include "debug/points.h"
+
+#include <QtGui/QCloseEvent>
+#include <QtWidgets/QAction>
+#include <QtWidgets/QDockWidget>
+#include <QtWidgets/QFileDialog>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QScrollBar>
 
 
-MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
-	WindowQt(machine, NULL),
+MainWindow::MainWindow(running_machine &machine, QWidget *parent) :
+	WindowQt(machine, nullptr),
 	m_historyIndex(0),
 	m_inputHistory()
 {
@@ -25,7 +27,7 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 	//
 	// The main frame and its input and log widgets
 	//
-	QFrame* mainWindowFrame = new QFrame(this);
+	QFrame *mainWindowFrame = new QFrame(this);
 
 	// The input line
 	m_inputEdit = new QLineEdit(mainWindowFrame);
@@ -34,13 +36,11 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 
 
 	// The log view
-	m_consoleView = new DebuggerView(DVT_CONSOLE,
-										m_machine,
-										mainWindowFrame);
+	m_consoleView = new DebuggerView(DVT_CONSOLE, m_machine, mainWindowFrame);
 	m_consoleView->setFocusPolicy(Qt::NoFocus);
 	m_consoleView->setPreferBottom(true);
 
-	QVBoxLayout* vLayout = new QVBoxLayout(mainWindowFrame);
+	QVBoxLayout *vLayout = new QVBoxLayout(mainWindowFrame);
 	vLayout->addWidget(m_consoleView);
 	vLayout->addWidget(m_inputEdit);
 	vLayout->setSpacing(3);
@@ -63,11 +63,11 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 	connect(m_runToCursorAct, &QAction::triggered, this, &MainWindow::runToCursor);
 
 	// Right bar options
-	QActionGroup* rightBarGroup = new QActionGroup(this);
+	QActionGroup *rightBarGroup = new QActionGroup(this);
 	rightBarGroup->setObjectName("rightbargroup");
-	QAction* rightActRaw = new QAction("Raw Opcodes", this);
-	QAction* rightActEncrypted = new QAction("Encrypted Opcodes", this);
-	QAction* rightActComments = new QAction("Comments", this);
+	QAction *rightActRaw = new QAction("Raw Opcodes", this);
+	QAction *rightActEncrypted = new QAction("Encrypted Opcodes", this);
+	QAction *rightActComments = new QAction("Comments", this);
 	rightActRaw->setCheckable(true);
 	rightActEncrypted->setCheckable(true);
 	rightActComments->setCheckable(true);
@@ -76,12 +76,12 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 	rightActComments->setActionGroup(rightBarGroup);
 	rightActRaw->setShortcut(QKeySequence("Ctrl+R"));
 	rightActEncrypted->setShortcut(QKeySequence("Ctrl+E"));
-	rightActComments->setShortcut(QKeySequence("Ctrl+C"));
+	rightActComments->setShortcut(QKeySequence("Ctrl+N"));
 	rightActRaw->setChecked(true);
 	connect(rightBarGroup, &QActionGroup::triggered, this, &MainWindow::rightBarChanged);
 
 	// Assemble the options menu
-	QMenu* optionsMenu = menuBar()->addMenu("&Options");
+	QMenu *optionsMenu = menuBar()->addMenu("&Options");
 	optionsMenu->addAction(m_breakpointToggleAct);
 	optionsMenu->addAction(m_breakpointEnableAct);
 	optionsMenu->addAction(m_runToCursorAct);
@@ -91,22 +91,20 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 	//
 	// Images menu
 	//
-	image_interface_iterator imageIterTest(m_machine->root_device());
-	if (imageIterTest.first() != NULL)
-	{
+	image_interface_enumerator imageIterTest(m_machine.root_device());
+	if (imageIterTest.first())
 		createImagesMenu();
-	}
 
 	//
 	// Dock window menu
 	//
-	QMenu* dockMenu = menuBar()->addMenu("Doc&ks");
+	QMenu *dockMenu = menuBar()->addMenu("Doc&ks");
 
 	setCorner(Qt::TopRightCorner, Qt::TopDockWidgetArea);
 	setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
 
 	// The processor dock
-	QDockWidget* cpuDock = new QDockWidget("processor", this);
+	QDockWidget *cpuDock = new QDockWidget("processor", this);
 	cpuDock->setObjectName("cpudock");
 	cpuDock->setAllowedAreas(Qt::LeftDockWidgetArea);
 	m_procFrame = new ProcessorDockWidget(m_machine, cpuDock);
@@ -116,7 +114,7 @@ MainWindow::MainWindow(running_machine* machine, QWidget* parent) :
 	dockMenu->addAction(cpuDock->toggleViewAction());
 
 	// The disassembly dock
-	QDockWidget* dasmDock = new QDockWidget("dasm", this);
+	QDockWidget *dasmDock = new QDockWidget("dasm", this);
 	dasmDock->setObjectName("dasmdock");
 	dasmDock->setAllowedAreas(Qt::TopDockWidgetArea);
 	m_dasmFrame = new DasmDockWidget(m_machine, dasmDock);
@@ -133,7 +131,7 @@ MainWindow::~MainWindow()
 }
 
 
-void MainWindow::setProcessor(device_t* processor)
+void MainWindow::setProcessor(device_t *processor)
 {
 	// Cpu swap
 	m_procFrame->view()->view()->set_source(*m_procFrame->view()->view()->source_for_device(processor));
@@ -144,13 +142,12 @@ void MainWindow::setProcessor(device_t* processor)
 	m_dasmFrame->view()->verticalScrollBar()->setValue(m_dasmFrame->view()->view()->visible_position().y);
 
 	// Window title
-	string_format("Debug: %s - %s '%s'", m_machine->system().name, processor->name(), processor->tag());
-	setWindowTitle(string_format("Debug: %s - %s '%s'", m_machine->system().name, processor->name(), processor->tag()).c_str());
+	setWindowTitle(string_format("Debug: %s - %s '%s'", m_machine.system().name, processor->name(), processor->tag()).c_str());
 }
 
 
 // Used to intercept the user clicking 'X' in the upper corner
-void MainWindow::closeEvent(QCloseEvent* event)
+void MainWindow::closeEvent(QCloseEvent *event)
 {
 	debugActQuit();
 
@@ -160,18 +157,14 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 
 // Used to intercept the user hitting the up arrow in the input widget
-bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
 	// Only filter keypresses
-	QKeyEvent* keyEvent = NULL;
+	QKeyEvent *keyEvent = nullptr;
 	if (event->type() == QEvent::KeyPress)
-	{
 		keyEvent = static_cast<QKeyEvent*>(event);
-	}
 	else
-	{
 		return QObject::eventFilter(obj, event);
-	}
 
 	// Catch up & down keys
 	if (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down)
@@ -213,35 +206,21 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 void MainWindow::toggleBreakpointAtCursor(bool changedTo)
 {
 	debug_view_disasm *const dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
-	if (dasmView->cursor_visible() && (debug_cpu_get_visible_cpu(*m_machine) == dasmView->source()->device()))
+	if (dasmView->cursor_visible() && (m_machine.debugger().console().get_visible_cpu() == dasmView->source()->device()))
 	{
 		offs_t const address = downcast<debug_view_disasm *>(dasmView)->selected_address();
 		device_debug *const cpuinfo = dasmView->source()->device()->debug();
 
 		// Find an existing breakpoint at this address
-		INT32 bpindex = -1;
-		for (device_debug::breakpoint* bp = cpuinfo->breakpoint_first();
-				bp != NULL;
-				bp = bp->next())
-		{
-			if (address == bp->address())
-			{
-				bpindex = bp->index();
-				break;
-			}
-		}
+		const debug_breakpoint *bp = cpuinfo->breakpoint_find(address);
 
 		// If none exists, add a new one
 		std::string command;
-		if (bpindex == -1)
-		{
+		if (!bp)
 			command = string_format("bpset 0x%X", address);
-		}
 		else
-		{
-			command = string_format("bpclear 0x%X", bpindex);
-		}
-		debug_console_execute_command(*m_machine, command.c_str(), 1);
+			command = string_format("bpclear 0x%X", bp->index());
+		m_machine.debugger().console().execute_command(command, true);
 	}
 
 	refreshAll();
@@ -251,21 +230,19 @@ void MainWindow::toggleBreakpointAtCursor(bool changedTo)
 void MainWindow::enableBreakpointAtCursor(bool changedTo)
 {
 	debug_view_disasm *const dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
-	if (dasmView->cursor_visible() && (debug_cpu_get_visible_cpu(*m_machine) == dasmView->source()->device()))
+	if (dasmView->cursor_visible() && (m_machine.debugger().console().get_visible_cpu() == dasmView->source()->device()))
 	{
 		offs_t const address = dasmView->selected_address();
 		device_debug *const cpuinfo = dasmView->source()->device()->debug();
 
 		// Find an existing breakpoint at this address
-		device_debug::breakpoint* bp = cpuinfo->breakpoint_first();
-		while ((bp != NULL) && (bp->address() != address))
-			bp = bp->next();
+		const debug_breakpoint *bp = cpuinfo->breakpoint_find(address);
 
-		if (bp != NULL)
+		if (bp)
 		{
-			INT32 const bpindex = bp->index();
+			int32_t const bpindex = bp->index();
 			std::string command = string_format(bp->enabled() ? "bpdisable 0x%X" : "bpenable 0x%X", bpindex);
-			debug_console_execute_command(*m_machine, command.c_str(), 1);
+			m_machine.debugger().console().execute_command(command, true);
 		}
 	}
 
@@ -275,31 +252,27 @@ void MainWindow::enableBreakpointAtCursor(bool changedTo)
 
 void MainWindow::runToCursor(bool changedTo)
 {
-	debug_view_disasm* dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
-	if (dasmView->cursor_visible() && (debug_cpu_get_visible_cpu(*m_machine) == dasmView->source()->device()))
+	debug_view_disasm *dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
+	if (dasmView->cursor_visible() && (m_machine.debugger().console().get_visible_cpu() == dasmView->source()->device()))
 	{
 		offs_t address = downcast<debug_view_disasm*>(dasmView)->selected_address();
 		std::string command = string_format("go 0x%X", address);
-		debug_console_execute_command(*m_machine, command.c_str(), 1);
+		m_machine.debugger().console().execute_command(command, true);
 	}
 }
 
 
-void MainWindow::rightBarChanged(QAction* changedTo)
+void MainWindow::rightBarChanged(QAction *changedTo)
 {
-	debug_view_disasm* dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
+	debug_view_disasm *dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
+
 	if (changedTo->text() == "Raw Opcodes")
-	{
 		dasmView->set_right_column(DASM_RIGHTCOL_RAW);
-	}
 	else if (changedTo->text() == "Encrypted Opcodes")
-	{
 		dasmView->set_right_column(DASM_RIGHTCOL_ENCRYPTED);
-	}
 	else if (changedTo->text() == "Comments")
-	{
 		dasmView->set_right_column(DASM_RIGHTCOL_COMMENTS);
-	}
+
 	m_dasmFrame->view()->viewport()->update();
 }
 
@@ -315,14 +288,12 @@ void MainWindow::executeCommand(bool withClear)
 	// A blank command is a "silent step"
 	if (command == "")
 	{
-		debug_cpu_get_visible_cpu(*m_machine)->debug()->single_step();
+		m_machine.debugger().console().get_visible_cpu()->debug()->single_step();
 		return;
 	}
 
 	// Send along the command
-	debug_console_execute_command(*m_machine,
-									command.toLocal8Bit().data(),
-									true);
+	m_machine.debugger().console().execute_command(command.toLocal8Bit().data(), true);
 
 	// Add history & set the index to be the top of the stack
 	addToHistory(command);
@@ -344,24 +315,25 @@ void MainWindow::mountImage(bool changedTo)
 {
 	// The image interface index was assigned to the QAction's data memeber
 	const int imageIndex = dynamic_cast<QAction*>(sender())->data().toInt();
-	image_interface_iterator iter(m_machine->root_device());
+	image_interface_enumerator iter(m_machine.root_device());
 	device_image_interface *img = iter.byindex(imageIndex);
-	if (img == NULL)
+	if (!img)
 	{
-		debug_console_printf(*m_machine, "Something is wrong with the mount menu.\n");
+		m_machine.debugger().console().printf("Something is wrong with the mount menu.\n");
 		refreshAll();
 		return;
 	}
 
 	// File dialog
-	QString filename = QFileDialog::getOpenFileName(this,
-													"Select an image file",
-													QDir::currentPath(),
-													tr("All files (*.*)"));
+	QString filename = QFileDialog::getOpenFileName(
+			this,
+			"Select an image file",
+			QDir::currentPath(),
+			tr("All files (*.*)"));
 
-	if (img->load(filename.toUtf8().data()) != IMAGE_INIT_PASS)
+	if (img->load(filename.toUtf8().data()) != image_init_result::PASS)
 	{
-		debug_console_printf(*m_machine, "Image could not be mounted.\n");
+		m_machine.debugger().console().printf("Image could not be mounted.\n");
 		refreshAll();
 		return;
 	}
@@ -371,13 +343,13 @@ void MainWindow::mountImage(bool changedTo)
 	unmountAct->setEnabled(true);
 
 	// Set the mount name
-	QMenu* parentMenuItem = dynamic_cast<QMenu*>(sender()->parent());
+	QMenu *parentMenuItem = dynamic_cast<QMenu *>(sender()->parent());
 	QString baseString = parentMenuItem->title();
 	baseString.truncate(baseString.lastIndexOf(QString(" : ")));
 	const QString newTitle = baseString + QString(" : ") + QString(img->filename());
 	parentMenuItem->setTitle(newTitle);
 
-	debug_console_printf(*m_machine, "Image %s mounted successfully.\n", filename.toUtf8().data());
+	m_machine.debugger().console().printf("Image %s mounted successfully.\n", filename.toUtf8().data());
 	refreshAll();
 }
 
@@ -385,31 +357,31 @@ void MainWindow::mountImage(bool changedTo)
 void MainWindow::unmountImage(bool changedTo)
 {
 	// The image interface index was assigned to the QAction's data memeber
-	const int imageIndex = dynamic_cast<QAction*>(sender())->data().toInt();
-	image_interface_iterator iter(m_machine->root_device());
+	const int imageIndex = dynamic_cast<QAction *>(sender())->data().toInt();
+	image_interface_enumerator iter(m_machine.root_device());
 	device_image_interface *img = iter.byindex(imageIndex);
 
 	img->unload();
 
 	// Deactivate the unmount menu option
-	dynamic_cast<QAction*>(sender())->setEnabled(false);
+	dynamic_cast<QAction *>(sender())->setEnabled(false);
 
 	// Set the mount name
-	QMenu* parentMenuItem = dynamic_cast<QMenu*>(sender()->parent());
+	QMenu *parentMenuItem = dynamic_cast<QMenu *>(sender()->parent());
 	QString baseString = parentMenuItem->title();
 	baseString.truncate(baseString.lastIndexOf(QString(" : ")));
 	const QString newTitle = baseString + QString(" : ") + QString("[empty slot]");
 	parentMenuItem->setTitle(newTitle);
 
-	debug_console_printf(*m_machine, "Image successfully unmounted.\n");
+	m_machine.debugger().console().printf("Image successfully unmounted.\n");
 	refreshAll();
 }
 
 
 void MainWindow::dasmViewUpdated()
 {
-	debug_view_disasm *const dasmView = downcast<debug_view_disasm*>(m_dasmFrame->view()->view());
-	bool const haveCursor = dasmView->cursor_visible() && (debug_cpu_get_visible_cpu(*m_machine) == dasmView->source()->device());
+	debug_view_disasm *const dasmView = downcast<debug_view_disasm *>(m_dasmFrame->view()->view());
+	bool const haveCursor = dasmView->cursor_visible() && (m_machine.debugger().console().get_visible_cpu() == dasmView->source()->device());
 	bool haveBreakpoint = false;
 	bool breakpointEnabled = false;
 	if (haveCursor)
@@ -419,11 +391,9 @@ void MainWindow::dasmViewUpdated()
 		device_debug *const cpuinfo = device->debug();
 
 		// Find an existing breakpoint at this address
-		device_debug::breakpoint* bp = cpuinfo->breakpoint_first();
-		while ((bp != NULL) && (bp->address() != address))
-			bp = bp->next();
+		const debug_breakpoint *bp = cpuinfo->breakpoint_find(address);
 
-		if (bp != NULL)
+		if (bp)
 		{
 			haveBreakpoint = true;
 			breakpointEnabled = bp->enabled();
@@ -440,7 +410,7 @@ void MainWindow::dasmViewUpdated()
 
 void MainWindow::debugActClose()
 {
-	m_machine->schedule_exit();
+	m_machine.schedule_exit();
 }
 
 
@@ -450,7 +420,7 @@ void MainWindow::addToHistory(const QString& command)
 		return;
 
 	// Always push back when there is no previous history
-	if (m_inputHistory.size() == 0)
+	if (m_inputHistory.empty())
 	{
 		m_inputHistory.push_back(m_inputEdit->text());
 		return;
@@ -458,27 +428,24 @@ void MainWindow::addToHistory(const QString& command)
 
 	// If there is previous history, make sure it's not what you just executed
 	if (m_inputHistory.back() != m_inputEdit->text())
-	{
 		m_inputHistory.push_back(m_inputEdit->text());
-	}
 }
 
 
 void MainWindow::createImagesMenu()
 {
-	QMenu* imagesMenu = menuBar()->addMenu("&Images");
+	QMenu *imagesMenu = menuBar()->addMenu("&Images");
 
 	int interfaceIndex = 0;
-	image_interface_iterator iter(m_machine->root_device());
-	for (device_image_interface *img = iter.first(); img != NULL; img = iter.next())
+	for (device_image_interface &img : image_interface_enumerator(m_machine.root_device()))
 	{
-		std::string menuName = string_format("%s : %s", img->device().name(), img->exists() ? img->filename() : "[empty slot]");
+		std::string menuName = string_format("%s : %s", img.device().name(), img.exists() ? img.filename() : "[empty slot]");
 
-		QMenu* interfaceMenu = imagesMenu->addMenu(menuName.c_str());
-		interfaceMenu->setObjectName(img->device().name());
+		QMenu *interfaceMenu = imagesMenu->addMenu(menuName.c_str());
+		interfaceMenu->setObjectName(img.device().name());
 
-		QAction* mountAct = new QAction("Mount...", interfaceMenu);
-		QAction* unmountAct = new QAction("Unmount", interfaceMenu);
+		QAction *mountAct = new QAction("Mount...", interfaceMenu);
+		QAction *unmountAct = new QAction("Unmount", interfaceMenu);
 		mountAct->setObjectName("mount");
 		mountAct->setData(QVariant(interfaceIndex));
 		unmountAct->setObjectName("unmount");
@@ -486,7 +453,7 @@ void MainWindow::createImagesMenu()
 		connect(mountAct, &QAction::triggered, this, &MainWindow::mountImage);
 		connect(unmountAct, &QAction::triggered, this, &MainWindow::unmountImage);
 
-		if (!img->exists())
+		if (!img.exists())
 			unmountAct->setEnabled(false);
 
 		interfaceMenu->addAction(mountAct);
@@ -505,10 +472,10 @@ void MainWindow::createImagesMenu()
 void MainWindowQtConfig::buildFromQWidget(QWidget* widget)
 {
 	WindowQtConfig::buildFromQWidget(widget);
-	MainWindow* window = dynamic_cast<MainWindow*>(widget);
+	MainWindow *window = dynamic_cast<MainWindow *>(widget);
 	m_windowState = window->saveState();
 
-	QActionGroup* rightBarGroup = window->findChild<QActionGroup*>("rightbargroup");
+	QActionGroup *rightBarGroup = window->findChild<QActionGroup*>("rightbargroup");
 	if (rightBarGroup->checkedAction()->text() == "Raw Opcodes")
 		m_rightBar = 0;
 	else if (rightBarGroup->checkedAction()->text() == "Encrypted Opcodes")
@@ -518,10 +485,10 @@ void MainWindowQtConfig::buildFromQWidget(QWidget* widget)
 }
 
 
-void MainWindowQtConfig::applyToQWidget(QWidget* widget)
+void MainWindowQtConfig::applyToQWidget(QWidget *widget)
 {
 	WindowQtConfig::applyToQWidget(widget);
-	MainWindow* window = dynamic_cast<MainWindow*>(widget);
+	MainWindow *window = dynamic_cast<MainWindow *>(widget);
 	window->restoreState(m_windowState);
 
 	QActionGroup* rightBarGroup = window->findChild<QActionGroup*>("rightbargroup");
@@ -529,20 +496,20 @@ void MainWindowQtConfig::applyToQWidget(QWidget* widget)
 }
 
 
-void MainWindowQtConfig::addToXmlDataNode(xml_data_node* node) const
+void MainWindowQtConfig::addToXmlDataNode(util::xml::data_node &node) const
 {
 	WindowQtConfig::addToXmlDataNode(node);
-	xml_set_attribute_int(node, "rightbar", m_rightBar);
-	xml_set_attribute(node, "qtwindowstate", m_windowState.toPercentEncoding().data());
+	node.set_attribute_int("rightbar", m_rightBar);
+	node.set_attribute("qtwindowstate", m_windowState.toPercentEncoding().data());
 }
 
 
-void MainWindowQtConfig::recoverFromXmlNode(xml_data_node* node)
+void MainWindowQtConfig::recoverFromXmlNode(util::xml::data_node const &node)
 {
 	WindowQtConfig::recoverFromXmlNode(node);
-	const char* state = xml_get_attribute_string(node, "qtwindowstate", "");
+	const char* state = node.get_attribute_string("qtwindowstate", "");
 	m_windowState = QByteArray::fromPercentEncoding(state);
-	m_rightBar = xml_get_attribute_int(node, "rightbar", m_rightBar);
+	m_rightBar = node.get_attribute_int("rightbar", m_rightBar);
 }
 
 DasmDockWidget::~DasmDockWidget()

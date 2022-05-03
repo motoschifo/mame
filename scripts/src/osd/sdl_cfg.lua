@@ -1,15 +1,26 @@
 -- license:BSD-3-Clause
 -- copyright-holders:MAMEdev Team
 
+dofile('modules.lua')
+
 forcedincludes {
 	MAME_DIR .. "src/osd/sdl/sdlprefix.h"
 }
 
-if SDL_NETWORK~="" and not _OPTIONS["DONT_USE_NETWORK"] then
+if _OPTIONS["USE_TAPTUN"]=="1" or _OPTIONS["USE_PCAP"]=="1" then
 	defines {
 		"USE_NETWORK",
-		"OSD_NET_USE_" .. string.upper(SDL_NETWORK),
 	}
+	if _OPTIONS["USE_TAPTUN"]=="1" then
+		defines {
+			"OSD_NET_USE_TAPTUN",
+		}
+	end
+	if _OPTIONS["USE_PCAP"]=="1" then
+		defines {
+			"OSD_NET_USE_PCAP",
+		}
+	end
 end
 
 if _OPTIONS["NO_OPENGL"]~="1" and _OPTIONS["USE_DISPATCH_GL"]~="1" and _OPTIONS["MESA_INSTALL_ROOT"] then
@@ -19,9 +30,9 @@ if _OPTIONS["NO_OPENGL"]~="1" and _OPTIONS["USE_DISPATCH_GL"]~="1" and _OPTIONS[
 end
 
 if _OPTIONS["SDL_INI_PATH"]~=nil then
-    defines {
-        "'INI_PATH=\"" .. _OPTIONS["SDL_INI_PATH"] .. "\"'",
-    }
+	defines {
+		"'INI_PATH=\"" .. _OPTIONS["SDL_INI_PATH"] .. "\"'",
+	}
 end
 
 if _OPTIONS["NO_X11"]=="1" then
@@ -50,9 +61,19 @@ else
 	}
 end
 
+if _OPTIONS["NO_USE_XINPUT_WII_LIGHTGUN_HACK"]=="1" then
+	defines {
+		"USE_XINPUT_WII_LIGHTGUN_HACK=0",
+	}
+else
+	defines {
+		"USE_XINPUT_WII_LIGHTGUN_HACK=1",
+	}
+end
+
 if _OPTIONS["NO_USE_MIDI"]~="1" and _OPTIONS["targetos"]=="linux" then
 	buildoptions {
-		backtick("pkg-config --cflags alsa"),
+		backtick(pkgconfigcmd() .. " --cflags alsa"),
 	}
 end
 
@@ -74,44 +95,42 @@ if BASE_TARGETOS=="unix" then
 		"SDLMAME_UNIX",
 	}
 	if _OPTIONS["targetos"]=="macosx" then
-    	if _OPTIONS["with-bundled-sdl2"]==nil then
-            if _OPTIONS["USE_LIBSDL"]~="1" then
-                buildoptions {
-                    "-F" .. _OPTIONS["SDL_FRAMEWORK_PATH"],
-                }
-            else
-                defines {
-                    "MACOSX_USE_LIBSDL",
-                }
-                buildoptions {
-                    backtick(sdlconfigcmd() .. " --cflags | sed 's:/SDL::'"),
-                }
-            end
-         end
+		if _OPTIONS["with-bundled-sdl2"]==nil then
+			if _OPTIONS["USE_LIBSDL"]~="1" then
+				buildoptions {
+					"-F" .. _OPTIONS["SDL_FRAMEWORK_PATH"],
+				}
+			else
+				defines {
+					"MACOSX_USE_LIBSDL",
+				}
+				buildoptions {
+					backtick(sdlconfigcmd() .. " --cflags | sed 's:/SDL2::'"),
+				}
+			end
+		end
 	else
 		buildoptions {
 			backtick(sdlconfigcmd() .. " --cflags"),
 		}
 		if _OPTIONS["targetos"]~="asmjs" then
 			buildoptions {
-				backtick("pkg-config --cflags fontconfig"),
+				backtick(pkgconfigcmd() .. " --cflags fontconfig"),
 			}
 		end
 	end
 end
 
 if _OPTIONS["targetos"]=="windows" then
-	configuration { "mingw*-gcc or vs*" }
+	configuration { "mingw* or vs*" }
 		defines {
 			"UNICODE",
 			"_UNICODE",
-			"main=utf8_main",
+			"_WIN32_WINNT=0x0501",
+			"WIN32_LEAN_AND_MEAN",
+			"NOMINMAX",
 		}
 
-	configuration { "Debug" }
-		defines {
-			"MALLOC_DEBUG",
-		}
 	configuration { }
 
 elseif _OPTIONS["targetos"]=="linux" then
@@ -121,7 +140,7 @@ elseif _OPTIONS["targetos"]=="linux" then
 		}
 	else
 		buildoptions {
-			backtick("pkg-config --cflags Qt5Widgets"),
+			backtick(pkgconfigcmd() .. " --cflags Qt5Widgets"),
 		}
 	end
 elseif _OPTIONS["targetos"]=="macosx" then

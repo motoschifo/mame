@@ -4,16 +4,88 @@
 
     Atari CAGE Audio Board
 
+    Atari CH31.2 sound board layout:
+    --------------------------------
+
+    ATARI GAMES (C) 93 MADE IN U.S.A.
+    |-----------------------------------------------------------|
+    |         JXBUS|---------------------------------|          |
+    |              |---------------------------------|  JPWR    |
+    |       |---------|                                         |
+    |JROMBUS|   11A   |                                         |
+    | |--|  |---------|                                         |
+    | |  ||-----------|                                         |
+    | |  ||    11B    |                                         |
+    | |  ||-----------|                                         |
+    | |  ||-----------|                     3B                  |
+    | |  ||    11C    | RAM  RAM  RAM  RAM                      |
+    | |  ||-----------|                                         |
+    | |  ||-----------|                                         |
+    | |  ||    11D    |                                         |
+    | |  ||-----------|                     3D                  |
+    | |  ||-----------|      |-----------|                      |
+    | |  ||    11E    |      |           |                      |
+    | |  ||-----------|      |    DSP    |                      |
+    | |  |                   |           |                 AMP  |
+    | |--|OSC                |-----------|  JSPKR               |
+    |                                                           |
+    |-----------------------------------------------------------|
+
+    DSP: TMS320C31 33.8688MHz
+    OSC: 33.8688MHz
+    11A: DIP32 EPROM for Boot
+    11B, 11C, 11D, 11E: DIP42 Mask ROM for Data
+    RAM: 32Kx8 bit SRAM
+    3B: AK4316-VS DAC, Not populated in primal rage (no quad channel sound support)
+    3D: AK4316-VS DAC
+    AMP: TDA1554Q Audio amplifier for connect speaker directly
+    JROMBUS: ROM expansion connector
+    JXBUS: X-Bus host interface
+    JSPKR: Audio output connector, Connect to external speaker or motherboard/AMP board
+    JPWR: Power supply connector, Connect to external power distribution board or motherboard
+
+    Pinouts:
+
+    JSPKR:
+    ---------------
+    01  Channel 1 +
+    02  Channel 1 -
+    03  Channel 2 +
+    04  Channel 2 -
+    05  Key
+    06  Channel 3 +
+    07  Channel 3 -
+    08  Channel 4 +
+    09  Channel 4 -
+    10  Subwoofer +
+    11  Subwoofer -
+
+    JPWR:
+    ----------------
+    01  +5V
+    02  +5V
+    03  Key
+    04  GND
+    05  GND
+    06  +12V
+    07  +12V
+    08  -5V
+    09  GND
+
+    TODO:
+    - Move DSP internal functions into tms32031.cpp
+    - Further support for variable sound output channel
+    - Support subwoofer output
+
 ****************************************************************************/
+
+
+#include "emu.h"
+#include "cage.h"
 
 
 #define LOG_COMM            (0)
 #define LOG_32031_IOPORTS   (0)
-
-
-#include "emu.h"
-#include "cpu/tms32031/tms32031.h"
-#include "cage.h"
 
 
 
@@ -23,7 +95,7 @@
  *
  *************************************/
 
-#define DAC_BUFFER_CHANNELS     4
+#define DAC_BUFFER_CHANNELS     4 // 5; 4 channel + subwoofer?
 #define STACK_SOUND_BUFSIZE     (1024)
 
 /*************************************
@@ -105,21 +177,32 @@ static const char *const register_names[] =
  *
  *************************************/
 
-const device_type ATARI_CAGE = &device_creator<atari_cage_device>;
+// uses Atari CH31(.2) external sound board
+DEFINE_DEVICE_TYPE(ATARI_CAGE, atari_cage_device, "atari_cage", "Atari CAGE")
 
 
 //-------------------------------------------------
 //  atari_cage_device - constructor
 //-------------------------------------------------
 
-atari_cage_device::atari_cage_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	device_t(mconfig, ATARI_CAGE, "Atari CAGE", tag, owner, clock, "atari_cage", __FILE__),
-	m_irqhandler(*this)
+atari_cage_device::atari_cage_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	atari_cage_device(mconfig, ATARI_CAGE, tag, owner, clock)
 {
 }
 
-atari_cage_device::atari_cage_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source) :
-	device_t(mconfig, type, name, tag, owner, clock, shortname, source),
+atari_cage_device::atari_cage_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, type, tag, owner, clock),
+	device_mixer_interface(mconfig, *this, 5), // 5 output routines in JSPKR
+	m_cpu(*this, "cpu"),
+	m_cageram(*this, "cageram"),
+	m_soundlatch(*this, "soundlatch"),
+	m_dma_timer(*this, "cage_dma_timer"),
+	m_timer(*this, "cage_timer%u", 0U),
+	m_dmadac(*this, "dac%u", 1U),
+	m_bootbank(*this, "bootbank"),
+	m_mainbank(*this, "mainbank"),
+	m_bootrom(*this, "boot"),
+	m_mainrom(*this, DEVICE_SELF),
 	m_irqhandler(*this)
 {
 }
@@ -131,30 +214,19 @@ atari_cage_device::atari_cage_device(const machine_config &mconfig, device_type 
 void atari_cage_device::device_start()
 {
 	attotime cage_cpu_clock_period;
-	int chan;
 
 	// resolve callbacks
 	m_irqhandler.resolve_safe();
 
-	membank("bank10")->set_base(machine().root_device().memregion("cageboot")->base());
-	membank("bank11")->set_base(machine().root_device().memregion("cage")->base());
+	m_bootbank->set_base(m_bootrom->base());
+	m_mainbank->set_base(m_mainrom->base());
 
-	m_cpu = subdevice<cpu_device>("cage");
 	cage_cpu_clock_period = attotime::from_hz(m_cpu->clock());
 	m_cpu_h1_clock_period = cage_cpu_clock_period * 2;
 
-	m_dma_timer = subdevice<timer_device>("cage_dma_timer");
-	m_timer[0] = subdevice<timer_device>("cage_timer0");
-	m_timer[1] = subdevice<timer_device>("cage_timer1");
-
-	if (m_speedup)
-		m_speedup_ram = m_cpu->space(AS_PROGRAM).install_write_handler(m_speedup, m_speedup, write32_delegate(FUNC(atari_cage_device::speedup_w),this));
-
-	for (chan = 0; chan < DAC_BUFFER_CHANNELS; chan++)
-	{
-		char buffer[10];
-		sprintf(buffer, "dac%d", chan + 1);
-		m_dmadac[chan] = subdevice<dmadac_sound_device>(buffer);
+	if (m_speedup) {
+		m_cpu->space(AS_PROGRAM).install_write_handler(m_speedup, m_speedup, write32s_delegate(*this, FUNC(atari_cage_device::speedup_w)));
+		m_speedup_ram = m_cageram + m_speedup;
 	}
 
 	save_item(NAME(m_cpu_to_cage_ready));
@@ -165,6 +237,7 @@ void atari_cage_device::device_start()
 	save_item(NAME(m_timer_enabled));
 	save_item(NAME(m_from_main));
 	save_item(NAME(m_control));
+	save_item(NAME(m_tms32031_io_regs));
 }
 
 
@@ -185,8 +258,6 @@ void atari_cage_device::reset_w(int state)
 
 TIMER_DEVICE_CALLBACK_MEMBER( atari_cage_device::dma_timer_callback )
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-
 	/* if we weren't enabled, don't do anything, just shut ourself off */
 	if (!m_dma_enabled)
 	{
@@ -199,52 +270,52 @@ TIMER_DEVICE_CALLBACK_MEMBER( atari_cage_device::dma_timer_callback )
 	}
 
 	/* set the final count to 0 and the source address to the final address */
-	tms32031_io_regs[DMA_TRANSFER_COUNT] = 0;
-	tms32031_io_regs[DMA_SOURCE_ADDR] = param;
+	m_tms32031_io_regs[DMA_TRANSFER_COUNT] = 0;
+	m_tms32031_io_regs[DMA_SOURCE_ADDR] = param;
 
 	/* set the interrupt */
-	m_cpu->set_input_line(TMS3203X_DINT, ASSERT_LINE);
+	m_cpu->set_input_line(TMS3203X_DINT0, ASSERT_LINE);
 	m_dma_enabled = 0;
 }
 
 
-void atari_cage_device::update_dma_state(address_space &space)
+void atari_cage_device::update_dma_state()
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-
 	/* determine the new enabled state */
-	int enabled = ((tms32031_io_regs[DMA_GLOBAL_CTL] & 3) == 3) && (tms32031_io_regs[DMA_TRANSFER_COUNT] != 0);
+	int enabled = ((m_tms32031_io_regs[DMA_GLOBAL_CTL] & 3) == 3) && (m_tms32031_io_regs[DMA_TRANSFER_COUNT] != 0);
 
 	/* see if we turned on */
 	if (enabled && !m_dma_enabled)
 	{
-		INT16 sound_data[STACK_SOUND_BUFSIZE];
-		UINT32 addr, inc;
+		int16_t sound_data[STACK_SOUND_BUFSIZE];
+		uint32_t addr, inc;
 		int i;
 
 		/* make sure our assumptions are correct */
-		if (tms32031_io_regs[DMA_DEST_ADDR] != 0x808048)
-			logerror("CAGE DMA: unexpected dest address %08X!\n", tms32031_io_regs[DMA_DEST_ADDR]);
-		if ((tms32031_io_regs[DMA_GLOBAL_CTL] & 0xfef) != 0xe03)
-			logerror("CAGE DMA: unexpected transfer params %08X!\n", tms32031_io_regs[DMA_GLOBAL_CTL]);
+		if (m_tms32031_io_regs[DMA_DEST_ADDR] != 0x808048)
+			logerror("CAGE DMA: unexpected dest address %08X!\n", m_tms32031_io_regs[DMA_DEST_ADDR]);
+		if ((m_tms32031_io_regs[DMA_GLOBAL_CTL] & 0xfef) != 0xe03)
+			logerror("CAGE DMA: unexpected transfer params %08X!\n", m_tms32031_io_regs[DMA_GLOBAL_CTL]);
 
 		/* do the DMA up front */
-		addr = tms32031_io_regs[DMA_SOURCE_ADDR];
-		inc = (tms32031_io_regs[DMA_GLOBAL_CTL] >> 4) & 1;
-		for (i = 0; i < tms32031_io_regs[DMA_TRANSFER_COUNT]; i++)
+		addr = m_tms32031_io_regs[DMA_SOURCE_ADDR];
+		inc = (m_tms32031_io_regs[DMA_GLOBAL_CTL] >> 4) & 1;
+		for (i = 0; i < m_tms32031_io_regs[DMA_TRANSFER_COUNT]; i++)
 		{
-			sound_data[i % STACK_SOUND_BUFSIZE] = space.read_dword(addr * 4);
+			sound_data[i % STACK_SOUND_BUFSIZE] = m_cpu->space(AS_PROGRAM).read_dword(addr);
 			addr += inc;
 			if (i % STACK_SOUND_BUFSIZE == STACK_SOUND_BUFSIZE - 1)
-				dmadac_transfer(&m_dmadac[0], DAC_BUFFER_CHANNELS, 1, DAC_BUFFER_CHANNELS, STACK_SOUND_BUFSIZE / DAC_BUFFER_CHANNELS, sound_data);
+				for (int j = 0; j < DAC_BUFFER_CHANNELS; j++)
+					m_dmadac[j]->transfer(j, 1, DAC_BUFFER_CHANNELS, STACK_SOUND_BUFSIZE / DAC_BUFFER_CHANNELS, sound_data);
 		}
-		if (tms32031_io_regs[DMA_TRANSFER_COUNT] % STACK_SOUND_BUFSIZE != 0)
-			dmadac_transfer(&m_dmadac[0], DAC_BUFFER_CHANNELS, 1, DAC_BUFFER_CHANNELS, (tms32031_io_regs[DMA_TRANSFER_COUNT] % STACK_SOUND_BUFSIZE) / DAC_BUFFER_CHANNELS, sound_data);
+		if (m_tms32031_io_regs[DMA_TRANSFER_COUNT] % STACK_SOUND_BUFSIZE != 0)
+			for (int j = 0; j < DAC_BUFFER_CHANNELS; j++)
+				m_dmadac[j]->transfer(j, 1, DAC_BUFFER_CHANNELS, (m_tms32031_io_regs[DMA_TRANSFER_COUNT] % STACK_SOUND_BUFSIZE) / DAC_BUFFER_CHANNELS, sound_data);
 
 		/* compute the time of the interrupt and set the timer */
 		if (!m_dma_timer_enabled)
 		{
-			attotime period = m_serial_period_per_word * tms32031_io_regs[DMA_TRANSFER_COUNT];
+			attotime period = m_serial_period_per_word * m_tms32031_io_regs[DMA_TRANSFER_COUNT];
 			m_dma_timer->adjust(period, addr, period);
 			m_dma_timer_enabled = 1;
 		}
@@ -281,20 +352,18 @@ TIMER_DEVICE_CALLBACK_MEMBER( atari_cage_device::cage_timer_callback )
 
 void atari_cage_device::update_timer(int which)
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-
 	/* determine the new enabled state */
 	int base = 0x10 * which;
-	int enabled = ((tms32031_io_regs[base + TIMER0_GLOBAL_CTL] & 0xc0) == 0xc0);
+	int enabled = ((m_tms32031_io_regs[base + TIMER0_GLOBAL_CTL] & 0xc0) == 0xc0);
 
 	/* see if we turned on */
 	if (enabled && !m_timer_enabled[which])
 	{
-		attotime period = m_cpu_h1_clock_period * (2 * tms32031_io_regs[base + TIMER0_PERIOD]);
+		attotime period = m_cpu_h1_clock_period * (2 * m_tms32031_io_regs[base + TIMER0_PERIOD]);
 
 		/* make sure our assumptions are correct */
-		if (tms32031_io_regs[base + TIMER0_GLOBAL_CTL] != 0x2c1)
-			logerror("CAGE TIMER%d: unexpected timer config %08X!\n", which, tms32031_io_regs[base + TIMER0_GLOBAL_CTL]);
+		if (m_tms32031_io_regs[base + TIMER0_GLOBAL_CTL] != 0x2c1)
+			logerror("CAGE TIMER%d: unexpected timer config %08X!\n", which, m_tms32031_io_regs[base + TIMER0_GLOBAL_CTL]);
 
 		m_timer[which]->adjust(period, which);
 	}
@@ -319,29 +388,34 @@ void atari_cage_device::update_timer(int which)
 
 void atari_cage_device::update_serial()
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
 	attotime serial_clock_period, bit_clock_period;
-	UINT32 freq;
+	uint32_t freq;
 
 	/* we start out at half the H1 frequency (or 2x the H1 period) */
 	serial_clock_period = m_cpu_h1_clock_period * 2;
 
 	/* if we're in clock mode, muliply by another factor of 2 */
-	if (tms32031_io_regs[SPORT_GLOBAL_CTL] & 4)
+	if (m_tms32031_io_regs[SPORT_GLOBAL_CTL] & 4)
 		serial_clock_period *= 2;
 
 	/* now multiply by the timer period */
-	bit_clock_period = serial_clock_period * (tms32031_io_regs[SPORT_TIMER_PERIOD] & 0xffff);
+	if ((m_tms32031_io_regs[SPORT_TIMER_PERIOD] & 0xffff) == 0)
+		bit_clock_period = (m_tms32031_io_regs[SPORT_GLOBAL_CTL] & 4) ? serial_clock_period : attotime::never;
+	else
+		bit_clock_period = serial_clock_period * (m_tms32031_io_regs[SPORT_TIMER_PERIOD] & 0xffff);
 
 	/* and times the number of bits per sample */
-	m_serial_period_per_word = bit_clock_period * (8 * (((tms32031_io_regs[SPORT_GLOBAL_CTL] >> 18) & 3) + 1));
+	m_serial_period_per_word = bit_clock_period * (8 * (((m_tms32031_io_regs[SPORT_GLOBAL_CTL] >> 18) & 3) + 1));
 
 	/* compute the step value to stretch this to the sample_rate */
-	freq = ATTOSECONDS_TO_HZ(m_serial_period_per_word.attoseconds()) / DAC_BUFFER_CHANNELS;
+	freq = m_serial_period_per_word.as_hz() / DAC_BUFFER_CHANNELS;
 	if (freq > 0 && freq < 100000)
 	{
-		dmadac_set_frequency(&m_dmadac[0], DAC_BUFFER_CHANNELS, freq);
-		dmadac_enable(&m_dmadac[0], DAC_BUFFER_CHANNELS, 1);
+		for (int i = 0; i < DAC_BUFFER_CHANNELS; i++)
+		{
+			m_dmadac[i]->set_frequency(freq);
+			m_dmadac[i]->enable(1);
+		}
 	}
 }
 
@@ -353,10 +427,9 @@ void atari_cage_device::update_serial()
  *
  *************************************/
 
-READ32_MEMBER( atari_cage_device::tms32031_io_r )
+uint32_t atari_cage_device::tms32031_io_r(offs_t offset)
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-	UINT16 result = tms32031_io_regs[offset];
+	uint16_t result = m_tms32031_io_regs[offset];
 
 	switch (offset)
 	{
@@ -366,19 +439,17 @@ READ32_MEMBER( atari_cage_device::tms32031_io_r )
 	}
 
 	if (LOG_32031_IOPORTS)
-		logerror("CAGE:%06X:%s read -> %08X\n", space.device().safe_pc(), register_names[offset & 0x7f], result);
+		logerror("%s CAGE:%s read -> %08X\n", machine().describe_context(), register_names[offset & 0x7f], result);
 	return result;
 }
 
 
-WRITE32_MEMBER( atari_cage_device::tms32031_io_w )
+void atari_cage_device::tms32031_io_w(offs_t offset, uint32_t data, uint32_t mem_mask)
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-
-	COMBINE_DATA(&tms32031_io_regs[offset]);
+	COMBINE_DATA(&m_tms32031_io_regs[offset]);
 
 	if (LOG_32031_IOPORTS)
-		logerror("CAGE:%06X:%s write = %08X\n", space.device().safe_pc(), register_names[offset & 0x7f], tms32031_io_regs[offset]);
+		logerror("%s CAGE:%s write = %08X\n", machine().describe_context(), register_names[offset & 0x7f], m_tms32031_io_regs[offset]);
 
 	switch (offset)
 	{
@@ -386,7 +457,7 @@ WRITE32_MEMBER( atari_cage_device::tms32031_io_w )
 		case DMA_SOURCE_ADDR:
 		case DMA_DEST_ADDR:
 		case DMA_TRANSFER_COUNT:
-			update_dma_state(space);
+			update_dma_state();
 			break;
 
 		case TIMER0_GLOBAL_CTL:
@@ -409,8 +480,8 @@ WRITE32_MEMBER( atari_cage_device::tms32031_io_w )
 
 		case SPORT_DATA_TX:
 #if (DAC_BUFFER_CHANNELS == 4)
-			if ((int)ATTOSECONDS_TO_HZ(m_serial_period_per_word.attoseconds()) == 22050*4 && (tms32031_io_regs[SPORT_RX_CTL] & 0xff) == 0x62)
-				tms32031_io_regs[SPORT_RX_CTL] ^= 0x800;
+			if (int(m_serial_period_per_word.as_hz()) == 22050*4 && (m_tms32031_io_regs[SPORT_RX_CTL] & 0xff) == 0x62)
+				m_tms32031_io_regs[SPORT_RX_CTL] ^= 0x800;
 #endif
 			break;
 
@@ -442,7 +513,7 @@ void atari_cage_device::update_control_lines()
 	if ((m_control & 2) && m_cage_to_cpu_ready)
 		reason |= CAGE_IRQ_REASON_DATA_READY;
 
-	m_irqhandler(machine().driver_data()->generic_space(), 0, reason);
+	m_irqhandler(0, reason);
 	/* set the IOF input lines */
 	val = m_cpu->state_int(TMS3203X_IOF);
 	val &= ~0x88;
@@ -452,10 +523,10 @@ void atari_cage_device::update_control_lines()
 }
 
 
-READ32_MEMBER( atari_cage_device::cage_from_main_r )
+uint32_t atari_cage_device::cage_from_main_r()
 {
 	if (LOG_COMM)
-		logerror("%06X:CAGE read command = %04X\n", space.device().safe_pc(), m_from_main);
+		logerror("%s CAGE read command = %04X\n", machine().describe_context(), m_from_main);
 	m_cpu_to_cage_ready = 0;
 	update_control_lines();
 	m_cpu->set_input_line(TMS3203X_IRQ0, CLEAR_LINE);
@@ -463,27 +534,26 @@ READ32_MEMBER( atari_cage_device::cage_from_main_r )
 }
 
 
-WRITE32_MEMBER( atari_cage_device::cage_from_main_ack_w )
+void atari_cage_device::cage_from_main_ack_w(uint32_t data)
 {
 	if (LOG_COMM)
 	{
-			logerror("%06X:CAGE ack command = %04X\n", space.device().safe_pc(), m_from_main);
+			logerror("%s CAGE ack command = %04X\n", machine().describe_context(), m_from_main);
 	}
 }
 
 
-WRITE32_MEMBER( atari_cage_device::cage_to_main_w )
+void atari_cage_device::cage_to_main_w(uint32_t data)
 {
 	if (LOG_COMM)
-		logerror("%06X:Data from CAGE = %04X\n", space.device().safe_pc(), data);
-	driver_device *drvstate = space.machine().driver_data<driver_device>();
-	drvstate->soundlatch_word_w(space, 0, data, mem_mask);
+		logerror("%s Data from CAGE = %04X\n", machine().describe_context(), data);
+	m_soundlatch->write(data);
 	m_cage_to_cpu_ready = 1;
 	update_control_lines();
 }
 
 
-READ32_MEMBER( atari_cage_device::cage_io_status_r )
+uint32_t atari_cage_device::cage_io_status_r()
 {
 	int result = 0;
 	if (m_cpu_to_cage_ready)
@@ -494,14 +564,13 @@ READ32_MEMBER( atari_cage_device::cage_io_status_r )
 }
 
 
-UINT16 atari_cage_device::main_r()
+uint16_t atari_cage_device::main_r()
 {
-	driver_device *drvstate = machine().driver_data<driver_device>();
 	if (LOG_COMM)
-		logerror("%s:main read data = %04X\n", machine().describe_context(), drvstate->soundlatch_word_r(drvstate->generic_space(), 0, 0));
+		logerror("%s:main read data = %04X\n", machine().describe_context(), m_soundlatch->read());
 	m_cage_to_cpu_ready = 0;
 	update_control_lines();
-	return drvstate->soundlatch_word_r(drvstate->generic_space(), 0, 0xffff);
+	return m_soundlatch->read();
 }
 
 
@@ -514,7 +583,7 @@ TIMER_CALLBACK_MEMBER( atari_cage_device::cage_deferred_w )
 }
 
 
-void atari_cage_device::main_w(UINT16 data)
+void atari_cage_device::main_w(uint16_t data)
 {
 	if (LOG_COMM)
 		logerror("%s:Command to CAGE = %04X\n", machine().describe_context(), data);
@@ -522,9 +591,9 @@ void atari_cage_device::main_w(UINT16 data)
 }
 
 
-UINT16 atari_cage_device::control_r()
+uint16_t atari_cage_device::control_r()
 {
-	UINT16 result = 0;
+	uint16_t result = 0;
 
 	if (m_cpu_to_cage_ready)
 		result |= 2;
@@ -535,10 +604,8 @@ UINT16 atari_cage_device::control_r()
 }
 
 
-void atari_cage_device::control_w(UINT16 data)
+void atari_cage_device::control_w(uint16_t data)
 {
-	UINT32 *tms32031_io_regs = m_tms32031_io_regs;
-
 	m_control = data;
 
 	/* CPU is reset if both control lines are 0 */
@@ -556,7 +623,7 @@ void atari_cage_device::control_w(UINT16 data)
 		m_timer[0]->reset();
 		m_timer[1]->reset();
 
-		memset(tms32031_io_regs, 0, 0x60 * 4);
+		memset(m_tms32031_io_regs, 0, 0x60 * 4);
 
 		m_cpu_to_cage_ready = 0;
 		m_cage_to_cpu_ready = 0;
@@ -579,9 +646,9 @@ void atari_cage_device::control_w(UINT16 data)
  *
  *************************************/
 
-WRITE32_MEMBER( atari_cage_device::speedup_w )
+void atari_cage_device::speedup_w(offs_t offset, uint32_t data, uint32_t mem_mask)
 {
-	space.device().execute().eat_cycles(100);
+	m_cpu->eat_cycles(100);
 	COMBINE_DATA(&m_speedup_ram[offset]);
 }
 
@@ -593,103 +660,86 @@ WRITE32_MEMBER( atari_cage_device::speedup_w )
  *
  *************************************/
 
-static ADDRESS_MAP_START( cage_map, AS_PROGRAM, 32, atari_cage_device )
-	AM_RANGE(0x000000, 0x00ffff) AM_RAM
-	AM_RANGE(0x200000, 0x200000) AM_WRITENOP
-	AM_RANGE(0x400000, 0x47ffff) AM_ROMBANK("bank10")
-	AM_RANGE(0x808000, 0x8080ff) AM_READWRITE(tms32031_io_r, tms32031_io_w)
-	AM_RANGE(0x809800, 0x809fff) AM_RAM
-	AM_RANGE(0xa00000, 0xa00000) AM_READWRITE(cage_from_main_r, cage_to_main_w)
-	AM_RANGE(0xc00000, 0xffffff) AM_ROMBANK("bank11")
-ADDRESS_MAP_END
-
-
-static ADDRESS_MAP_START( cage_map_seattle, AS_PROGRAM, 32, atari_cage_seattle_device )
-	AM_RANGE(0x000000, 0x00ffff) AM_RAM
-	AM_RANGE(0x200000, 0x200000) AM_WRITENOP
-	AM_RANGE(0x400000, 0x47ffff) AM_ROMBANK("bank10")
-	AM_RANGE(0x808000, 0x8080ff) AM_READWRITE(tms32031_io_r, tms32031_io_w)
-	AM_RANGE(0x809800, 0x809fff) AM_RAM
-	AM_RANGE(0xa00000, 0xa00000) AM_READWRITE(cage_from_main_r, cage_from_main_ack_w)
-	AM_RANGE(0xa00001, 0xa00001) AM_WRITE(cage_to_main_w)
-	AM_RANGE(0xa00003, 0xa00003) AM_READ(cage_io_status_r)
-	AM_RANGE(0xc00000, 0xffffff) AM_ROMBANK("bank11")
-ADDRESS_MAP_END
-
-
-
-/*************************************
- *
- *  CAGE machine driver
- *
- *************************************/
-
-MACHINE_CONFIG_FRAGMENT( cage )
-
-	/* basic machine hardware */
-	MCFG_CPU_ADD("cage", TMS32031, 33868800)
-	MCFG_CPU_PROGRAM_MAP(cage_map)
-	MCFG_TMS3203X_MCBL(true)
-
-	MCFG_TIMER_DEVICE_ADD("cage_dma_timer", DEVICE_SELF, atari_cage_device, dma_timer_callback)
-	MCFG_TIMER_DEVICE_ADD("cage_timer0", DEVICE_SELF, atari_cage_device, cage_timer_callback)
-	MCFG_TIMER_DEVICE_ADD("cage_timer1", DEVICE_SELF, atari_cage_device, cage_timer_callback)
-
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_STEREO("lspeaker", "rspeaker")
-
-#if (DAC_BUFFER_CHANNELS == 4)
-	MCFG_SOUND_ADD("dac1", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "rspeaker", 0.50)
-
-	MCFG_SOUND_ADD("dac2", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "lspeaker", 0.50)
-
-	MCFG_SOUND_ADD("dac3", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "lspeaker", 0.50)
-
-	MCFG_SOUND_ADD("dac4", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "rspeaker", 0.50)
-#else
-	MCFG_SOUND_ADD("dac1", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "lspeaker", 1.0)
-
-	MCFG_SOUND_ADD("dac2", DMADAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "rspeaker", 1.0)
-#endif
-MACHINE_CONFIG_END
-
-
-MACHINE_CONFIG_DERIVED( cage_seattle, cage )
-
-	MCFG_CPU_MODIFY("cage")
-	MCFG_CPU_PROGRAM_MAP(cage_map_seattle)
-MACHINE_CONFIG_END
-
-//-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
-//-------------------------------------------------
-
-machine_config_constructor atari_cage_device::device_mconfig_additions() const
+void atari_cage_device::cage_map(address_map &map)
 {
-	return MACHINE_CONFIG_NAME( cage );
+	map(0x000000, 0x00ffff).ram().share("cageram");
+	map(0x200000, 0x200000).nopw();
+	map(0x400000, 0x47ffff).bankr("bootbank");
+	map(0x808000, 0x8080ff).rw(FUNC(atari_cage_device::tms32031_io_r), FUNC(atari_cage_device::tms32031_io_w));
+	map(0xa00000, 0xa00000).rw(FUNC(atari_cage_device::cage_from_main_r), FUNC(atari_cage_device::cage_to_main_w));
+	map(0xc00000, 0xffffff).bankr("mainbank");
 }
 
 
-const device_type ATARI_CAGE_SEATTLE = &device_creator<atari_cage_seattle_device>;
+void atari_cage_seattle_device::cage_map_seattle(address_map &map)
+{
+	map(0x000000, 0x00ffff).ram().share("cageram");
+	map(0x200000, 0x200000).nopw();
+	map(0x400000, 0x47ffff).bankr("bootbank");
+	map(0x808000, 0x8080ff).rw(FUNC(atari_cage_seattle_device::tms32031_io_r), FUNC(atari_cage_seattle_device::tms32031_io_w));
+	map(0xa00000, 0xa00000).rw(FUNC(atari_cage_seattle_device::cage_from_main_r), FUNC(atari_cage_seattle_device::cage_from_main_ack_w));
+	map(0xa00001, 0xa00001).w(FUNC(atari_cage_seattle_device::cage_to_main_w));
+	map(0xa00003, 0xa00003).r(FUNC(atari_cage_seattle_device::cage_io_status_r));
+	map(0xc00000, 0xffffff).bankr("mainbank");
+}
+
+
+//-------------------------------------------------
+//  machine_add_config - add device configuration
+//-------------------------------------------------
+
+void atari_cage_device::device_add_mconfig(machine_config &config)
+{
+	/* basic machine hardware */
+	TMS32031(config, m_cpu, XTAL(33'868'800));
+	m_cpu->set_addrmap(AS_PROGRAM, &atari_cage_device::cage_map);
+	m_cpu->set_mcbl_mode(true);
+
+	TIMER(config, m_dma_timer).configure_generic(DEVICE_SELF, FUNC(atari_cage_device::dma_timer_callback));
+	TIMER(config, m_timer[0]).configure_generic(DEVICE_SELF, FUNC(atari_cage_device::cage_timer_callback));
+	TIMER(config, m_timer[1]).configure_generic(DEVICE_SELF, FUNC(atari_cage_device::cage_timer_callback));
+
+	/* sound hardware */
+	GENERIC_LATCH_16(config, m_soundlatch);
+
+#if (DAC_BUFFER_CHANNELS == 4)
+	DMADAC(config, m_dmadac[0]).add_route(ALL_OUTPUTS, *this, 0.50, AUTO_ALLOC_INPUT, 0);
+
+	DMADAC(config, m_dmadac[1]).add_route(ALL_OUTPUTS, *this, 0.50, AUTO_ALLOC_INPUT, 1);
+
+	DMADAC(config, m_dmadac[2]).add_route(ALL_OUTPUTS, *this, 0.50, AUTO_ALLOC_INPUT, 2);
+
+	DMADAC(config, m_dmadac[3]).add_route(ALL_OUTPUTS, *this, 0.50, AUTO_ALLOC_INPUT, 3);
+#else
+	DMADAC(config, m_dmadac[0]).add_route(ALL_OUTPUTS, *this, 1.0, AUTO_ALLOC_INPUT, 0);
+
+	DMADAC(config, m_dmadac[1]).add_route(ALL_OUTPUTS, *this, 1.0, AUTO_ALLOC_INPUT, 1);
+#endif
+	//add_route(ALL_OUTPUTS, *this, 0.50, AUTO_ALLOC_INPUT, 4); Subwoofer output
+}
+
+// Embedded in San francisco Rush Motherboard, 4 channel output connected to Quad Amp PCB and expanded to 5 channel (4 channel + subwoofer)
+DEFINE_DEVICE_TYPE(ATARI_CAGE_SEATTLE, atari_cage_seattle_device, "atari_cage_seattle", "Atari CAGE Seattle")
 
 
 //-------------------------------------------------
 //  atari_cage_seattle_device - constructor
 //-------------------------------------------------
 
-atari_cage_seattle_device::atari_cage_seattle_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	atari_cage_device(mconfig, ATARI_CAGE_SEATTLE, "Atari CAGE Seattle", tag, owner, clock, "atari_cage_seattle", __FILE__)
+atari_cage_seattle_device::atari_cage_seattle_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	atari_cage_device(mconfig, ATARI_CAGE_SEATTLE, tag, owner, clock)
 {
 }
 
-machine_config_constructor atari_cage_seattle_device::device_mconfig_additions() const
+
+//-------------------------------------------------
+//  machine_add_config - add device configuration
+//-------------------------------------------------
+
+
+void atari_cage_seattle_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( cage_seattle );
+	atari_cage_device::device_add_mconfig(config);
+
+	m_cpu->set_addrmap(AS_PROGRAM, &atari_cage_seattle_device::cage_map_seattle);
 }

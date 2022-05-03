@@ -8,22 +8,16 @@
 //
 //============================================================
 
-#include "input_module.h"
-#include "modules/osdmodule.h"
 #include "modules/lib/osdobj_common.h"
-
-#include <mutex>
-#include <memory>
 
 // MAME headers
 #include "emu.h"
+#include "input_common.h"
 
 // winnt.h defines this
 #ifdef DELETE
 #undef DELETE
 #endif
-
-#include "input_common.h"
 
 //============================================================
 //  Keyboard translation table
@@ -35,12 +29,14 @@
 #define KEY_TRANS_ENTRY1(mame, sdlsc, sdlkey, disc, virtual, ascii)     { ITEM_ID_##mame, KEY_ ## disc, virtual, ascii, "ITEM_ID_"#mame, (char*) #mame }
 #elif defined(OSD_SDL)
 // SDL include
-#include <sdlinc.h>
-#define KEY_TRANS_ENTRY0(mame, sdlsc, sdlkey, disc, virtual, ascii, UI) { ITEM_ID_##mame, SDL_SCANCODE_ ## sdlsc, SDLK_ ## sdlkey, ascii, "ITEM_ID_"#mame, (char *) UI }
-#define KEY_TRANS_ENTRY1(mame, sdlsc, sdlkey, disc, virtual, ascii)     { ITEM_ID_##mame, SDL_SCANCODE_ ## sdlsc, SDLK_ ## sdlkey, ascii, "ITEM_ID_"#mame, (char*) #mame }
+#include <SDL2/SDL.h>
+#define KEY_TRANS_ENTRY0(mame, sdlsc, sdlkey, disc, virtual, ascii, UI) { ITEM_ID_##mame, SDL_SCANCODE_ ## sdlsc, ascii, "ITEM_ID_"#mame, (char *) UI }
+#define KEY_TRANS_ENTRY1(mame, sdlsc, sdlkey, disc, virtual, ascii)     { ITEM_ID_##mame, SDL_SCANCODE_ ## sdlsc, ascii, "ITEM_ID_"#mame, (char*) #mame }
 #else
 // osd mini
 #endif
+
+// FIXME: sdl_key can be removed from the table below. It is no longer used.
 
 #if defined(OSD_WINDOWS) || defined(OSD_SDL)
 key_trans_entry keyboard_trans_table::s_default_table[] =
@@ -59,8 +55,8 @@ key_trans_entry keyboard_trans_table::s_default_table[] =
 	KEY_TRANS_ENTRY1(0,            0,            0,            0,              '0',            '0'),
 	KEY_TRANS_ENTRY1(MINUS,        MINUS,        MINUS,        MINUS,          VK_OEM_MINUS,   '-'),
 	KEY_TRANS_ENTRY1(EQUALS,       EQUALS,       EQUALS,       EQUALS,         VK_OEM_PLUS,    '='),
-	KEY_TRANS_ENTRY1(BACKSPACE,    BACKSPACE,    BACKSPACE,    BACK,           VK_BACK,         8),
-	KEY_TRANS_ENTRY1(TAB,          TAB,          TAB,          TAB,            VK_TAB,          9),
+	KEY_TRANS_ENTRY1(BACKSPACE,    BACKSPACE,    BACKSPACE,    BACK,           VK_BACK,        8),
+	KEY_TRANS_ENTRY1(TAB,          TAB,          TAB,          TAB,            VK_TAB,         9),
 	KEY_TRANS_ENTRY1(Q,            Q,            q,            Q,              'Q',            'Q'),
 	KEY_TRANS_ENTRY1(W,            W,            w,            W,              'W',            'W'),
 	KEY_TRANS_ENTRY1(E,            E,            e,            E,              'E',            'E'),
@@ -73,8 +69,8 @@ key_trans_entry keyboard_trans_table::s_default_table[] =
 	KEY_TRANS_ENTRY1(P,            P,            p,            P,              'P',            'P'),
 	KEY_TRANS_ENTRY1(OPENBRACE,    LEFTBRACKET,  LEFTBRACKET,  LBRACKET,       VK_OEM_4,       '['),
 	KEY_TRANS_ENTRY1(CLOSEBRACE,   RIGHTBRACKET, RIGHTBRACKET, RBRACKET,       VK_OEM_6,       ']'),
-	KEY_TRANS_ENTRY0(ENTER,        RETURN,       RETURN,       RETURN,         VK_RETURN,       13,      "RETURN"),
-	KEY_TRANS_ENTRY1(LCONTROL,     LCTRL,        LCTRL,        LCONTROL,       VK_LCONTROL,     0),
+	KEY_TRANS_ENTRY0(ENTER,        RETURN,       RETURN,       RETURN,         VK_RETURN,      13,      "RETURN"),
+	KEY_TRANS_ENTRY1(LCONTROL,     LCTRL,        LCTRL,        LCONTROL,       VK_LCONTROL,    0),
 	KEY_TRANS_ENTRY1(A,            A,            a,            A,              'A',            'A'),
 	KEY_TRANS_ENTRY1(S,            S,            s,            S,              'S',            'S'),
 	KEY_TRANS_ENTRY1(D,            D,            d,            D,              'D',            'D'),
@@ -89,7 +85,9 @@ key_trans_entry keyboard_trans_table::s_default_table[] =
 	KEY_TRANS_ENTRY1(TILDE,        GRAVE,        BACKQUOTE,    GRAVE,          VK_OEM_3,       '`'),
 	KEY_TRANS_ENTRY1(LSHIFT,       LSHIFT,       LSHIFT,       LSHIFT,         VK_LSHIFT,      0),
 	KEY_TRANS_ENTRY1(BACKSLASH,    BACKSLASH,    BACKSLASH,    BACKSLASH,      VK_OEM_5,       '\\'),
-	KEY_TRANS_ENTRY1(BACKSLASH2,   0,            0,            OEM_102,        VK_OEM_102,     '<'),
+//  KEY_TRANS_ENTRY1(BACKSLASH2,   NONUSHASH,    UNKNOWN,      OEM_102,        VK_OEM_102,     '<'),
+// This is the additional key that ISO keyboards have over ANSI ones, located between left shift and Y.
+	KEY_TRANS_ENTRY1(BACKSLASH2,   NONUSBACKSLASH, UNKNOWN,    OEM_102,        VK_OEM_102,     '<'),
 	KEY_TRANS_ENTRY1(Z,            Z,            z,            Z,              'Z',            'Z'),
 	KEY_TRANS_ENTRY1(X,            X,            x,            X,              'X',            'X'),
 	KEY_TRANS_ENTRY1(C,            C,            c,            C,              'C',            'C'),
@@ -154,7 +152,13 @@ key_trans_entry keyboard_trans_table::s_default_table[] =
 	KEY_TRANS_ENTRY1(RWIN,         RGUI,         RGUI,         RWIN,           VK_RWIN,        0),
 	KEY_TRANS_ENTRY1(MENU,         MENU,         MENU,         APPS,           VK_APPS,        0),
 	KEY_TRANS_ENTRY1(PAUSE,        PAUSE,        PAUSE,        PAUSE,          VK_PAUSE,       0),
-	KEY_TRANS_ENTRY0(CANCEL,       UNKNOWN,      UNKNOWN,      UNKNOWN,        0,              0,        "CANCEL"),
+	KEY_TRANS_ENTRY0(CANCEL,       CANCEL,       CANCEL,       UNKNOWN,        0,              0,        "CANCEL"),
+	KEY_TRANS_ENTRY1(BS_PAD,       KP_BACKSPACE, KP_BACKSPACE, UNKNOWN,        0,              0),
+	KEY_TRANS_ENTRY1(TAB_PAD,      KP_TAB,       KP_TAB,       UNKNOWN,        0,              0),
+	KEY_TRANS_ENTRY1(00_PAD,       KP_00,        KP_00,        UNKNOWN,        0,              0),
+	KEY_TRANS_ENTRY1(000_PAD,      KP_000,       KP_000,       UNKNOWN,        0,              0),
+	KEY_TRANS_ENTRY1(COMMA_PAD,    KP_COMMA,     KP_COMMA,     NUMPADCOMMA,    0,              0),
+	KEY_TRANS_ENTRY1(EQUALS_PAD,   KP_EQUALS,    KP_EQUALS,    NUMPADEQUALS,   0,              0),
 
 	// New keys introduced in Windows 2000. These have no MAME codes to
 	// preserve compatibility with old config files that may refer to them
@@ -182,7 +186,7 @@ key_trans_entry keyboard_trans_table::s_default_table[] =
 keyboard_trans_table::keyboard_trans_table()
 {
 	m_table = s_default_table;
-	m_table_size = ARRAY_LENGTH(s_default_table);
+	m_table_size = std::size(s_default_table);
 }
 #else
 keyboard_trans_table::keyboard_trans_table()
@@ -200,7 +204,7 @@ keyboard_trans_table::keyboard_trans_table(std::unique_ptr<key_trans_entry[]> en
 	m_table_size = size;
 }
 
-int keyboard_trans_table::lookup_mame_index(const char *scode)
+int keyboard_trans_table::lookup_mame_index(const char *scode) const
 {
 	for (int i = 0; i < m_table_size; i++)
 	{
@@ -210,7 +214,7 @@ int keyboard_trans_table::lookup_mame_index(const char *scode)
 	return -1;
 }
 
-input_item_id keyboard_trans_table::lookup_mame_code(const char *scode)
+input_item_id keyboard_trans_table::lookup_mame_code(const char *scode) const
 {
 	int const index = lookup_mame_index(scode);
 	if (index >= 0)
@@ -222,7 +226,7 @@ input_item_id keyboard_trans_table::lookup_mame_code(const char *scode)
 // Windows specific lookup methods
 #if defined(OSD_WINDOWS)
 
-input_item_id keyboard_trans_table::map_di_scancode_to_itemid(int scancode)
+input_item_id keyboard_trans_table::map_di_scancode_to_itemid(int scancode) const
 {
 	int tablenum;
 
@@ -239,7 +243,7 @@ input_item_id keyboard_trans_table::map_di_scancode_to_itemid(int scancode)
 //  wininput_vkey_for_mame_code
 //============================================================
 
-int keyboard_trans_table::vkey_for_mame_code(input_code code)
+int keyboard_trans_table::vkey_for_mame_code(input_code code) const
 {
 	// only works for keyboard switches
 	if (code.device_class() == DEVICE_CLASS_KEYBOARD && code.item_class() == ITEM_CLASS_SWITCH)
@@ -256,7 +260,6 @@ int keyboard_trans_table::vkey_for_mame_code(input_code code)
 }
 
 #endif
-
 
 int input_module_base::init(const osd_options &options)
 {

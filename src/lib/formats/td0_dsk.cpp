@@ -14,10 +14,12 @@
  * Edited and translated to English by Kenji RIKITAKE
  */
 
-#include <string.h>
-#include <assert.h>
-#include "pool.h"
-#include "flopimg.h"
+#include "flopimg_legacy.h"
+
+#include "ioprocs.h"
+
+#include <cstring>
+
 
 #define BUFSZ           512     // new input buffer
 
@@ -44,75 +46,61 @@ struct td0dsk_tag
 	int heads;
 	int tracks;
 	int sector_size;
-	UINT64 track_offsets[84*2]; /* offset within data for each track */
-	UINT8 *data;
+	uint64_t track_offsets[84*2]; /* offset within data for each track */
+	uint8_t *data;
 };
 
 struct tdlzhuf {
-	UINT16 r,
-					bufcnt,bufndx,bufpos,  // string buffer
+	uint16_t r = 0,
+					bufcnt = 0, bufndx = 0, bufpos = 0,  // string buffer
 				// the following to allow block reads from input in next_word()
-					ibufcnt,ibufndx; // input buffer counters
-	UINT8  inbuf[BUFSZ];    // input buffer
+					ibufcnt = 0, ibufndx = 0; // input buffer counters
+	uint8_t  inbuf[BUFSZ]{};    // input buffer
 };
 
 
 struct td0dsk_t
 {
-	io_generic *floppy_file;
-	UINT64 floppy_file_offset;
+public:
+	td0dsk_t(util::random_read &f) : floppy_file(f) { }
+
+	void set_floppy_file_offset(uint64_t o) { floppy_file_offset = o; }
+
+	void init_Decode();
+	int Decode(uint8_t *buf, int len);
+
+private:
+	util::random_read &floppy_file;
+	uint64_t floppy_file_offset;
 
 	struct tdlzhuf tdctl;
-	UINT8 text_buf[N + F - 1];
-	UINT16 freq[T + 1];    /* cumulative freq table */
+	uint8_t text_buf[N + F - 1];
+	uint16_t freq[T + 1];    /* cumulative freq table */
 
 /*
  * pointing parent nodes.
  * area [T..(T + N_CHAR - 1)] are pointers for leaves
  */
-	INT16 prnt[T + N_CHAR];
+	int16_t prnt[T + N_CHAR];
 
 	/* pointing children nodes (son[], son[] + 1)*/
-	INT16 son[T];
+	int16_t son[T];
 
-	UINT16 getbuf;
-	UINT8 getlen;
+	uint16_t getbuf;
+	uint8_t getlen;
 
-	int data_read(UINT8 *buf, UINT16 size);
+	int data_read(uint8_t *buf, uint16_t size);
 	int next_word();
 	int GetBit();
 	int GetByte();
 	void StartHuff();
 	void reconst();
 	void update(int c);
-	INT16 DecodeChar();
-	INT16 DecodePosition();
-	void init_Decode();
-	int Decode(UINT8 *buf, int len);
+	int16_t DecodeChar();
+	int16_t DecodePosition();
 };
 
 //static td0dsk_t td0dsk;
-
-struct floppy_image_legacy
-{
-	struct io_generic io;
-
-	const struct FloppyFormat *floppy_option;
-	struct FloppyCallbacks format;
-
-	/* loaded track stuff */
-	int loaded_track_head;
-	int loaded_track_index;
-	UINT32 loaded_track_size;
-	void *loaded_track_data;
-	UINT8 loaded_track_status;
-	UINT8 flags;
-
-	/* tagging system */
-	object_pool *tags;
-	void *tag_data;
-};
-
 
 static struct td0dsk_tag *get_tag(floppy_image_legacy *floppy)
 {
@@ -125,7 +113,7 @@ static struct td0dsk_tag *get_tag(floppy_image_legacy *floppy)
 
 FLOPPY_IDENTIFY( td0_dsk_identify )
 {
-	UINT8 header[2];
+	uint8_t header[2];
 
 	floppy_image_read(floppy, header, 0, 2);
 	if (header[0]=='T' && header[1]=='D') {
@@ -148,16 +136,16 @@ static int td0_get_tracks_per_disk(floppy_image_legacy *floppy)
 	return get_tag(floppy)->tracks;
 }
 
-static UINT64 td0_get_track_offset(floppy_image_legacy *floppy, int head, int track)
+static uint64_t td0_get_track_offset(floppy_image_legacy *floppy, int head, int track)
 {
 	return get_tag(floppy)->track_offsets[(track<<1) + head];
 }
 
-static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, int sector, int sector_is_index, UINT64 *offset)
+static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, int sector, bool sector_is_index, uint64_t *offset)
 {
-	UINT64 offs;
-	UINT8 *header;
-	UINT8 sectors_per_track;
+	uint64_t offs;
+	uint8_t *header;
+	uint8_t sectors_per_track;
 	int i;
 
 	if ((head < 0) || (head >= get_tag(floppy)->heads) || (track < 0) || (track >= get_tag(floppy)->tracks)
@@ -200,18 +188,18 @@ static floperr_t get_offset(floppy_image_legacy *floppy, int head, int track, in
 
 
 
-static floperr_t internal_td0_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, int sector_is_index, void *buffer, size_t buflen)
+static floperr_t internal_td0_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, bool sector_is_index, void *buffer, size_t buflen)
 {
-	UINT64 offset;
+	uint64_t offset;
 	floperr_t err;
-	UINT8 *header;
+	uint8_t *header;
 	int size,realsize,i;
 	int buff_pos;
 	int data_pos;
-	UINT8 *data;
-	UINT8 *buf;
+	uint8_t *data;
+	uint8_t *buf;
 
-	buf = (UINT8*)buffer;
+	buf = (uint8_t*)buffer;
 	// take sector offset
 	err = get_offset(floppy, head, track, sector, sector_is_index, &offset);
 	if (err)
@@ -287,18 +275,18 @@ static floperr_t internal_td0_read_sector(floppy_image_legacy *floppy, int head,
 
 static floperr_t td0_read_sector(floppy_image_legacy *floppy, int head, int track, int sector, void *buffer, size_t buflen)
 {
-	return internal_td0_read_sector(floppy, head, track, sector, FALSE, buffer, buflen);
+	return internal_td0_read_sector(floppy, head, track, sector, false, buffer, buflen);
 }
 
 static floperr_t td0_read_indexed_sector(floppy_image_legacy *floppy, int head, int track, int sector, void *buffer, size_t buflen)
 {
-	return internal_td0_read_sector(floppy, head, track, sector, TRUE, buffer, buflen);
+	return internal_td0_read_sector(floppy, head, track, sector, true, buffer, buflen);
 }
 
-static floperr_t td0_get_sector_length(floppy_image_legacy *floppy, int head, int track, int sector, UINT32 *sector_length)
+static floperr_t td0_get_sector_length(floppy_image_legacy *floppy, int head, int track, int sector, uint32_t *sector_length)
 {
 	floperr_t err;
-	err = get_offset(floppy, head, track, sector, FALSE, nullptr);
+	err = get_offset(floppy, head, track, sector, false, nullptr);
 	if (err)
 		return err;
 
@@ -308,13 +296,13 @@ static floperr_t td0_get_sector_length(floppy_image_legacy *floppy, int head, in
 	return FLOPPY_ERROR_SUCCESS;
 }
 
-static floperr_t td0_get_indexed_sector_info(floppy_image_legacy *floppy, int head, int track, int sector_index, int *cylinder, int *side, int *sector, UINT32 *sector_length, unsigned long *flags)
+static floperr_t td0_get_indexed_sector_info(floppy_image_legacy *floppy, int head, int track, int sector_index, int *cylinder, int *side, int *sector, uint32_t *sector_length, unsigned long *flags)
 {
 	floperr_t retVal;
-	UINT64 offset = 0;
-	UINT8 *sector_info;
+	uint64_t offset = 0;
+	uint8_t *sector_info;
 
-	retVal = get_offset(floppy, head, track, sector_index, FALSE, &offset);
+	retVal = get_offset(floppy, head, track, sector_index, false, &offset);
 	sector_info = get_tag(floppy)->data + offset;
 	if (cylinder)
 		*cylinder = sector_info[0];
@@ -334,13 +322,15 @@ static floperr_t td0_get_indexed_sector_info(floppy_image_legacy *floppy, int he
 	return retVal;
 }
 
-int td0dsk_t::data_read(UINT8 *buf, UINT16 size)
+int td0dsk_t::data_read(uint8_t *buf, uint16_t size)
 {
-	UINT64 image_size = io_generic_size(floppy_file);
+	uint64_t image_size = 0;
+	floppy_file.length(image_size);
 	if (size > image_size - floppy_file_offset) {
 		size = image_size - floppy_file_offset;
 	}
-	io_generic_read(floppy_file,buf,floppy_file_offset,size);
+	size_t actual;
+	floppy_file.read_at(floppy_file_offset, buf, size, actual);
 	floppy_file_offset += size;
 	return size;
 }
@@ -352,7 +342,7 @@ int td0dsk_t::data_read(UINT8 *buf, UINT16 size)
  */
 
 /* decoder table */
-static const UINT8 d_code[256] = {
+static const uint8_t d_code[256] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -387,7 +377,7 @@ static const UINT8 d_code[256] = {
 	0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
 };
 
-static const UINT8 d_len[256] = {
+static const uint8_t d_len[256] = {
 	0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 	0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 	0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
@@ -441,7 +431,7 @@ int td0dsk_t::next_word()
 
 int td0dsk_t::GetBit()    /* get one bit */
 {
-	INT16 i;
+	int16_t i;
 	if(next_word() < 0)
 		return(-1);
 	i = getbuf;
@@ -455,7 +445,7 @@ int td0dsk_t::GetBit()    /* get one bit */
 
 int td0dsk_t::GetByte()    /* get a byte */
 {
-	UINT16 i;
+	uint16_t i;
 	if(next_word() != 0)
 		return(-1);
 	i = getbuf;
@@ -494,8 +484,8 @@ void td0dsk_t::StartHuff()
 
 void td0dsk_t::reconst()
 {
-	INT16 i, j, k;
-	UINT16 f, l;
+	int16_t i, j, k;
+	uint16_t f, l;
 
 	/* halven cumulative freq for leaf nodes */
 	j = 0;
@@ -572,10 +562,10 @@ void td0dsk_t::update(int c)
 }
 
 
-INT16 td0dsk_t::DecodeChar()
+int16_t td0dsk_t::DecodeChar()
 {
 	int ret;
-	UINT16 c;
+	uint16_t c;
 
 	c = son[R];
 
@@ -595,16 +585,16 @@ INT16 td0dsk_t::DecodeChar()
 	return c;
 }
 
-INT16 td0dsk_t::DecodePosition()
+int16_t td0dsk_t::DecodePosition()
 {
-	INT16 bit;
-	UINT16 i, j, c;
+	int16_t bit;
+	uint16_t i, j, c;
 
 	/* decode upper 6 bits from given table */
 	if((bit=GetByte()) < 0)
 		return(-1);
-	i = (UINT16) bit;
-	c = (UINT16)d_code[i] << 6;
+	i = (uint16_t) bit;
+	c = (uint16_t)d_code[i] << 6;
 	j = d_len[i];
 
 	/* input lower 6 bits directly */
@@ -637,9 +627,9 @@ void td0dsk_t::init_Decode()
 }
 
 
-int td0dsk_t::Decode(UINT8 *buf, int len)  /* Decoding/Uncompressing */
+int td0dsk_t::Decode(uint8_t *buf, int len)  /* Decoding/Uncompressing */
 {
-	INT16 c,pos;
+	int16_t c,pos;
 	int  count;  // was an unsigned long, seems unnecessary
 	for (count = 0; count < len; ) {
 			if(tdctl.bufcnt == 0) {
@@ -679,10 +669,9 @@ int td0dsk_t::Decode(UINT8 *buf, int len)  /* Decoding/Uncompressing */
 
 FLOPPY_CONSTRUCT( td0_dsk_construct )
 {
-	td0dsk_t state;
 	struct FloppyCallbacks *callbacks;
 	struct td0dsk_tag *tag;
-	UINT8 *header;
+	uint8_t *header;
 	int number_of_sectors;
 	int position;
 	int i;
@@ -698,7 +687,7 @@ FLOPPY_CONSTRUCT( td0_dsk_construct )
 	if (!tag)
 		return FLOPPY_ERROR_OUTOFMEMORY;
 
-	tag->data = (UINT8*)malloc(floppy_image_size(floppy));
+	tag->data = (uint8_t*)malloc(floppy_image_size(floppy));
 	if (tag->data==nullptr) {
 		return FLOPPY_ERROR_OUTOFMEMORY;
 	}
@@ -706,25 +695,25 @@ FLOPPY_CONSTRUCT( td0_dsk_construct )
 	header = tag->data;
 
 	if (header[0]=='t') {
-		UINT8 obuf[BUFSZ];
+		uint8_t obuf[BUFSZ];
 		int rd;
 		int off = 12;
 		int size = 0;
-		state.floppy_file = &(floppy->io);
+		td0dsk_t state(floppy_get_io(floppy));
 		state.init_Decode();
-		state.floppy_file_offset = 12;
+		state.set_floppy_file_offset(12);
 		do
 		{
 			if((rd = state.Decode(obuf, BUFSZ)) > 0) size += rd;
 		} while(rd == BUFSZ);
 		memcpy(obuf,tag->data,12);
 		free(tag->data);
-		tag->data = (UINT8*)malloc(size+12);
+		tag->data = (uint8_t*)malloc(size+12);
 		if (tag->data==nullptr) {
 			return FLOPPY_ERROR_OUTOFMEMORY;
 		}
 		memcpy(tag->data,obuf,12);
-		state.floppy_file_offset = 12;
+		state.set_floppy_file_offset(12);
 		state.init_Decode();
 		do
 		{
@@ -819,42 +808,48 @@ const char *td0_format::extensions() const
 	return "td0";
 }
 
-int td0_format::identify(io_generic *io, UINT32 form_factor)
+int td0_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
-	UINT8 h[7];
+	size_t actual;
+	uint8_t h[7];
 
-	io_generic_read(io, h, 0, 7);
+	io.read_at(0, h, 7, actual);
 	if(((h[0] == 'T') && (h[1] == 'D')) || ((h[0] == 't') && (h[1] == 'd')))
 	{
-			return 100;
+		return FIFID_SIGN;
 	}
 	return 0;
 }
 
-bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool td0_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
+	size_t actual;
 	int track_count = 0;
 	int head_count = 0;
 	int track_spt;
 	int offset = 0;
 	const int max_size = 4*1024*1024; // 4MB ought to be large enough for any floppy
-	dynamic_buffer imagebuf(max_size);
-	UINT8 header[12];
+	std::vector<uint8_t> imagebuf(max_size);
+	uint8_t header[12];
 
-	io_generic_read(io, header, 0, 12);
+	io.read_at(0, header, 12, actual);
 	head_count = header[9];
 
 	if(header[0] == 't')
 	{
-		td0dsk_t disk_decode;
+		td0dsk_t disk_decode(io);
 
-		disk_decode.floppy_file = io;
 		disk_decode.init_Decode();
-		disk_decode.floppy_file_offset = 12;
+		disk_decode.set_floppy_file_offset(12);
 		disk_decode.Decode(&imagebuf[0], max_size);
 	}
 	else
-		io_generic_read(io, &imagebuf[0], 12, io_generic_size(io));
+	{
+		uint64_t image_size;
+		if(io.length(image_size))
+			return false;
+		io.read_at(12, &imagebuf[0], image_size, actual);
+	}
 
 	if(header[7] & 0x80)
 		offset = 10 + imagebuf[2] + (imagebuf[3] << 8);
@@ -874,7 +869,8 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 					return false; // single side hd?
 				break;
 			}
-			/* no break; could be qd, won't know until tracks are counted */
+			// could be qd, won't know until tracks are counted
+			[[fallthrough]];
 		case 1:
 			if(head_count == 2)
 				image->set_variant(floppy_image::DSDD);
@@ -889,7 +885,9 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 				else
 					return false; // single side 3.5?
 				break;
-			}
+			} else
+				image->set_variant(floppy_image::SSDD);
+			break; // FIXME: comment below says "no break" but this is a breal
 			/* no break */
 		case 3:
 			if(head_count == 2)
@@ -907,6 +905,10 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 					return false; // single side 3.5?
 			}
 			break;
+		case 5:
+			if (form_factor != floppy_image::FF_8)
+				return false;   // 8" drive form factor is expected
+			break;
 	}
 
 	static const int rates[3] = { 250000, 300000, 500000 };
@@ -917,7 +919,7 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	while(track_spt != 255)
 	{
 		desc_pc_sector sects[256];
-		UINT8 sect_data[65536];
+		uint8_t sect_data[65536];
 		int sdatapos = 0;
 		int track = imagebuf[offset + 1];
 		int head = imagebuf[offset + 2] & 1;
@@ -925,8 +927,8 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 		offset += 4;
 		for(int i = 0; i < track_spt; i++)
 		{
-			UINT8 *hs = &imagebuf[offset];
-			UINT16 size;
+			uint8_t *hs = &imagebuf[offset];
+			uint16_t size;
 			offset += 6;
 
 			sects[i].track       = hs[0];
@@ -967,8 +969,8 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 						k = 0;
 						while(k < size)
 						{
-							UINT16 len = imagebuf[offset];
-							UINT16 rep = imagebuf[offset + 1];
+							uint16_t len = imagebuf[offset];
+							uint16_t rep = imagebuf[offset + 1];
 							offset += 2;
 							if(!len)
 							{
@@ -1021,14 +1023,9 @@ bool td0_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 }
 
 
-bool td0_format::save(io_generic *io, floppy_image *image)
-{
-	return false;
-}
-
 bool td0_format::supports_save() const
 {
 	return false;
 }
 
-const floppy_format_type FLOPPY_TD0_FORMAT = &floppy_image_format_creator<td0_format>;
+const td0_format FLOPPY_TD0_FORMAT;

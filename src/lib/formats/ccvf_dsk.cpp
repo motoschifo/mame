@@ -8,8 +8,11 @@
 
 *********************************************************************/
 
-#include "emu.h" // BIT
 #include "formats/ccvf_dsk.h"
+
+#include "coretmpl.h" // BIT
+#include "ioprocs.h"
+
 
 ccvf_format::ccvf_format()
 {
@@ -39,18 +42,18 @@ const char *ccvf_format::extensions() const
 const ccvf_format::format ccvf_format::file_formats[] = {
 	{
 		floppy_image::FF_525, floppy_image::SSSD,
-		(int) (1./(9600*8))*1000000000, 10, 41, 1, 128, {}, 0, { 0,5,1,6,2,7,3,8,4,9 }
+		(int) ((1./(9600*8))*1000000000), 10, 41, 1, 128, {}, 0, { 0,5,1,6,2,7,3,8,4,9 }
 	},
 	{}
 };
 
-int ccvf_format::identify(io_generic *io, UINT32 form_factor)
+int ccvf_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
 	char h[36];
-
-	io_generic_read(io, h, 0, 36);
-	if(!memcmp(h, "Compucolor Virtual Floppy Disk Image", 36))
-		return 100;
+	size_t actual;
+	io.read_at(0, h, 36, actual);
+	if (!memcmp(h, "Compucolor Virtual Floppy Disk Image", 36))
+		return FIFID_SIGN;
 
 	return 0;
 }
@@ -85,20 +88,24 @@ floppy_image_format_t::desc_e* ccvf_format::get_desc_8n1(const format &f, int &c
 	return desc;
 }
 
-bool ccvf_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool ccvf_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
 	const format &f = formats[0];
 
-	UINT64 size = io_generic_size(io);
-	dynamic_buffer img(size);
-	io_generic_read(io, &img[0], 0, size);
+	uint64_t size;
+	if (io.length(size))
+		return false;
+
+	std::vector<uint8_t> img(size);
+	size_t actual;
+	io.read_at(0, &img[0], size, actual);
 
 	std::string ccvf = std::string((const char *)&img[0], size);
-	dynamic_buffer bytes(78720);
+	std::vector<uint8_t> bytes(78720);
 
 	int start = 0, end = 0;
 	std::string line;
-	UINT32 byteoffs = 0;
+	uint32_t byteoffs = 0;
 	char hex[3] = {0};
 
 	do {
@@ -115,16 +122,16 @@ bool ccvf_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 		start = end + 1;
 	} while (start > 0 && end != -1);
 
-	UINT64 pos = 0;
+	uint64_t pos = 0;
 	int total_size = 200000000/f.cell_size;
 
 	for(int track=0; track < f.track_count; track++) {
-		std::vector<UINT32> buffer;
+		std::vector<uint32_t> buffer;
 		int offset = 0;
 
 		for (int i=0; i<1920 && pos<size; i++, pos++) {
 			for (int bit=0; bit<8; bit++) {
-				bit_w(buffer, BIT(bytes[pos], bit), f.cell_size);
+				bit_w(buffer, util::BIT(bytes[pos], bit), f.cell_size);
 			}
 		}
 
@@ -149,4 +156,4 @@ bool ccvf_format::supports_save() const
 	return false;
 }
 
-const floppy_format_type FLOPPY_CCVF_FORMAT = &floppy_image_format_creator<ccvf_format>;
+const ccvf_format FLOPPY_CCVF_FORMAT;

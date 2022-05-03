@@ -5,9 +5,17 @@
 //  input_windows.h - Common code used by Windows input modules
 //
 //============================================================
+#ifndef MAME_OSD_INPUT_INPUT_WINDOWS_H
+#define MAME_OSD_INPUT_INPUT_WINDOWS_H
 
-#ifndef INPUT_WIN_H_
-#define INPUT_WIN_H_
+#pragma once
+
+// standard windows headers
+#include <windows.h>
+#undef interface
+
+#include "window.h"
+#include "winmain.h"
 
 //============================================================
 //  TYPEDEFS
@@ -16,9 +24,9 @@
 // state information for a keyboard
 struct keyboard_state
 {
-	UINT8                   state[MAX_KEYS];
-	INT8                    oldkey[MAX_KEYS];
-	INT8                    currkey[MAX_KEYS];
+	uint8_t                   state[MAX_KEYS];
+	int8_t                    oldkey[MAX_KEYS];
+	int8_t                    currkey[MAX_KEYS];
 };
 
 // state information for a mouse (matches DIMOUSESTATE exactly)
@@ -33,18 +41,17 @@ struct mouse_state
 class wininput_module : public input_module_base
 {
 protected:
-	bool  m_global_inputs_enabled;
+	bool  m_global_inputs_enabled = false;
 
 public:
-	wininput_module(const char * type, const char * name)
-		: input_module_base(type, name)
-	{
-	}
+	wininput_module(const char *type, const char *name) : input_module_base(type, name) { }
+
+	virtual ~wininput_module() { }
 
 	virtual bool should_hide_mouse()
 	{
 		if (winwindow_has_focus()  // has focus
-			&& (!video_config.windowed || !win_window_list->win_has_menu()) // not windowed or doesn't have a menu
+			&& (!video_config.windowed || !osd_common_t::s_window_list.front()->win_has_menu()) // not windowed or doesn't have a menu
 			&& (input_enabled() && !input_paused()) // input enabled and not paused
 			&& (mouse_enabled() || lightgun_enabled())) // either mouse or lightgun enabled in the core
 		{
@@ -74,10 +81,4 @@ protected:
 	}
 };
 
-//============================================================
-//  INLINE FUNCTIONS
-//============================================================
-
-INT32 generic_button_get_state(void *device_internal, void *item_internal);
-INT32 generic_axis_get_state(void *device_internal, void *item_internal);
-#endif
+#endif // MAME_OSD_INPUT_INPUT_WINDOWS_H

@@ -7,13 +7,15 @@
     Camputers Lynx disk image format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_CAMPLYNX_DSK_H
+#define MAME_FORMATS_CAMPLYNX_DSK_H
 
-#ifndef CAMPLYNX_DSK_H_
-#define CAMPLYNX_DSK_H_
+#pragma once
 
 #include "wd177x_dsk.h"
 
-class camplynx_format : public wd177x_format {
+class camplynx_format : public wd177x_format
+{
 public:
 	camplynx_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_CAMPLYNX_FORMAT;
+extern const camplynx_format FLOPPY_CAMPLYNX_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_CAMPLYNX_DSK_H

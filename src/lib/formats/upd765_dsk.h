@@ -7,9 +7,10 @@
     helper for simple upd765-formatted disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_UPD765_DSK_H
+#define MAME_FORMATS_UPD765_DSK_H
 
-#ifndef UPD765_DSK_H
-#define UPD765_DSK_H
+#pragma once
 
 #include "flopimg.h"
 
@@ -17,9 +18,9 @@ class upd765_format : public floppy_image_format_t
 {
 public:
 	struct format {
-		UINT32 form_factor;      // See floppy_image for possible values
-		UINT32 variant;          // See floppy_image for possible values
-		UINT32 encoding;         // See floppy_image for possible values
+		uint32_t form_factor = 0U; // See floppy_image for possible values
+		uint32_t variant = 0U;   // See floppy_image for possible values
+		uint32_t encoding = 0U;  // See floppy_image for possible values
 
 		int cell_size;           // See floppy_image_format_t for details
 		int sector_count;
@@ -38,22 +39,22 @@ public:
 	// End the array with {}
 	upd765_format(const format *formats);
 
-	virtual int identify(io_generic *io, UINT32 form_factor) override;
-	virtual bool load(io_generic *io, UINT32 form_factor, floppy_image *image) override;
-	virtual bool save(io_generic *io, floppy_image *image) override;
+	virtual int identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const override;
+	virtual bool load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const override;
+	virtual bool save(util::random_read_write &io, const std::vector<uint32_t> &variants, floppy_image *image) const override;
 	virtual bool supports_save() const override;
 
 protected:
-	floppy_image_format_t::desc_e* get_desc_fm(const format &f, int &current_size, int &end_gap_index);
-	floppy_image_format_t::desc_e* get_desc_mfm(const format &f, int &current_size, int &end_gap_index);
-	int find_size(io_generic *io, UINT32 form_factor) const;
+	floppy_image_format_t::desc_e* get_desc_fm(const format &f, int &current_size, int &end_gap_index) const;
+	floppy_image_format_t::desc_e* get_desc_mfm(const format &f, int &current_size, int &end_gap_index) const;
+	int find_size(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const;
 	int compute_track_size(const format &f) const;
-	virtual void build_sector_description(const format &d, UINT8 *sectdata, desc_s *sectors, int track, int head) const;
-	void check_compatibility(floppy_image *image, std::vector<int> &candidates);
-	void extract_sectors(floppy_image *image, const format &f, desc_s *sdesc, int track, int head);
+	virtual void build_sector_description(const format &d, uint8_t *sectdata, desc_s *sectors, int track, int head) const;
+	void check_compatibility(floppy_image *image, std::vector<int> &candidates) const;
+	void extract_sectors(floppy_image *image, const format &f, desc_s *sdesc, int track, int head) const;
 
 private:
-	const format *formats;
+	format const *const formats;
 };
 
-#endif /* UPD765_DSK_H */
+#endif // MAME_FORMATS_UPD765_DSK_H

@@ -9,7 +9,6 @@
 #ifndef __WINDOWS_WINMAIN_H__
 #define __WINDOWS_WINMAIN_H__
 
-#include "clifront.h"
 #include "osdepend.h"
 #include "modules/lib/osdobj_common.h"
 
@@ -24,15 +23,12 @@
 
 // video options
 #define WINOPTION_MENU                  "menu"
-
-// DirectDraw-specific options
-#define WINOPTION_HWSTRETCH             "hwstretch"
+#define WINOPTION_ATTACH_WINDOW         "attach_window"
 
 // core post-processing options
-#define WINOPTION_HLSL_ENABLE               "hlsl_enable"
 #define WINOPTION_HLSLPATH                  "hlslpath"
-#define WINOPTION_HLSL_PRESCALE_X           "hlsl_prescale_x"
-#define WINOPTION_HLSL_PRESCALE_Y           "hlsl_prescale_y"
+#define WINOPTION_HLSL_ENABLE               "hlsl_enable"
+#define WINOPTION_HLSL_OVERSAMPLING         "hlsl_oversampling"
 #define WINOPTION_HLSL_WRITE                "hlsl_write"
 #define WINOPTION_HLSL_SNAP_WIDTH           "hlsl_snap_width"
 #define WINOPTION_HLSL_SNAP_HEIGHT          "hlsl_snap_height"
@@ -46,13 +42,16 @@
 #define WINOPTION_SHADOW_MASK_UOFFSET       "shadow_mask_uoffset"
 #define WINOPTION_SHADOW_MASK_VOFFSET       "shadow_mask_voffset"
 #define WINOPTION_REFLECTION                "reflection"
-#define WINOPTION_CURVATURE                 "curvature"
+#define WINOPTION_DISTORTION                "distortion"
+#define WINOPTION_CUBIC_DISTORTION          "cubic_distortion"
+#define WINOPTION_DISTORT_CORNER            "distort_corner"
 #define WINOPTION_ROUND_CORNER              "round_corner"
 #define WINOPTION_SMOOTH_BORDER             "smooth_border"
 #define WINOPTION_VIGNETTING                "vignetting"
 #define WINOPTION_SCANLINE_AMOUNT           "scanline_alpha"
 #define WINOPTION_SCANLINE_SCALE            "scanline_size"
 #define WINOPTION_SCANLINE_HEIGHT           "scanline_height"
+#define WINOPTION_SCANLINE_VARIATION        "scanline_variation"
 #define WINOPTION_SCANLINE_BRIGHT_SCALE     "scanline_bright_scale"
 #define WINOPTION_SCANLINE_BRIGHT_OFFSET    "scanline_bright_offset"
 #define WINOPTION_SCANLINE_JITTER           "scanline_jitter"
@@ -71,6 +70,12 @@
 #define WINOPTION_FLOOR                     "floor"
 #define WINOPTION_PHOSPHOR                  "phosphor_life"
 #define WINOPTION_SATURATION                "saturation"
+#define WINOPTION_CHROMA_MODE               "chroma_mode"
+#define WINOPTION_CHROMA_CONVERSION_GAIN    "chroma_conversion_gain"
+#define WINOPTION_CHROMA_A                  "chroma_a"
+#define WINOPTION_CHROMA_B                  "chroma_b"
+#define WINOPTION_CHROMA_C                  "chroma_c"
+#define WINOPTION_CHROMA_Y_GAIN             "chroma_y_gain"
 #define WINOPTION_YIQ_ENABLE                "yiq_enable"
 #define WINOPTION_YIQ_JITTER                "yiq_jitter"
 #define WINOPTION_YIQ_CCVALUE               "yiq_cc"
@@ -84,9 +89,9 @@
 #define WINOPTION_YIQ_QVALUE                "yiq_q"
 #define WINOPTION_YIQ_SCAN_TIME             "yiq_scan_time"
 #define WINOPTION_YIQ_PHASE_COUNT           "yiq_phase_count"
+#define WINOPTION_VECTOR_BEAM_SMOOTH        "vector_beam_smooth"
 #define WINOPTION_VECTOR_LENGTH_SCALE       "vector_length_scale"
 #define WINOPTION_VECTOR_LENGTH_RATIO       "vector_length_ratio"
-#define WINOPTION_VECTOR_TIME_PERIOD        "vector_time_period"
 #define WINOPTION_BLOOM_BLEND_MODE          "bloom_blend_mode"
 #define WINOPTION_BLOOM_SCALE               "bloom_scale"
 #define WINOPTION_BLOOM_OVERDRIVE           "bloom_overdrive"
@@ -99,8 +104,10 @@
 #define WINOPTION_BLOOM_LEVEL6_WEIGHT       "bloom_lvl6_weight"
 #define WINOPTION_BLOOM_LEVEL7_WEIGHT       "bloom_lvl7_weight"
 #define WINOPTION_BLOOM_LEVEL8_WEIGHT       "bloom_lvl8_weight"
-#define WINOPTION_BLOOM_LEVEL9_WEIGHT       "bloom_lvl9_weight"
-#define WINOPTION_BLOOM_LEVEL10_WEIGHT      "bloom_lvl10_weight"
+#define WINOPTION_LUT_TEXTURE "lut_texture"
+#define WINOPTION_LUT_ENABLE "lut_enable"
+#define WINOPTION_UI_LUT_TEXTURE "ui_lut_texture"
+#define WINOPTION_UI_LUT_ENABLE "ui_lut_enable"
 
 // full screen options
 #define WINOPTION_TRIPLEBUFFER          "triplebuffer"
@@ -128,16 +135,13 @@ public:
 
 	// video options
 	bool menu() const { return bool_value(WINOPTION_MENU); }
-
-	// DirectDraw-specific options
-	bool hwstretch() const { return bool_value(WINOPTION_HWSTRETCH); }
+	const char *attach_window() const { return value(WINOPTION_ATTACH_WINDOW); }
 
 	// core post-processing options
 	const char *screen_post_fx_dir() const { return value(WINOPTION_HLSLPATH); }
 	bool d3d_hlsl_enable() const { return bool_value(WINOPTION_HLSL_ENABLE); }
+	bool d3d_hlsl_oversampling() const { return bool_value(WINOPTION_HLSL_OVERSAMPLING); }
 	const char *d3d_hlsl_write() const { return value(WINOPTION_HLSL_WRITE); }
-	int d3d_hlsl_prescale_x() const { return int_value(WINOPTION_HLSL_PRESCALE_X); }
-	int d3d_hlsl_prescale_y() const { return int_value(WINOPTION_HLSL_PRESCALE_Y); }
 	int d3d_snap_width() const { return int_value(WINOPTION_HLSL_SNAP_WIDTH); }
 	int d3d_snap_height() const { return int_value(WINOPTION_HLSL_SNAP_HEIGHT); }
 	int screen_shadow_mask_tile_mode() const { return int_value(WINOPTION_SHADOW_MASK_TILE_MODE); }
@@ -152,12 +156,15 @@ public:
 	float screen_scanline_amount() const { return float_value(WINOPTION_SCANLINE_AMOUNT); }
 	float screen_scanline_scale() const { return float_value(WINOPTION_SCANLINE_SCALE); }
 	float screen_scanline_height() const { return float_value(WINOPTION_SCANLINE_HEIGHT); }
+	float screen_scanline_variation() const { return float_value(WINOPTION_SCANLINE_VARIATION); }
 	float screen_scanline_bright_scale() const { return float_value(WINOPTION_SCANLINE_BRIGHT_SCALE); }
 	float screen_scanline_bright_offset() const { return float_value(WINOPTION_SCANLINE_BRIGHT_OFFSET); }
 	float screen_scanline_jitter() const { return float_value(WINOPTION_SCANLINE_JITTER); }
 	float screen_hum_bar_alpha() const { return float_value(WINOPTION_HUM_BAR_ALPHA); }
 	float screen_reflection() const { return float_value(WINOPTION_REFLECTION); }
-	float screen_curvature() const { return float_value(WINOPTION_CURVATURE); }
+	float screen_distortion() const { return float_value(WINOPTION_DISTORTION); }
+	float screen_cubic_distortion() const { return float_value(WINOPTION_CUBIC_DISTORTION); }
+	float screen_distort_corner() const { return float_value(WINOPTION_DISTORT_CORNER); }
 	float screen_round_corner() const { return float_value(WINOPTION_ROUND_CORNER); }
 	float screen_smooth_border() const { return float_value(WINOPTION_SMOOTH_BORDER); }
 	float screen_vignetting() const { return float_value(WINOPTION_VIGNETTING); }
@@ -182,9 +189,9 @@ public:
 	float screen_yiq_q() const { return float_value(WINOPTION_YIQ_QVALUE); }
 	float screen_yiq_scan_time() const { return float_value(WINOPTION_YIQ_SCAN_TIME); }
 	int screen_yiq_phase_count() const { return int_value(WINOPTION_YIQ_PHASE_COUNT); }
+	float screen_vector_beam_smooth() const { return float_value(WINOPTION_VECTOR_BEAM_SMOOTH); }
 	float screen_vector_length_scale() const { return float_value(WINOPTION_VECTOR_LENGTH_SCALE); }
 	float screen_vector_length_ratio() const { return float_value(WINOPTION_VECTOR_LENGTH_RATIO); }
-	float screen_vector_time_period() const { return float_value(WINOPTION_VECTOR_TIME_PERIOD); }
 	int screen_bloom_blend_mode() const { return int_value(WINOPTION_BLOOM_BLEND_MODE); }
 	float screen_bloom_scale() const { return float_value(WINOPTION_BLOOM_SCALE); }
 	const char *screen_bloom_overdrive() const { return value(WINOPTION_BLOOM_OVERDRIVE); }
@@ -197,14 +204,22 @@ public:
 	float screen_bloom_lvl6_weight() const { return float_value(WINOPTION_BLOOM_LEVEL6_WEIGHT); }
 	float screen_bloom_lvl7_weight() const { return float_value(WINOPTION_BLOOM_LEVEL7_WEIGHT); }
 	float screen_bloom_lvl8_weight() const { return float_value(WINOPTION_BLOOM_LEVEL8_WEIGHT); }
-	float screen_bloom_lvl9_weight() const { return float_value(WINOPTION_BLOOM_LEVEL9_WEIGHT); }
-	float screen_bloom_lvl10_weight() const { return float_value(WINOPTION_BLOOM_LEVEL10_WEIGHT); }
 	const char *screen_offset() const { return value(WINOPTION_OFFSET); }
 	const char *screen_scale() const { return value(WINOPTION_SCALE); }
 	const char *screen_power() const { return value(WINOPTION_POWER); }
 	const char *screen_floor() const { return value(WINOPTION_FLOOR); }
 	const char *screen_phosphor() const { return value(WINOPTION_PHOSPHOR); }
 	float screen_saturation() const { return float_value(WINOPTION_SATURATION); }
+	int screen_chroma_mode() const { return int_value(WINOPTION_CHROMA_MODE); }
+	const char *screen_chroma_a() const { return value(WINOPTION_CHROMA_A); }
+	const char *screen_chroma_b() const { return value(WINOPTION_CHROMA_B); }
+	const char *screen_chroma_c() const { return value(WINOPTION_CHROMA_C); }
+	const char *screen_chroma_conversion_gain() const { return value(WINOPTION_CHROMA_CONVERSION_GAIN); }
+	const char *screen_chroma_y_gain() const { return value(WINOPTION_CHROMA_Y_GAIN); }
+	const char *screen_lut_texture() const { return value(WINOPTION_LUT_TEXTURE); }
+	bool screen_lut_enable() const { return bool_value(WINOPTION_LUT_ENABLE); }
+	const char *ui_lut_texture() const { return value(WINOPTION_UI_LUT_TEXTURE); }
+	bool ui_lut_enable() const { return bool_value(WINOPTION_UI_LUT_ENABLE); }
 
 	// full screen options
 	bool triple_buffer() const { return bool_value(WINOPTION_TRIPLEBUFFER); }
@@ -216,23 +231,8 @@ public:
 	bool global_inputs() const { return bool_value(WINOPTION_GLOBAL_INPUTS); }
 	bool dual_lightgun() const { return bool_value(WINOPTION_DUAL_LIGHTGUN); }
 
-private:
 	static const options_entry s_option_entries[];
 };
-
-
-
-//============================================================
-//  MACROS
-//============================================================
-
-#ifdef __cplusplus
-#define WRAP_REFIID(x)      x
-#else
-#define WRAP_REFIID(x)      &x
-#endif
-
-
 
 //============================================================
 //  TYPE DEFINITIONS
@@ -243,14 +243,16 @@ enum input_event
 	INPUT_EVENT_KEYDOWN,
 	INPUT_EVENT_KEYUP,
 	INPUT_EVENT_RAWINPUT,
+	INPUT_EVENT_ARRIVAL,
+	INPUT_EVENT_REMOVAL,
 	INPUT_EVENT_MOUSE_BUTTON
 };
 
 struct KeyPressEventArgs
 {
 	input_event event_id;
-	UINT8 vkey;
-	UINT8 scancode;
+	uint8_t vkey;
+	uint8_t scancode;
 };
 
 struct MouseButtonEventArgs
@@ -261,8 +263,14 @@ struct MouseButtonEventArgs
 	int ypos;
 };
 
+// Forward declarations
+struct _EXCEPTION_POINTERS;
+
 class windows_osd_interface : public osd_common_t
 {
+	// Access to exception filter static method
+	friend int main(int argc, char *argv[]);
+
 public:
 	// construction/destruction
 	windows_osd_interface(windows_options &options);
@@ -271,43 +279,47 @@ public:
 	// general overridables
 	virtual void init(running_machine &machine) override;
 	virtual void update(bool skip_redraw) override;
+	virtual void input_update() override;
+
+	// input overrideables
+	virtual void customize_input_type_list(std::vector<input_type_entry> &typelist) override;
 
 	// video overridables
-	virtual slider_state *get_slider_list() override;
-
-	virtual void customize_input_type_list(simple_list<input_type_entry> &typelist) override;
+	virtual void add_audio_to_recording(const int16_t *buffer, int samples_this_frame) override;
 
 	virtual void video_register() override;
 
 	virtual bool video_init() override;
 	virtual bool window_init() override;
-	virtual bool output_init() override;
 
 	virtual void video_exit() override;
 	virtual void window_exit() override;
-	virtual void output_exit() override;
 
 	void extract_video_config();
 
 	// windows osd specific
-	bool handle_input_event(input_event eventid, void *eventdata);
-	bool should_hide_mouse();
-	void poll_input(running_machine &machine);
+	bool handle_input_event(input_event eventid, void *eventdata) const;
+	bool should_hide_mouse() const;
+	void poll_input(running_machine &machine) const;
 
-	windows_options &options() { return m_options; }
+	virtual windows_options &options() override { return m_options; }
+
+	int window_count();
+
+protected:
+	virtual void build_slider_list() override;
+	virtual void update_slider_list() override;
+
+	void check_osd_inputs();
 
 private:
 	virtual void osd_exit() override;
-	void build_slider_list();
-	void update_slider_list();
+	static void output_oslog(const char *buffer);
 
 	windows_options &   m_options;
-	slider_state *      m_sliders;
 
 	static const int DEFAULT_FONT_HEIGHT = 200;
 };
-
-
 
 //============================================================
 //  GLOBAL VARIABLES
@@ -318,14 +330,5 @@ extern const options_entry mame_win_options[];
 // defined in winwork.c
 extern int osd_num_processors;
 
-
-
-//============================================================
-//  FUNCTION PROTOTYPES
-//============================================================
-
-// use this to ping the watchdog
-void winmain_watchdog_ping(void);
-void winmain_dump_stack();
 
 #endif

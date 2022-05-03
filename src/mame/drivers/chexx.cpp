@@ -13,95 +13,202 @@ Electro-mechanical bubble hockey games:
 
 (Some sources indicate these may have been copied from a earlier Sega game called Face-Off)
 
+Olimpic Hockey, Spanish clone from Inor (probably unlicensed), runs on an almost
+exact clone of the 1st generation ICE Chexx hardware (https://www.recreativas.org/olimpic-hockey-1110-inor):
+
+ Inor Olympic Hockey PCB
+ ________________________________________
+ |                                       |
+ | : <- Conn P4            ____________  |
+ |                        |/B8342 SJLB|  |
+ |                        |___________|  |
+ |                        ____________   |
+ |                        |/B8342 SJLC|  |
+ |                        |___________|  |
+ |                        ____________   |
+ |                        |/B8342 SJLD|  |
+ |                        |___________|  |
+ |                        ____________   |
+ |/o\ <- Conn p5          |/B8342 SJLF|  |
+ ||o|                     |___________|  |
+ ||o|                     ____________   |
+ |                        |/B8342 SJLG|  |
+ |                        |___________|  |
+ | : <- Conn P7           ____________   |
+ | :                      |/B8342 SJLH|  |
+ |                        |___________|  |
+ | ____                   ____________   |
+ | LM358N                 |EMPTY      |  |
+ |                        |___________|  |
+ |                        ____________   |
+ |       _________        |EMPTY      |  |
+ |       74LS138B1        |___________|  |
+ |              ______________________   |
+ |              | 54104 DIGITALKER    |  |
+ |              |_____________________|  |
+ |                         _________   : |
+ |    _________            |________|  : |
+ |    |74LS74B1|            Conn P2 -> : |
+ |              ______________________   |
+ |              | UM6522A             |  |
+ |  _________   |_____________________|  |
+ |  |________|                           |
+ |                 ____________          |
+ | :               | EF68B10P  |         |
+ | : <- Conn P1    |___________|         |
+ | :   o <- Conn P8                      |
+ |     o   : <- Conn P6                  |
+ |     0   :                             |
+ | :            ______________________   |
+ | : <- Conn P3 | UM6502A             |  |
+ |              |_____________________|  |
+ |                            _________  |
+ |  _________  ____________  PC74HCT74P  |
+ |  |74LS04_|  | EPROM     |             |
+ |             |___________|             |
+ | Xtal                                  |
+ | 4.000 MHz  DSW _________      DSW     |
+ |            x2  T74LS365B1     x2      |
+ |___________ COST _____________ TIME ___|
+
+The electromechanical game Fire Escape (1984, Mech-Tronic Games, Inc.)
+appears to run on very similar hardware, with a AY8912 but no Digitalker.
+
 ***************************************************************************/
 
 #include "emu.h"
 #include "cpu/m6502/m6502.h"
+#include "machine/6522via.h"
+#include "machine/timer.h"
 #include "sound/ay8910.h"
 #include "sound/digitalk.h"
-#include "machine/6522via.h"
+#include "speaker.h"
+
 #include "chexx.lh"
 
-#define MAIN_CLOCK XTAL_4MHz
+
+namespace {
 
 class chexx_state : public driver_device
 {
 public:
 	chexx_state(const machine_config &mconfig, device_type type, const char *tag)
-		: driver_device(mconfig, type, tag),
-			m_maincpu(*this, "maincpu"),
-			m_via(*this, "via6522"),
-			m_digitalker(*this, "digitalker"),
-			m_aysnd(*this, "aysnd")
+		: driver_device(mconfig, type, tag)
+		, m_maincpu(*this, "maincpu")
+		, m_via(*this, "via6522")
+		, m_digitalker(*this, "digitalker")
+		, m_digits(*this, "digit%u", 0U)
+		, m_leds(*this, "led%u", 0U)
+		, m_lamps(*this, "lamp%u", 0U)
+		, m_dsw(*this, "DSW")
+		, m_input(*this, "INPUT")
+		, m_coin(*this, "COIN")
 	{
 	}
 
-	// devices
-	required_device<cpu_device> m_maincpu;
-	required_device<via6522_device> m_via;
-	required_device<digitalker_device> m_digitalker;
-	optional_device<ay8910_device> m_aysnd; // only faceoffh
-
-	// vars
-	UINT8  m_port_a, m_port_b;
-	UINT8  m_bank;
-	UINT32 m_shift;
-	UINT8  m_lamp;
-	UINT8  m_ay_cmd, m_ay_data;
-
-	// callbacks
-	TIMER_DEVICE_CALLBACK_MEMBER(update);
-
 	// handlers
-	DECLARE_READ8_MEMBER(via_a_in);
-	DECLARE_READ8_MEMBER(via_b_in);
+	uint8_t via_a_in();
+	uint8_t via_b_in();
 
-	DECLARE_WRITE8_MEMBER(via_a_out);
-	DECLARE_WRITE8_MEMBER(via_b_out);
+	void via_a_out(uint8_t data);
+	void via_b_out(uint8_t data);
 
 	DECLARE_WRITE_LINE_MEMBER(via_ca2_out);
 	DECLARE_WRITE_LINE_MEMBER(via_cb1_out);
 	DECLARE_WRITE_LINE_MEMBER(via_cb2_out);
 	DECLARE_WRITE_LINE_MEMBER(via_irq_out);
 
-	DECLARE_READ8_MEMBER(input_r);
+	uint8_t input_r();
 
-	DECLARE_WRITE8_MEMBER(ay_w);
-	DECLARE_WRITE8_MEMBER(lamp_w);
+	void lamp_w(uint8_t data);
+
+	void chexx(machine_config &config);
+	void mem(address_map &map);
+
+protected:
+	enum
+	{
+		TIMER_UPDATE
+	};
+
+	virtual void device_timer(emu_timer &timer, device_timer_id id, int param) override;
+
+	void update();
 
 	// digitalker
-	void digitalker_set_bank(UINT8 bank);
+	void digitalker_set_bank(uint8_t bank);
 
 	// driver_device overrides
 	virtual void machine_start() override;
 	virtual void machine_reset() override;
+
+	// devices
+	required_device<cpu_device> m_maincpu;
+	required_device<via6522_device> m_via;
+	required_device<digitalker_device> m_digitalker;
+	output_finder<4> m_digits;
+	output_finder<3> m_leds;
+	output_finder<2> m_lamps;
+
+	required_ioport m_dsw;
+	required_ioport m_input;
+	required_ioport m_coin;
+
+	// vars
+	emu_timer *m_update_timer;
+	uint8_t  m_port_a;
+	uint8_t  m_port_b;
+	uint8_t  m_bank;
+	uint32_t m_shift;
+	uint8_t  m_lamp;
+};
+
+class faceoffh_state : public chexx_state
+{
+public:
+	faceoffh_state(const machine_config &mconfig, device_type type, const char *tag)
+		: chexx_state(mconfig, type, tag)
+		, m_aysnd(*this, "aysnd")
+	{
+	}
+
+	void faceoffh(machine_config &config);
+
+protected:
+	void ay_w(offs_t offset, uint8_t data);
+
+	void mem(address_map &map);
+
+	required_device<ay8910_device> m_aysnd; // only faceoffh
+	uint8_t m_ay_cmd = 0;
+	uint8_t m_ay_data = 0;
 };
 
 
 // VIA
 
-READ8_MEMBER(chexx_state::via_a_in)
+uint8_t chexx_state::via_a_in()
 {
-	UINT8 ret = 0;
+	uint8_t ret = 0;
 	logerror("%s: VIA read A: %02X\n", machine().describe_context(), ret);
 	return ret;
 }
-READ8_MEMBER(chexx_state::via_b_in)
+
+uint8_t chexx_state::via_b_in()
 {
-	UINT8 ret = 0;
+	uint8_t ret = 0;
 	logerror("%s: VIA read B: %02X\n", machine().describe_context(), ret);
 	return ret;
 }
 
-WRITE8_MEMBER(chexx_state::via_a_out)
+void chexx_state::via_a_out(uint8_t data)
 {
 	m_port_a = data;    // multiplexer
-
-	m_digitalker->digitalker_data_w(space, 0, data, 0);
-
+	m_digitalker->digitalker_data_w(data);
 //  logerror("%s: VIA write A = %02X\n", machine().describe_context(), data);
 }
-WRITE8_MEMBER(chexx_state::via_b_out)
+
+void chexx_state::via_b_out(uint8_t data)
 {
 	m_port_b = data;
 
@@ -122,43 +229,45 @@ WRITE_LINE_MEMBER(chexx_state::via_ca2_out)
 
 //  logerror("%s: VIA write CA2 = %02X\n", machine().describe_context(), state);
 }
+
 WRITE_LINE_MEMBER(chexx_state::via_cb1_out)
 {
 //  logerror("%s: VIA write CB1 = %02X\n", machine().describe_context(), state);
 }
+
 WRITE_LINE_MEMBER(chexx_state::via_cb2_out)
 {
 	m_shift = ((m_shift << 1) & 0xffffff) | state;
 
 	// 7segs (score)
-	static const UINT8 patterns[16] = { 0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07, 0x7f, 0x67, 0, 0, 0, 0, 0, 0 }; // 4511
+	constexpr uint8_t patterns[16] = { 0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07, 0x7f, 0x67, 0, 0, 0, 0, 0, 0 }; // 4511
 
-	output().set_digit_value(0, patterns[(m_shift >> (16+4)) & 0xf]);
-	output().set_digit_value(1, patterns[(m_shift >> (16+0)) & 0xf]);
-
-	output().set_digit_value(2, patterns[(m_shift >>  (8+4)) & 0xf]);
-	output().set_digit_value(3, patterns[(m_shift >>  (8+0)) & 0xf]);
+	m_digits[0] = patterns[(m_shift >> (16+4)) & 0xf];
+	m_digits[1] = patterns[(m_shift >> (16+0)) & 0xf];
+	m_digits[2] = patterns[(m_shift >>  (8+4)) & 0xf];
+	m_digits[3] = patterns[(m_shift >>  (8+0)) & 0xf];
 
 	// Leds (period being played)
-	output().set_led_value(0, BIT(m_shift,2));
-	output().set_led_value(1, BIT(m_shift,1));
-	output().set_led_value(2, BIT(m_shift,0));
+	m_leds[0] = BIT(m_shift,2);
+	m_leds[1] = BIT(m_shift,1);
+	m_leds[2] = BIT(m_shift,0);
 
 //  logerror("%s: VIA write CB2 = %02X\n", machine().describe_context(), state);
 }
+
 WRITE_LINE_MEMBER(chexx_state::via_irq_out)
 {
 	m_maincpu->set_input_line(INPUT_LINE_IRQ0, state ? ASSERT_LINE : CLEAR_LINE);
 //  logerror("%s: VIA write IRQ = %02X\n", machine().describe_context(), state);
 }
 
-READ8_MEMBER(chexx_state::input_r)
+uint8_t chexx_state::input_r()
 {
-	UINT8 ret = ioport("DSW")->read();          // bits 0-3
-	UINT8 inp = ioport("INPUT")->read();        // bit 7 (multiplexed)
+	uint8_t ret = m_dsw->read();          // bits 0-3
+	uint8_t inp = m_input->read();        // bit 7 (multiplexed)
 
 	for (int i = 0; i < 8; ++i)
-		if ( ((~m_port_a) & (1 << i)) && ((~inp) & (1 << i)) )
+		if (BIT(~m_port_a, i) && BIT(~inp, i))
 			ret &= 0x7f;
 
 	return ret;
@@ -166,23 +275,44 @@ READ8_MEMBER(chexx_state::input_r)
 
 // Chexx Memory Map
 
-static ADDRESS_MAP_START( chexx83_map, AS_PROGRAM, 8, chexx_state )
-	AM_RANGE(0x0000, 0x007f) AM_RAM AM_MIRROR(0x100) // 6810 - 128 x 8 static RAM
-	AM_RANGE(0x4000, 0x400f) AM_DEVREADWRITE("via6522", via6522_device, read, write)
-	AM_RANGE(0x8000, 0x8000) AM_READ(input_r)
-	AM_RANGE(0xf800, 0xffff) AM_ROM AM_REGION("maincpu", 0)
-ADDRESS_MAP_END
+void chexx_state::mem(address_map &map)
+{
+	map(0x0000, 0x007f).ram().mirror(0x100); // 6810 - 128 x 8 static RAM
+	map(0x4000, 0x400f).m(m_via, FUNC(via6522_device::map));
+	map(0x8000, 0x8000).r(FUNC(chexx_state::input_r));
+	map(0xf800, 0xffff).rom().region("maincpu", 0);
+}
+
+void chexx_state::device_timer(emu_timer &timer, device_timer_id id, int param)
+{
+	switch (id)
+	{
+	case TIMER_UPDATE:
+		update();
+		break;
+	}
+}
+
+void chexx_state::lamp_w(uint8_t data)
+{
+	m_lamp = data;
+	m_lamps[0] = BIT(m_lamp,0);
+	m_lamps[1] = BIT(m_lamp,1);
+}
 
 // Face-Off Memory Map
 
-WRITE8_MEMBER(chexx_state::lamp_w)
+void faceoffh_state::mem(address_map &map)
 {
-	m_lamp = data;
-	output().set_lamp_value(0, BIT(m_lamp,0));
-	output().set_lamp_value(1, BIT(m_lamp,1));
+	map(0x0000, 0x007f).ram().mirror(0x100); // M58725P - 2KB
+	map(0x4000, 0x400f).m(m_via, FUNC(via6522_device::map));
+	map(0x8000, 0x8000).r(FUNC(faceoffh_state::input_r));
+	map(0xa000, 0xa001).w(FUNC(faceoffh_state::ay_w));
+	map(0xc000, 0xc000).w(FUNC(faceoffh_state::lamp_w));
+	map(0xf000, 0xffff).rom().region("maincpu", 0);
 }
 
-WRITE8_MEMBER(chexx_state::ay_w)
+void faceoffh_state::ay_w(offs_t offset, uint8_t data)
 {
 	if (offset)
 	{
@@ -192,25 +322,16 @@ WRITE8_MEMBER(chexx_state::ay_w)
 
 	if (m_ay_cmd == 0x00 && data == 0x03)
 	{
-		m_aysnd->address_w(space, offset, m_ay_data, mem_mask);
+		m_aysnd->address_w(m_ay_data);
 //      logerror("%s: AY addr = %02X\n", machine().describe_context(), m_ay_data);
 	}
 	else if (m_ay_cmd == 0x00 && data == 0x02)
 	{
-		m_aysnd->data_w(space, offset, m_ay_data, mem_mask);
+		m_aysnd->data_w(m_ay_data);
 //      logerror("%s: AY data = %02X\n", machine().describe_context(), m_ay_data);
 	}
 	m_ay_cmd = data;
 }
-
-static ADDRESS_MAP_START( faceoffh_map, AS_PROGRAM, 8, chexx_state )
-	AM_RANGE(0x0000, 0x007f) AM_RAM AM_MIRROR(0x100) // M58725P - 2KB
-	AM_RANGE(0x4000, 0x400f) AM_DEVREADWRITE("via6522", via6522_device, read, write)
-	AM_RANGE(0x8000, 0x8000) AM_READ(input_r)
-	AM_RANGE(0xa000, 0xa001) AM_WRITE(ay_w)
-	AM_RANGE(0xc000, 0xc000) AM_WRITE(lamp_w)
-	AM_RANGE(0xf000, 0xffff) AM_ROM AM_REGION("maincpu", 0)
-ADDRESS_MAP_END
 
 // Inputs
 
@@ -241,21 +362,26 @@ static INPUT_PORTS_START( chexx83 )
 	PORT_DIPSETTING(    0x08, "4" ) // 80
 	PORT_DIPSETTING(    0x0c, "5" ) // 100
 	PORT_BIT( 0x70, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_SPECIAL ) // multiplexed inputs
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_CUSTOM ) // multiplexed inputs
 INPUT_PORTS_END
 
 // Machine
 
 void chexx_state::machine_start()
 {
+	m_digits.resolve();
+	m_leds.resolve();
+	m_lamps.resolve();
+
+	m_update_timer = timer_alloc(TIMER_UPDATE);
 }
 
-void chexx_state::digitalker_set_bank(UINT8 bank)
+void chexx_state::digitalker_set_bank(uint8_t bank)
 {
 	if (m_bank != bank)
 	{
-		UINT8 *src = memregion("samples")->base();
-		UINT8 *dst = memregion("digitalker")->base();
+		uint8_t *src = memregion("samples")->base();
+		uint8_t *dst = memregion("digitalker")->base();
 
 		memcpy(dst, src + bank * 0x4000, 0x4000);
 
@@ -267,12 +393,13 @@ void chexx_state::machine_reset()
 {
 	m_bank = -1;
 	digitalker_set_bank(0);
+	m_update_timer->adjust(attotime::from_hz(60), 0, attotime::from_hz(60));
 }
 
-TIMER_DEVICE_CALLBACK_MEMBER(chexx_state::update)
+void chexx_state::update()
 {
 	// NMI on coin-in
-	UINT8 coin = (~ioport("COIN")->read()) & 0x03;
+	uint8_t coin = (~m_coin->read()) & 0x03;
 	m_maincpu->set_input_line(INPUT_LINE_NMI, coin ? ASSERT_LINE : CLEAR_LINE);
 
 	// VIA CA1 connected to Digitalker INTR line
@@ -280,7 +407,7 @@ TIMER_DEVICE_CALLBACK_MEMBER(chexx_state::update)
 
 #if 0
 	// Play the digitalker samples (it's not hooked up correctly yet)
-	static UINT8 sample = 0, bank = 0;
+	static uint8_t sample = 0, bank = 0;
 
 	if (machine().input().code_pressed_once(KEYCODE_Q))
 		--bank;
@@ -299,8 +426,7 @@ TIMER_DEVICE_CALLBACK_MEMBER(chexx_state::update)
 		m_digitalker->digitalker_0_cms_w(CLEAR_LINE);
 		m_digitalker->digitalker_0_cs_w(CLEAR_LINE);
 
-		address_space &space = m_maincpu->space(AS_PROGRAM);
-		m_digitalker->digitalker_data_w(space, 0, sample, 0);
+		m_digitalker->digitalker_data_w(sample);
 
 		m_digitalker->digitalker_0_wr_w(ASSERT_LINE);
 		m_digitalker->digitalker_0_wr_w(CLEAR_LINE);
@@ -309,43 +435,42 @@ TIMER_DEVICE_CALLBACK_MEMBER(chexx_state::update)
 #endif
 }
 
-static MACHINE_CONFIG_START( chexx83, chexx_state )
-
-	// basic machine hardware
-	MCFG_CPU_ADD("maincpu", M6502, MAIN_CLOCK/2)
-	MCFG_CPU_PROGRAM_MAP(chexx83_map)
-	MCFG_TIMER_DRIVER_ADD_PERIODIC("update", chexx_state, update, attotime::from_hz(60))
+void chexx_state::chexx(machine_config &config)
+{
+	M6502(config, m_maincpu, XTAL(4'000'000) / 2);
+	m_maincpu->set_addrmap(AS_PROGRAM, &chexx_state::mem);
 
 	// via
-	MCFG_DEVICE_ADD("via6522", VIA6522, MAIN_CLOCK/4)
+	MOS6522(config, m_via, XTAL(4'000'000) / 4);
 
-	MCFG_VIA6522_READPA_HANDLER(READ8(chexx_state, via_a_in))
-	MCFG_VIA6522_READPB_HANDLER(READ8(chexx_state, via_b_in))
+	m_via->readpa_handler().set(FUNC(chexx_state::via_a_in));
+	m_via->readpb_handler().set(FUNC(chexx_state::via_b_in));
 
-	MCFG_VIA6522_WRITEPA_HANDLER(WRITE8(chexx_state, via_a_out))
-	MCFG_VIA6522_WRITEPB_HANDLER(WRITE8(chexx_state, via_b_out))
+	m_via->writepa_handler().set(FUNC(chexx_state::via_a_out));
+	m_via->writepb_handler().set(FUNC(chexx_state::via_b_out));
 
-	MCFG_VIA6522_CA2_HANDLER(WRITELINE(chexx_state, via_ca2_out))
-	MCFG_VIA6522_CB1_HANDLER(WRITELINE(chexx_state, via_cb1_out))
-	MCFG_VIA6522_CB2_HANDLER(WRITELINE(chexx_state, via_cb2_out))
-	MCFG_VIA6522_IRQ_HANDLER(WRITELINE(chexx_state, via_irq_out))
+	m_via->ca2_handler().set(FUNC(chexx_state::via_ca2_out));
+	m_via->cb1_handler().set(FUNC(chexx_state::via_cb1_out));
+	m_via->cb2_handler().set(FUNC(chexx_state::via_cb2_out));
+	m_via->irq_handler().set(FUNC(chexx_state::via_irq_out));
 
 	// Layout
-	MCFG_DEFAULT_LAYOUT(layout_chexx)
+	config.set_default_layout(layout_chexx);
 
 	// sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("mono")
-	MCFG_DIGITALKER_ADD("digitalker", MAIN_CLOCK)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.16)
-MACHINE_CONFIG_END
+	SPEAKER(config, "mono").front_center();
+	DIGITALKER(config, m_digitalker, XTAL(4'000'000));
+	m_digitalker->add_route(ALL_OUTPUTS, "mono", 0.16);
+}
 
-static MACHINE_CONFIG_DERIVED( faceoffh, chexx83 )
-	MCFG_CPU_MODIFY("maincpu")
-	MCFG_CPU_PROGRAM_MAP(faceoffh_map)
+void faceoffh_state::faceoffh(machine_config &config)
+{
+	chexx(config);
+	m_maincpu->set_addrmap(AS_PROGRAM, &faceoffh_state::mem);
 
-	MCFG_SOUND_ADD("aysnd", AY8910, MAIN_CLOCK/2)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.30)
-MACHINE_CONFIG_END
+	AY8910(config, m_aysnd, XTAL(4'000'000) / 2);
+	m_aysnd->add_route(ALL_OUTPUTS, "mono", 0.30);
+}
 
 // ROMs
 
@@ -375,6 +500,48 @@ ROM_START( chexx83 )
 	ROM_LOAD( "chexx83.u17", 0xa000, 0x2000, NO_DUMP )
 	ROM_LOAD( "chexx83.u18", 0xc000, 0x2000, NO_DUMP )
 	ROM_LOAD( "chexx83.u19", 0xe000, 0x2000, NO_DUMP )
+ROM_END
+
+// Same PCB as 'chexx83'
+ROM_START( olihockey )
+	ROM_REGION( 0x0800, "maincpu", 0 )
+	ROM_LOAD( "inor_1.u4", 0x0000, 0x0800, CRC(97716ac9) SHA1(b85ff1401544dc7121babee8adf618f82a2f6a89) )
+
+	ROM_REGION( 0x4000, "digitalker", ROMREGION_ERASE00 )
+	// bank switched (from samples region)
+
+	ROM_REGION( 0x10000, "samples", ROMREGION_ERASE00 )
+	ROM_LOAD( "b8342_sjlb.u19", 0x0000, 0x2000, CRC(059b3725) SHA1(5837bee1ef34ce19a3101b851ca55029776e4b3e) )
+	ROM_LOAD( "b8342_sjlc.u18", 0x2000, 0x2000, CRC(679da4e1) SHA1(01a5b9dd132c1b0de97c153d7de226f5bf357338) )
+	ROM_LOAD( "b8342_sjld.u17", 0x4000, 0x2000, CRC(f8461b33) SHA1(717a8842e0ce9ba94dd59504a324bede4844e389) )
+	ROM_LOAD( "b8342_sjlf.u16", 0x6000, 0x2000, CRC(156c91e0) SHA1(6017d4b5609b214a6e66dcd76493a7d1442c04d4) )
+	ROM_LOAD( "b8342_sjlg.u15", 0x8000, 0x2000, CRC(19904604) SHA1(633c211a9a822cdf597a6f3c221ae9c8d6482e82) )
+	ROM_LOAD( "b8342_sjlh.u14", 0xa000, 0x2000, CRC(c3386d51) SHA1(7882e88db55ba914be81075e4b2d76e246c34d3b) )
+
+	// U13 and U12 unpopulated
+	ROM_FILL(                   0xc000, 0x2000, 0xff )
+	ROM_FILL(                   0xe000, 0x2000, 0xff )
+ROM_END
+
+// Same PCB as 'chexx83'
+ROM_START( olihockeya )
+	ROM_REGION( 0x0800, "maincpu", 0 )
+	ROM_LOAD( "inor_2.u4", 0x0000, 0x0800, CRC(038958a4) SHA1(aec5e24eea1829459dd3ef9ffe3e4b8c39071ced) )
+
+	ROM_REGION( 0x4000, "digitalker", ROMREGION_ERASE00 )
+	// bank switched (from samples region)
+
+	ROM_REGION( 0x10000, "samples", ROMREGION_ERASE00 )
+	ROM_LOAD( "b8342_sjlb.u19", 0x0000, 0x2000, CRC(059b3725) SHA1(5837bee1ef34ce19a3101b851ca55029776e4b3e) )
+	ROM_LOAD( "b8342_sjlc.u18", 0x2000, 0x2000, CRC(679da4e1) SHA1(01a5b9dd132c1b0de97c153d7de226f5bf357338) )
+	ROM_LOAD( "b8342_sjld.u17", 0x4000, 0x2000, CRC(f8461b33) SHA1(717a8842e0ce9ba94dd59504a324bede4844e389) )
+	ROM_LOAD( "b8342_sjlf.u16", 0x6000, 0x2000, CRC(156c91e0) SHA1(6017d4b5609b214a6e66dcd76493a7d1442c04d4) )
+	ROM_LOAD( "b8342_sjlg.u15", 0x8000, 0x2000, CRC(19904604) SHA1(633c211a9a822cdf597a6f3c221ae9c8d6482e82) )
+	ROM_LOAD( "b8342_sjlh.u14", 0xa000, 0x2000, CRC(c3386d51) SHA1(7882e88db55ba914be81075e4b2d76e246c34d3b) )
+
+	// U13 and U12 unpopulated
+	ROM_FILL(                   0xc000, 0x2000, 0xff )
+	ROM_FILL(                   0xe000, 0x2000, 0xff )
 ROM_END
 
 /***************************************************************************
@@ -416,5 +583,10 @@ ROM_START( faceoffh )
 	ROM_FILL(         0xe000, 0x2000, 0xff ) // unpopulated
 ROM_END
 
-GAME( 1983, chexx83,  0,       chexx83,  chexx83, driver_device, 0, ROT270, "ICE",                                                 "Chexx (EM Bubble Hockey, 1983 1.1)", MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_NO_SOUND )
-GAME( 1983, faceoffh, chexx83, faceoffh, chexx83, driver_device, 0, ROT270, "SoftLogic (Entertainment Enterprises, Ltd. license)", "Face-Off (EM Bubble Hockey)",        MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_IMPERFECT_SOUND )
+} // Anonymous namespace
+
+
+GAME( 1983, chexx83,    0,         chexx,    chexx83, chexx_state,    empty_init, ROT270, "ICE",                                                 "Chexx (EM Bubble Hockey, 1983 1.1)",       MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_NO_SOUND )
+GAME( 1983, faceoffh,   chexx83,   faceoffh, chexx83, faceoffh_state, empty_init, ROT270, "SoftLogic (Entertainment Enterprises, Ltd. license)", "Face-Off (EM Bubble Hockey)",              MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_IMPERFECT_SOUND )
+GAME( 1985, olihockey,  0,         chexx,    chexx83, chexx_state,    empty_init, ROT270, "Inor",                                                "Olimpic Hockey (EM Bubble Hockey, set 1)", MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_IMPERFECT_SOUND )
+GAME( 1985, olihockeya, olihockey, chexx,    chexx83, chexx_state,    empty_init, ROT270, "Inor",                                                "Olimpic Hockey (EM Bubble Hockey, set 2)", MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_IMPERFECT_SOUND )

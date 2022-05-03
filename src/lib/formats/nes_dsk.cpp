@@ -8,12 +8,10 @@
 
 *********************************************************************/
 
-
-#include <string.h>
-#include <assert.h>
-
 #include "formats/nes_dsk.h"
 #include "formats/basicdsk.h"
+
+#include <cstring>
 
 
 
@@ -24,8 +22,8 @@
 
 static FLOPPY_IDENTIFY( nes_dsk_identify )
 {
-	UINT64 size;
-	UINT8 header[3];
+	uint64_t size;
+	uint8_t header[3];
 
 	*vote = 0;
 

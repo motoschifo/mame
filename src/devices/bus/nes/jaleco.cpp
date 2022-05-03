@@ -21,8 +21,8 @@
 #include "emu.h"
 #include "jaleco.h"
 
-#include "cpu/m6502/m6502.h"
-#include "sound/samples.h"
+#include "speaker.h"
+
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE 1
@@ -37,144 +37,109 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_JF11 = &device_creator<nes_jf11_device>;
-const device_type NES_JF16 = &device_creator<nes_jf16_device>;
-const device_type NES_JF17 = &device_creator<nes_jf17_device>;
-const device_type NES_JF19 = &device_creator<nes_jf19_device>;
-const device_type NES_SS88006 = &device_creator<nes_ss88006_device>;
-const device_type NES_JF13 = &device_creator<nes_jf13_device>;
-const device_type NES_JF17_ADPCM = &device_creator<nes_jf17_adpcm_device>;
-const device_type NES_JF19_ADPCM = &device_creator<nes_jf19_adpcm_device>;
-const device_type NES_JF23 = &device_creator<nes_jf23_device>;
-const device_type NES_JF24 = &device_creator<nes_jf24_device>;
-const device_type NES_JF29 = &device_creator<nes_jf29_device>;
-const device_type NES_JF33 = &device_creator<nes_jf33_device>;
+DEFINE_DEVICE_TYPE(NES_JF11,       nes_jf11_device,       "nes_jf11",     "NES Cart Jaleco JF-11 PCB")
+DEFINE_DEVICE_TYPE(NES_JF13,       nes_jf13_device,       "nes_jf13",     "NES Cart Jaleco JF-13 PCB")
+DEFINE_DEVICE_TYPE(NES_JF16,       nes_jf16_device,       "nes_jf16",     "NES Cart Jaleco JF-16 PCB")
+DEFINE_DEVICE_TYPE(NES_JF17,       nes_jf17_device,       "nes_jf17",     "NES Cart Jaleco JF-17 PCB")
+DEFINE_DEVICE_TYPE(NES_JF17_ADPCM, nes_jf17_adpcm_device, "nes_jf17_pcm", "NES Cart Jaleco JF-17 + ADPCM (Moero!! Pro Tennis) PCB")
+DEFINE_DEVICE_TYPE(NES_JF19,       nes_jf19_device,       "nes_jf19",     "NES Cart Jaleco JF-19 (Moero!! Pro Soccer) PCB")
+DEFINE_DEVICE_TYPE(NES_JF19_ADPCM, nes_jf19_adpcm_device, "nes_jf19_pcm", "NES Cart Jaleco JF-19 + ADPCM (Moero!! Pro Yakyuu 88) PCB")
+DEFINE_DEVICE_TYPE(NES_SS88006,    nes_ss88006_device,    "nes_ss88006",  "NES Cart Jaleco SS88006 PCB")
+DEFINE_DEVICE_TYPE(NES_JF23,       nes_jf23_device,       "nes_jf23",     "NES Cart Jaleco JF-23 (Shin Moero Pro Yakyuu) PCB")
+DEFINE_DEVICE_TYPE(NES_JF24,       nes_jf24_device,       "nes_jf24",     "NES Cart Jaleco JF-24 (Terao no Dosukoi Oozumou) PCB")
+DEFINE_DEVICE_TYPE(NES_JF29,       nes_jf29_device,       "nes_jf29",     "NES Cart Jaleco JF-29 (Moe Pro! '90) PCB")
+DEFINE_DEVICE_TYPE(NES_JF33,       nes_jf33_device,       "nes_jf33",     "NES Cart Jaleco JF-33 (Moe Pro! Saikyou-hen) PCB")
 
 
-nes_jf11_device::nes_jf11_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_JF11, "NES Cart Jaleco JF-11 PCB", tag, owner, clock, "nes_jf11", __FILE__)
+nes_jf11_device::nes_jf11_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, NES_JF11, tag, owner, clock)
 {
 }
 
-nes_jf13_device::nes_jf13_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_JF13, "NES Cart Jaleco JF-13 PCB", tag, owner, clock, "nes_jf13", __FILE__),
-						m_samples(*this, "samples")
+nes_jf13_device::nes_jf13_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, NES_JF13, tag, owner, clock)
+	, m_samples(*this, "samples")
 {
 }
 
-nes_jf16_device::nes_jf16_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_JF16, "NES Cart Jaleco JF-16 PCB", tag, owner, clock, "nes_jf16", __FILE__)
+nes_jf16_device::nes_jf16_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, NES_JF16, tag, owner, clock)
 {
 }
 
-nes_jf17_device::nes_jf17_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source), m_latch(0)
-				{
-}
-
-nes_jf17_device::nes_jf17_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_JF17, "NES Cart Jaleco JF-17 PCB", tag, owner, clock, "nes_jf17", __FILE__), m_latch(0)
-				{
-}
-
-nes_jf17_adpcm_device::nes_jf17_adpcm_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_jf17_device(mconfig, NES_JF17_ADPCM, "NES Cart Jaleco JF-17 + ADPCM (Moero!! Pro Tennis) PCB", tag, owner, clock, "nes_jf17_pcm", __FILE__),
-						m_samples(*this, "samples")
+nes_jf17_device::nes_jf17_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, bool prg_flip)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_samples(*this, "samples")
+	, m_latch(0)
+	, m_prg_flip(prg_flip)
 {
 }
 
-nes_jf19_device::nes_jf19_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source)
+nes_jf17_device::nes_jf17_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_jf17_device(mconfig, NES_JF17, tag, owner, clock, false)
 {
 }
 
-nes_jf19_device::nes_jf19_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_JF19, "NES Cart Jaleco JF-19 (Moero!! Pro Soccer) PCB", tag, owner, clock, "nes_jf19", __FILE__)
+nes_jf17_adpcm_device::nes_jf17_adpcm_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_jf17_device(mconfig, NES_JF17_ADPCM, tag, owner, clock, false)
 {
 }
 
-nes_jf19_adpcm_device::nes_jf19_adpcm_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_jf19_device(mconfig, NES_JF19_ADPCM, "NES Cart Jaleco JF-19 + ADPCM  (Moero!! Pro Yakyuu 88) PCB", tag, owner, clock, "nes_jf19_pcm", __FILE__),
-						m_samples(*this, "samples")
+nes_jf19_device::nes_jf19_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_jf17_device(mconfig, NES_JF19, tag, owner, clock, true)
 {
 }
 
-nes_ss88006_device::nes_ss88006_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source), m_irq_count(0), m_irq_count_latch(0), m_irq_mode(0), m_irq_enable(0), irq_timer(nullptr), m_latch(0)
-				{
-}
-
-nes_ss88006_device::nes_ss88006_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SS88006, "NES Cart Jaleco SS88006 PCB", tag, owner, clock, "nes_ss88006", __FILE__), m_irq_count(0), m_irq_count_latch(0), m_irq_mode(0), m_irq_enable(0), irq_timer(nullptr), m_latch(0)
-				{
-}
-
-nes_ss88006_adpcm_device::nes_ss88006_adpcm_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_ss88006_device(mconfig, type, name, tag, owner, clock, shortname, source)
+nes_jf19_adpcm_device::nes_jf19_adpcm_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_jf17_device(mconfig, NES_JF19_ADPCM, tag, owner, clock, true)
 {
 }
 
-nes_jf23_device::nes_jf23_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_ss88006_adpcm_device(mconfig, NES_JF23, "NES Cart Jaleco Shin Moero Pro Yakyuu PCB", tag, owner, clock, "nes_jf23", __FILE__),
-						m_samples(*this, "samples")
+nes_ss88006_device::nes_ss88006_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_samples(*this, "samples")
+	, m_irq_count(0)
+	, m_irq_count_latch(0)
+	, m_irq_mode(0)
+	, m_irq_enable(0)
+	, irq_timer(nullptr)
+	, m_wram_protect(0)
 {
 }
 
-nes_jf24_device::nes_jf24_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_ss88006_adpcm_device(mconfig, NES_JF24, "NES Cart Jaleco Terao no Dosukoi Oozumou PCB", tag, owner, clock, "nes_jf24", __FILE__),
-						m_samples(*this, "samples")
+nes_ss88006_device::nes_ss88006_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_ss88006_device(mconfig, NES_SS88006, tag, owner, clock)
 {
 }
 
-nes_jf29_device::nes_jf29_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_ss88006_adpcm_device(mconfig, NES_JF29, "NES Cart Jaleco Moe Pro! '90 PCB", tag, owner, clock, "nes_jf29", __FILE__),
-						m_samples(*this, "samples")
+nes_jf23_device::nes_jf23_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_ss88006_device(mconfig, NES_JF23, tag, owner, clock)
 {
 }
 
-nes_jf33_device::nes_jf33_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_ss88006_adpcm_device(mconfig, NES_JF33, "NES Cart Jaleco Moe Pro! Saikyou-hen PCB", tag, owner, clock, "nes_jf33", __FILE__),
-						m_samples(*this, "samples")
+nes_jf24_device::nes_jf24_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_ss88006_device(mconfig, NES_JF24, tag, owner, clock)
+{
+}
+
+nes_jf29_device::nes_jf29_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_ss88006_device(mconfig, NES_JF29, tag, owner, clock)
+{
+}
+
+nes_jf33_device::nes_jf33_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_ss88006_device(mconfig, NES_JF33, tag, owner, clock)
 {
 }
 
 
-
-void nes_jf11_device::device_start()
-{
-	common_start();
-}
-
-void nes_jf11_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
-}
-
-void nes_jf13_device::device_start()
-{
-	common_start();
-}
-
-void nes_jf13_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
-}
-
-void nes_jf16_device::device_start()
-{
-	common_start();
-}
 
 void nes_jf16_device::pcb_reset()
 {
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
 	prg16_89ab(0);
 	prg16_cdef(m_prg_chunks - 1);
 	chr8(0, m_chr_source);
+	set_nt_mirroring(PPU_MIRROR_LOW);
 }
 
 void nes_jf17_device::device_start()
@@ -185,30 +150,17 @@ void nes_jf17_device::device_start()
 
 void nes_jf17_device::pcb_reset()
 {
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
 	prg16_89ab(0);
-	prg16_cdef(m_prg_chunks - 1);
+	prg16_cdef(m_prg_flip ? 0 : m_prg_chunks - 1);
 	chr8(0, m_chr_source);
 	m_latch = 0;
-}
-
-void nes_jf19_device::device_start()
-{
-	common_start();
-}
-
-void nes_jf19_device::pcb_reset()
-{
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
-	prg32(0);
-	chr8(0, m_chr_source);
 }
 
 void nes_ss88006_device::device_start()
 {
 	common_start();
 	irq_timer = timer_alloc(TIMER_IRQ);
-	irq_timer->adjust(attotime::zero, 0, machine().device<cpu_device>("maincpu")->cycles_to_attotime(1));
+	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));
@@ -216,23 +168,22 @@ void nes_ss88006_device::device_start()
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
 	save_item(NAME(m_irq_mode));
-	save_item(NAME(m_latch));
+	save_item(NAME(m_wram_protect));
 }
 
 void nes_ss88006_device::pcb_reset()
 {
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
 	prg16_89ab(0);
 	prg16_cdef(m_prg_chunks - 1);
 	chr8(0, m_chr_source);
 
-	memset(m_mmc_prg_bank, 0, sizeof(m_mmc_prg_bank));
-	memset(m_mmc_vrom_bank, 0, sizeof(m_mmc_vrom_bank));
+	std::fill(std::begin(m_mmc_prg_bank), std::end(m_mmc_prg_bank), 0x00);
+	std::fill(std::begin(m_mmc_vrom_bank), std::end(m_mmc_vrom_bank), 0x00);
 	m_irq_enable = 0;
 	m_irq_mode = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
-	m_latch = 0;
+	m_wram_protect = 0;
 }
 
 
@@ -244,15 +195,16 @@ void nes_ss88006_device::pcb_reset()
 
  Jaleco JF-11, JF-12 & JF-14 boards emulation
 
- Games: Bio Senshi Dan, Mississippi Satsujin Jiken
+ Games: Bio Senshi Dan, Mississippi Satsujin Jiken,
+ Yousai Club
 
  iNES: mapper 140
 
- In MESS: Supported.
+ In MAME: Supported.
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_jf11_device::write_m)
+void nes_jf11_device::write_m(offs_t offset, u8 data)
 {
 	LOG_MMC(("jf11 write_m, offset: %04x, data: %02x\n", offset, data));
 	chr8(data, CHRROM);
@@ -269,38 +221,34 @@ WRITE8_MEMBER(nes_jf11_device::write_m)
 
  iNES: mapper 86
 
- In MESS: Supported.
+ In MAME: Supported.
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_jf13_device::write_m)
+void nes_jf13_device::write_m(offs_t offset, u8 data)
 {
 	LOG_MMC(("jf13 write_m, offset: %04x, data: %02x\n", offset, data));
 
 	if (offset < 0x1000)
 	{
-		prg32((data >> 4) & 0x03);
-		chr8(((data >> 4) & 0x04) | (data & 0x03), CHRROM);
+		prg32(BIT(data, 4, 2));
+		chr8(bitswap<3>(data, 6, 1, 0), CHRROM);
 	}
-	else
-	{
-//      printf("sample write: offset: %04x, data: %02x\n", offset, data);
-		if (data & 0x20)
-			m_samples->start(data & 0x0f, data & 0x0f);
-		else
-			m_samples->stop_all();
-	}
+	else if ((data & 0x30) == 0x20)
+		m_samples->start(data & 0x0f, data & 0x0f);
 }
 
 /*-------------------------------------------------
 
  Jaleco JF-16 board emulation
 
+ Games: Uchuusen Cosmo Carrier
+
  iNES: mapper 78 (shared with a diff Irem board)
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_jf16_device::write_h)
+void nes_jf16_device::write_h(offs_t offset, u8 data)
 {
 	LOG_MMC(("jf16 write_h, offset: %04x, data: %02x\n", offset, data));
 
@@ -315,98 +263,42 @@ WRITE8_MEMBER(nes_jf16_device::write_h)
 
 /*-------------------------------------------------
 
- Jaleco JF-17 boards emulation
+ Jaleco JF-17 & JF-19 boards emulation
 
  Note: we don't emulate the additional sound hardware
        for Moero!! Pro Tennis
 
  Games: Moero!! Juudou Warriors, Moero!! Pro Tennis, Pinball
- Quest Jpn
+ Quest Jpn, Moero Pro Soccer, Moero Pro Yakyuu '88
 
- iNES: mapper 72
+ iNES: mapper 72 & 92
 
- In MESS: Supported, see below for the Moero Pro Tennis
+ In MAME: Supported, see below for the games with samples
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_jf17_device::write_h)
+void nes_jf17_device::write_h(offs_t offset, u8 data)
 {
 	LOG_MMC(("jf17 write_h, offset: %04x, data: %02x\n", offset, data));
 
 	// this pcb is subject to bus conflict
 	data = account_bus_conflict(offset, data);
 
-	if (BIT(m_latch, 7) && !BIT(data, 7))
-		prg16_89ab(m_latch & 0x07);
-	if (BIT(m_latch, 6) && !BIT(data, 6))
-		chr8(m_latch & 0x0f, CHRROM);
+	if (BIT(data, 7) && !BIT(m_latch, 7))  // 74174 clocks on 0 -> 1
+	{
+		if (m_prg_flip)
+			prg16_cdef(data & 0x0f);
+		else
+			prg16_89ab(data & 0x07);
+	}
+	if (BIT(data, 6) && !BIT(m_latch, 6))  // 74174 clocks on 0 -> 1
+		chr8(data & 0x0f, CHRROM);
 
 	m_latch = data;
-}
 
-WRITE8_MEMBER(nes_jf17_adpcm_device::write_h)
-{
-	LOG_MMC(("jf17 + ADPCM write_h, offset: %04x, data: %02x\n", offset, data));
-
-	// this pcb is subject to bus conflict
-	data = account_bus_conflict(offset, data);
-
-	if (BIT(m_latch, 7) && !BIT(data, 7))
-		prg16_89ab(m_latch & 0x07);
-	if (BIT(m_latch, 6) && !BIT(data, 6))
-		chr8(m_latch & 0x0f, CHRROM);
-	if (BIT(data, 5) && !BIT(data,4))
-	{
-//      printf("sample write: offset: %04x, data: %02x\n", offset, data);
-		m_samples->start(offset & 0x1f, offset & 0x1f);
-	}
-
-	m_latch = data;
-}
-
-/*-------------------------------------------------
-
- Jaleco JF-19 boards emulation
-
- Note: we don't emulate the additional sound hardware.
-
- Games: Moero Pro Soccer, Moero Pro Yakyuu '88
-
- iNES: mapper 92
-
- In MESS: Supported, see below for the Moero Pro Yakyuu '88
-
- -------------------------------------------------*/
-
-WRITE8_MEMBER(nes_jf19_device::write_h)
-{
-	LOG_MMC(("jf19 write_h, offset: %04x, data: %02x\n", offset, data));
-
-	// this pcb is subject to bus conflict
-	data = account_bus_conflict(offset, data);
-
-	if (BIT(data, 7))
-		prg16_cdef(data & 0x0f);
-	if (BIT(data, 6))
-		chr8(data & 0x0f, CHRROM);
-}
-
-WRITE8_MEMBER(nes_jf19_adpcm_device::write_h)
-{
-	LOG_MMC(("jf19 + ADPCM write_h, offset: %04x, data: %02x\n", offset, data));
-
-	// this pcb is subject to bus conflict
-	data = account_bus_conflict(offset, data);
-
-	if (BIT(data, 7))
-		prg16_cdef(data & 0x0f);
-	if (BIT(data, 6))
-		chr8(data & 0x0f, CHRROM);
-	if (BIT(data, 5) && !BIT(data,4))
-	{
-//      printf("sample write: offset: %04x, data: %02x\n", offset, data);
-		m_samples->start(offset & 0x1f, offset & 0x1f);
-	}
+	if (m_samples)
+		if ((data & 0x30) == 0x20)
+			m_samples->start(offset & 0x1f, offset & 0x1f);
 }
 
 /*-------------------------------------------------
@@ -419,128 +311,104 @@ WRITE8_MEMBER(nes_jf19_adpcm_device::write_h)
 
  iNES: mapper 18
 
- In MESS: Supported, see below for the games with samples
+ In MAME: Supported, see below for the games with samples
 
  -------------------------------------------------*/
 
-void nes_ss88006_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void nes_ss88006_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	if (id == TIMER_IRQ)
 	{
 		if (m_irq_enable)
 		{
-			if (m_irq_mode & 0x08)  // 4bits counter
-			{
-				if (!(m_irq_count & 0x000f))
-				{
-					m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
-					m_irq_count = (m_irq_count & 0xfff0) | 0x000f;
-				}
-				else
-					m_irq_count = (m_irq_count & 0xfff0) | ((m_irq_count & 0x000f) - 1);
-			}
-			else if (m_irq_mode & 0x04) // 8bits counter
-			{
-				if (!(m_irq_count & 0x00ff))
-				{
-					m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
-					m_irq_count = (m_irq_count & 0xff00) | 0x00ff;
-				}
-				else
-					m_irq_count = (m_irq_count & 0xff00) | ((m_irq_count & 0x00ff) - 1);
-			}
-			else if (m_irq_mode & 0x02) // 12bits counter
-			{
-				if (!(m_irq_count & 0x0fff))
-				{
-					m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
-					m_irq_count = (m_irq_count & 0xf000) | 0x0fff;
-				}
-				else
-					m_irq_count = (m_irq_count & 0xf000) | ((m_irq_count & 0x0fff) - 1);
-			}
-			else    // 16bits counter
-			{
-				if (!m_irq_count)
-				{
-					m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
-					m_irq_count = 0xffff;
-				}
-				else
-					m_irq_count = m_irq_count - 1;
-			}
+			u16 mask = 0xffff;            // 16-bit counter (default)
+
+			if (BIT(m_irq_mode, 3))       // 4-bit counter
+				mask = 0x000f;
+			else if (BIT(m_irq_mode, 2))  // 8-bit counter
+				mask = 0x00ff;
+			else if (BIT(m_irq_mode, 1))  // 12-bit counter
+				mask = 0x0fff;
+
+			m_irq_count = (m_irq_count & ~mask) | ((m_irq_count - 1) & mask);
+
+			if ((m_irq_count & mask) == mask)
+				set_irq_line(ASSERT_LINE);
 		}
 	}
 }
 
-WRITE8_MEMBER(nes_ss88006_device::ss88006_write)
+u8 nes_ss88006_device::read_m(offs_t offset)
 {
-	UINT8 bank;
+	LOG_MMC(("ss88006 read_m, offset: %04x\n", offset));
+
+	if (m_wram_protect & 1) // RAM enabled
+		return device_nes_cart_interface::read_m(offset);
+
+	return get_open_bus();
+}
+
+void nes_ss88006_device::write_m(offs_t offset, u8 data)
+{
+	LOG_MMC(("ss88006 write_m, offset: %04x, data: %02x\n", offset, data));
+
+	if (m_wram_protect == 0x03) // RAM enabled and writable
+		device_nes_cart_interface::write_m(offset, data);
+}
+
+void nes_ss88006_device::write_h(offs_t offset, u8 data)
+{
 	LOG_MMC(("ss88006 write_h, offset: %04x, data: %02x\n", offset, data));
+
+	int bank, shift;
 
 	switch (offset & 0x7003)
 	{
 		case 0x0000:
-			m_mmc_prg_bank[0] = (m_mmc_prg_bank[0] & 0xf0) | (data & 0x0f);
-			prg8_89(m_mmc_prg_bank[0]);
-			break;
 		case 0x0001:
-			m_mmc_prg_bank[0] = (m_mmc_prg_bank[0] & 0x0f) | (data << 4);
-			prg8_89(m_mmc_prg_bank[0]);
-			break;
 		case 0x0002:
-			m_mmc_prg_bank[1] = (m_mmc_prg_bank[1] & 0xf0) | (data & 0x0f);
-			prg8_ab(m_mmc_prg_bank[1]);
-			break;
 		case 0x0003:
-			m_mmc_prg_bank[1] = (m_mmc_prg_bank[1] & 0x0f) | (data << 4);
-			prg8_ab(m_mmc_prg_bank[1]);
-			break;
 		case 0x1000:
-			m_mmc_prg_bank[2] = (m_mmc_prg_bank[2] & 0xf0) | (data & 0x0f);
-			prg8_cd(m_mmc_prg_bank[2]);
-			break;
 		case 0x1001:
-			m_mmc_prg_bank[2] = (m_mmc_prg_bank[2] & 0x0f) | (data << 4);
-			prg8_cd(m_mmc_prg_bank[2]);
+			bank = bitswap<2>(offset, 12, 1);
+			shift = (offset & 1) << 2;
+			m_mmc_prg_bank[bank] &= ~(0x0f << shift);
+			m_mmc_prg_bank[bank] |= (data & 0x0f) << shift;
+			prg8_x(bank, m_mmc_prg_bank[bank]);
 			break;
 
-			/* $9002, 3 (1002, 3) uncaught = Jaleco Baseball writes 0 */
-			/* believe it's related to battery-backed ram enable/disable */
+		case 0x1002:
+			m_wram_protect = data & 0x03;
+			break;
 
 		case 0x2000: case 0x2001: case 0x2002: case 0x2003:
 		case 0x3000: case 0x3001: case 0x3002: case 0x3003:
 		case 0x4000: case 0x4001: case 0x4002: case 0x4003:
 		case 0x5000: case 0x5001: case 0x5002: case 0x5003:
-			bank = ((offset & 0x7000) - 0x2000) / 0x0800 + ((offset & 0x0002) >> 1);
-			if (offset & 0x0001)
-				m_mmc_vrom_bank[bank] = (m_mmc_vrom_bank[bank] & 0x0f) | ((data & 0x0f)<< 4);
-			else
-				m_mmc_vrom_bank[bank] = (m_mmc_vrom_bank[bank] & 0xf0) | (data & 0x0f);
-
+			bank = 2 * (BIT(offset, 12, 3) - 2) + BIT(offset, 1);
+			shift = (offset & 1) << 2;
+			m_mmc_vrom_bank[bank] &= ~(0x0f << shift);
+			m_mmc_vrom_bank[bank] |= (data & 0x0f) << shift;
 			chr1_x(bank, m_mmc_vrom_bank[bank], CHRROM);
 			break;
 
 		case 0x6000:
-			m_irq_count_latch = (m_irq_count_latch & 0xfff0) | (data & 0x0f);
-			break;
 		case 0x6001:
-			m_irq_count_latch = (m_irq_count_latch & 0xff0f) | ((data & 0x0f) << 4);
-			break;
 		case 0x6002:
-			m_irq_count_latch = (m_irq_count_latch & 0xf0ff) | ((data & 0x0f) << 8);
-			break;
 		case 0x6003:
-			m_irq_count_latch = (m_irq_count_latch & 0x0fff) | ((data & 0x0f) << 12);
+			shift = 4 * (offset & 0x03);
+			m_irq_count_latch &= ~(0x000f << shift);
+			m_irq_count_latch |= (data & 0x0f) << shift;
 			break;
+
 		case 0x7000:
 			m_irq_count = m_irq_count_latch;
-			m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x7001:
 			m_irq_enable = data & 0x01;
 			m_irq_mode = data & 0x0e;
-			m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+			set_irq_line(CLEAR_LINE);
 			break;
 
 		case 0x7002:
@@ -553,34 +421,14 @@ WRITE8_MEMBER(nes_ss88006_device::ss88006_write)
 			}
 			break;
 
+		case 0x7003:
+			if (m_samples)
+				if ((data & 0x03) == 0x02)
+					m_samples->start(BIT(data, 2, 5), BIT(data, 2, 5));
+			break;
+
 		default:
 			logerror("Jaleco SS88006 uncaught write, addr: %04x, value: %02x\n", offset + 0x8000, data);
-			break;
-	}
-}
-
-
-// bits2-bits6 are sample number, bit1 is setup/enable/disable
-// program first write sample # + bit1 set to 'init' the sample
-// then it writes sample # + bit1 clear to 'start' the sample
-void nes_ss88006_adpcm_device::ss88006_adpcm_write(address_space &space, offs_t offset, UINT8 data, samples_device *dev)
-{
-	LOG_MMC(("ss88006 write_h, offset: %04x, data: %02x\n", offset, data));
-
-	switch (offset & 0x7003)
-	{
-		case 0x7003:
-			if ((m_latch & 0x7c) == (data & 0x7c))
-			{
-//              printf("sample write: data: %02x\n", data);
-				if ((m_latch & 2) && !(data & 2))
-					dev->start((data >> 2) & 0x1f, (data >> 2) & 0x1f);
-			}
-			m_latch = data;
-			break;
-
-		default:
-			ss88006_write(space, offset, data);
 			break;
 	}
 }
@@ -611,13 +459,13 @@ static const char *const jf13_sample_names[] =
 	"04",   // safe
 	"05",   // foul
 	"06",   // (catcher obtains the ball)
-	"07",   // you're out
+	"07",   // batter out
 	"08",   // play ball
 	"09",   // ball four
 	"10",   // home run
 	"11",   // new pitcher
 	"12",   // ouch (pitcher hits batter)
-	"13",   // ??
+	"13",   // aho (idiot)
 	"14",   // (bat hits the ball)
 	"15",   // (crowd)
 	nullptr
@@ -765,122 +613,84 @@ static const char *const jf33_sample_names[] =
 	nullptr
 };
 
-//-------------------------------------------------
-//  MACHINE_DRIVER
-//-------------------------------------------------
-
-static MACHINE_CONFIG_FRAGMENT( jf13 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(16)
-	MCFG_SAMPLES_NAMES(jf13_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf17 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(20)
-	MCFG_SAMPLES_NAMES(jf17_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf19 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(20)
-	MCFG_SAMPLES_NAMES(jf19_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf23 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(20)
-	MCFG_SAMPLES_NAMES(jf23_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf24 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(6)
-	MCFG_SAMPLES_NAMES(jf24_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf29 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(20)
-	MCFG_SAMPLES_NAMES(jf29_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_FRAGMENT( jf33 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(20)
-	MCFG_SAMPLES_NAMES(jf33_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
 
 //-------------------------------------------------
-//  machine_config_additions
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-machine_config_constructor nes_jf13_device::device_mconfig_additions() const
+void nes_jf13_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf13 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(16);
+	m_samples->set_samples_names(jf13_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf17_adpcm_device::device_mconfig_additions() const
+void nes_jf17_adpcm_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf17 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(20);
+	m_samples->set_samples_names(jf17_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf19_adpcm_device::device_mconfig_additions() const
+void nes_jf19_adpcm_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf19 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(20);
+	m_samples->set_samples_names(jf19_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf23_device::device_mconfig_additions() const
+void nes_jf23_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf23 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(20);
+	m_samples->set_samples_names(jf23_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf24_device::device_mconfig_additions() const
+void nes_jf24_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf24 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(6);
+	m_samples->set_samples_names(jf24_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf29_device::device_mconfig_additions() const
+void nes_jf29_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf29 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(20);
+	m_samples->set_samples_names(jf29_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-machine_config_constructor nes_jf33_device::device_mconfig_additions() const
+void nes_jf33_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( jf33 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(20);
+	m_samples->set_samples_names(jf33_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }

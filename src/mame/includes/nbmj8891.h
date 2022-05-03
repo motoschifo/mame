@@ -1,6 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Takahiro Nogi
-#include "includes/nb1413m3.h"
+
+#include "machine/nb1413m3.h"
+#include "emupal.h"
+#include "screen.h"
 
 class nbmj8891_state : public driver_device
 {
@@ -20,75 +23,105 @@ public:
 	{
 	}
 
+	void mjfocusm(machine_config &config);
+	void mjfocus(machine_config &config);
+	void bananadr(machine_config &config);
+	void scandal(machine_config &config);
+	void hanamomo(machine_config &config);
+	void telmahjn(machine_config &config);
+	void pairsten(machine_config &config);
+	void club90s(machine_config &config);
+	void mgion(machine_config &config);
+	void chinmoku(machine_config &config);
+	void msjiken(machine_config &config);
+	void hnageman(machine_config &config);
+	void mjcamerb(machine_config &config);
+	void mjnanpas(machine_config &config);
+	void mmcamera(machine_config &config);
+	void pairsnb(machine_config &config);
+	void taiwanmb(machine_config &config);
+	void hanaoji(machine_config &config);
+	void lovehous(machine_config &config);
+	void hnxmasev(machine_config &config);
+	void mmaiko(machine_config &config);
+	void maiko(machine_config &config);
+	void mladyhtr(machine_config &config);
+	void omotesnd(machine_config &config);
+	void abunai(machine_config &config);
+	void gionbana(machine_config &config);
+	void mgmen89(machine_config &config);
+	void scandalm(machine_config &config);
+
+	void init_pairsten();
+	void init_telmahjn();
+	void init_gionbana();
+	void init_omotesnd();
+	void init_scandal();
+	void init_mgmen89();
+	void init_mjfocusm();
+	void init_mjfocus();
+	void init_pairsnb();
+	void init_mjnanpas();
+
+	DECLARE_READ_LINE_MEMBER(nb1413m3_outcoin_flag_r);
+
+private:
 	required_device<cpu_device> m_maincpu;
 	required_device<nb1413m3_device> m_nb1413m3;
 	required_device<screen_device> m_screen;
 	required_device<palette_device> m_palette;
-	optional_region_ptr<UINT8> m_clut_ptr;
+	optional_region_ptr<uint8_t> m_clut_ptr;
 
-	int m_scrolly;
-	int m_blitter_destx;
-	int m_blitter_desty;
-	int m_blitter_sizex;
-	int m_blitter_sizey;
-	int m_blitter_src_addr;
-	int m_blitter_direction_x;
-	int m_blitter_direction_y;
-	int m_vram;
-	int m_gfxrom;
-	int m_dispflag;
-	int m_flipscreen;
-	int m_clutsel;
-	int m_screen_refresh;
-	int m_gfxdraw_mode;
+	int m_scrolly = 0;
+	int m_blitter_destx = 0;
+	int m_blitter_desty = 0;
+	int m_blitter_sizex = 0;
+	int m_blitter_sizey = 0;
+	int m_blitter_src_addr = 0;
+	int m_blitter_direction_x = 0;
+	int m_blitter_direction_y = 0;
+	int m_vram = 0;
+	int m_gfxrom = 0;
+	int m_dispflag = 0;
+	int m_flipscreen = 0;
+	int m_clutsel = 0;
+	int m_screen_refresh = 0;
+	int m_gfxdraw_mode = 0;
 	bitmap_ind16 m_tmpbitmap0;
 	bitmap_ind16 m_tmpbitmap1;
-	std::unique_ptr<UINT8[]> m_videoram0;
-	std::unique_ptr<UINT8[]> m_videoram1;
-	std::unique_ptr<UINT8[]> m_palette_ptr;
-	std::unique_ptr<UINT8[]> m_clut;
+	std::unique_ptr<uint8_t[]> m_videoram0;
+	std::unique_ptr<uint8_t[]> m_videoram1;
+	std::unique_ptr<uint8_t[]> m_palette_ptr;
+	std::unique_ptr<uint8_t[]> m_clut;
 	int m_param_old[0x10];
-	int m_param_cnt;
-	int m_flipscreen_old;
-	emu_timer *m_blitter_timer;
+	int m_param_cnt =0;
+	int m_flipscreen_old = 0;
+	emu_timer *m_blitter_timer = nullptr;
 
-	DECLARE_READ8_MEMBER(palette_type1_r);
-	DECLARE_WRITE8_MEMBER(palette_type1_w);
-	DECLARE_READ8_MEMBER(palette_type2_r);
-	DECLARE_WRITE8_MEMBER(palette_type2_w);
-	DECLARE_READ8_MEMBER(palette_type3_r);
-	DECLARE_WRITE8_MEMBER(palette_type3_w);
-	DECLARE_WRITE8_MEMBER(clutsel_w);
-	DECLARE_READ8_MEMBER(clut_r);
-	DECLARE_WRITE8_MEMBER(clut_w);
-	DECLARE_WRITE8_MEMBER(blitter_w);
-	DECLARE_WRITE8_MEMBER(scrolly_w);
-	DECLARE_WRITE8_MEMBER(vramsel_w);
-	DECLARE_WRITE8_MEMBER(romsel_w);
+	uint8_t palette_type1_r(offs_t offset);
+	void palette_type1_w(offs_t offset, uint8_t data);
+	uint8_t palette_type2_r(offs_t offset);
+	void palette_type2_w(offs_t offset, uint8_t data);
+	uint8_t palette_type3_r(offs_t offset);
+	void palette_type3_w(offs_t offset, uint8_t data);
+	void clutsel_w(uint8_t data);
+	uint8_t clut_r(offs_t offset);
+	void clut_w(offs_t offset, uint8_t data);
+	void blitter_w(offs_t offset, uint8_t data);
+	void scrolly_w(uint8_t data);
+	void vramsel_w(uint8_t data);
+	void romsel_w(uint8_t data);
 
-	DECLARE_READ8_MEMBER(taiwanmb_unk_r);
-	DECLARE_WRITE8_MEMBER(taiwanmb_blitter_w);
-	DECLARE_WRITE8_MEMBER(taiwanmb_gfxdraw_w);
-	DECLARE_WRITE8_MEMBER(taiwanmb_gfxflag_w);
-	DECLARE_WRITE8_MEMBER(taiwanmb_mcu_w);
+	uint8_t taiwanmb_unk_r();
+	void taiwanmb_blitter_w(offs_t offset, uint8_t data);
+	void taiwanmb_gfxdraw_w(uint8_t data);
+	void taiwanmb_gfxflag_w(uint8_t data);
+	void taiwanmb_mcu_w(uint8_t data);
 
-	DECLARE_CUSTOM_INPUT_MEMBER(nb1413m3_busyflag_r);
-	DECLARE_CUSTOM_INPUT_MEMBER(nb1413m3_outcoin_flag_r);
-
-	DECLARE_DRIVER_INIT(pairsten);
-	DECLARE_DRIVER_INIT(telmahjn);
-	DECLARE_DRIVER_INIT(gionbana);
-	DECLARE_DRIVER_INIT(omotesnd);
-	DECLARE_DRIVER_INIT(scandal);
-	DECLARE_DRIVER_INIT(mgmen89);
-	DECLARE_DRIVER_INIT(mjfocusm);
-	DECLARE_DRIVER_INIT(mjfocus);
-	DECLARE_DRIVER_INIT(pairsnb);
-	DECLARE_DRIVER_INIT(mjnanpas);
 	virtual void video_start() override;
 	DECLARE_VIDEO_START(_1layer);
 
-	UINT32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 	void vramflip(int vram);
 	void update_pixel0(int x, int y);
 	void update_pixel1(int x, int y);
@@ -97,6 +130,30 @@ public:
 	void common_save_state();
 	void postload();
 
-protected:
-	virtual void device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr) override;
+	void bananadr_io_map(address_map &map);
+	void club90s_map(address_map &map);
+	void gionbana_io_map(address_map &map);
+	void gionbana_map(address_map &map);
+	void hanamomo_io_map(address_map &map);
+	void hanamomo_map(address_map &map);
+	void hanaoji_map(address_map &map);
+	void hnageman_map(address_map &map);
+	void hnxmasev_map(address_map &map);
+	void lovehous_io_map(address_map &map);
+	void lovehous_map(address_map &map);
+	void maiko_io_map(address_map &map);
+	void maiko_map(address_map &map);
+	void mgion_io_map(address_map &map);
+	void mgion_map(address_map &map);
+	void mmaiko_map(address_map &map);
+	void msjiken_io_map(address_map &map);
+	void omotesnd_io_map(address_map &map);
+	void omotesnd_map(address_map &map);
+	void scandal_io_map(address_map &map);
+	void scandalm_io_map(address_map &map);
+	void scandalm_map(address_map &map);
+	void taiwanmb_io_map(address_map &map);
+	void taiwanmb_map(address_map &map);
+
+	virtual void device_timer(emu_timer &timer, device_timer_id id, int param) override;
 };

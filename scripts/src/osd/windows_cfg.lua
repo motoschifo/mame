@@ -3,18 +3,14 @@
 
 defines {
 	"OSD_WINDOWS",
+	"WIN32_LEAN_AND_MEAN",
+	"NOMINMAX",
 }
 
-configuration { "mingw*-gcc or vs*" }
+configuration { "mingw* or vs*" }
 	defines {
 		"UNICODE",
-		"_UNICODE",
-		"main=utf8_main",
-	}
-
-configuration { "Debug" }
-	defines {
-		"MALLOC_DEBUG",
+		"_UNICODE"
 	}
 
 configuration { "vs*" }
@@ -41,11 +37,20 @@ else
 	}
 end
 
-if not _OPTIONS["DONT_USE_NETWORK"] then
+if _OPTIONS["USE_TAPTUN"]=="1" or _OPTIONS["USE_PCAP"]=="1" then
 	defines {
 		"USE_NETWORK",
-		"OSD_NET_USE_PCAP",
 	}
+	if _OPTIONS["USE_TAPTUN"]=="1" then
+		defines {
+			"OSD_NET_USE_TAPTUN",
+		}
+	end
+	if _OPTIONS["USE_PCAP"]=="1" then
+		defines {
+			"OSD_NET_USE_PCAP",
+		}
+	end
 end
 
 if _OPTIONS["USE_SDL"]=="1" then

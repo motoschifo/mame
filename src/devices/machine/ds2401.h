@@ -8,29 +8,32 @@
  *
  */
 
-#ifndef __DS2401_H__
-#define __DS2401_H__
+#ifndef MAME_MACHINE_DS2401_H
+#define MAME_MACHINE_DS2401_H
 
-#define MCFG_DS2401_ADD(_tag) \
-	MCFG_DEVICE_ADD(_tag, DS2401, 0)
-
-#include "emu.h"
+#pragma once
 
 class ds2401_device : public device_t
 {
 public:
 	// construction/destruction
-	ds2401_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	ds2401_device(const machine_config &mconfig, const char *tag, device_t *owner)
+		: ds2401_device(mconfig, tag, owner, uint32_t(0))
+	{
+	}
+
+	ds2401_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	DECLARE_WRITE_LINE_MEMBER( write );
 	DECLARE_READ_LINE_MEMBER( read );
-	UINT8 direct_read(int index);
+	uint8_t direct_read(int index);
 
 protected:
 	enum {
 		SIZE_DATA = 8,
 
-		COMMAND_READROM = 0x33
+		COMMAND_READROM = 0x33,
+		COMMAND_READROM_COMPAT = 0x0f
 	};
 
 	enum {
@@ -50,13 +53,13 @@ protected:
 	// device-level overrides
 	virtual void device_start() override;
 	virtual void device_reset() override;
-	virtual void device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr) override;
+	virtual void device_timer(emu_timer &timer, device_timer_id id, int param) override;
 
 	// internal state
 	int m_state, m_bit, m_shift;
-	UINT8 m_byte;
+	uint8_t m_byte;
 	bool m_rx, m_tx;
-	UINT8 m_data[SIZE_DATA];
+	uint8_t m_data[SIZE_DATA];
 	emu_timer *m_timer_main, *m_timer_reset;
 	attotime t_samp, t_rdv, t_rstl, t_pdh, t_pdl;
 
@@ -66,6 +69,6 @@ private:
 
 
 // device type definition
-extern const device_type DS2401;
+DECLARE_DEVICE_TYPE(DS2401, ds2401_device)
 
-#endif
+#endif // MAME_MACHINE_DS2401_H

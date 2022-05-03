@@ -7,13 +7,15 @@
     Coleco Adam disk image format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_ADAM_DSK_H
+#define MAME_FORMATS_ADAM_DSK_H
 
-#ifndef ADAM_DSK_H_
-#define ADAM_DSK_H_
+#pragma once
 
 #include "wd177x_dsk.h"
 
-class adam_format : public wd177x_format {
+class adam_format : public wd177x_format
+{
 public:
 	adam_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_ADAM_FORMAT;
+extern const adam_format FLOPPY_ADAM_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_ADAM_DSK_H

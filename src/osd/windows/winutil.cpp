@@ -2,12 +2,11 @@
 // copyright-holders:Aaron Giles
 //============================================================
 //
-//  winutil.c - Win32 OSD core utility functions
+//  winutil.cpp - Win32 OSD core utility functions
 //
 //============================================================
 
 // standard windows headers
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <direct.h>
 
@@ -17,61 +16,33 @@
 // MAMEOS headers
 #include "winutil.h"
 #include "strconv.h"
-
-//============================================================
-//  win_error_to_file_error
-//============================================================
-
-file_error win_error_to_file_error(DWORD error)
-{
-	file_error filerr;
-
-	// convert a Windows error to a file_error
-	switch (error)
-	{
-		case ERROR_SUCCESS:
-			filerr = FILERR_NONE;
-			break;
-
-		case ERROR_OUTOFMEMORY:
-			filerr = FILERR_OUT_OF_MEMORY;
-			break;
-
-		case ERROR_FILE_NOT_FOUND:
-		case ERROR_FILENAME_EXCED_RANGE:
-		case ERROR_PATH_NOT_FOUND:
-			filerr = FILERR_NOT_FOUND;
-			break;
-
-		case ERROR_ACCESS_DENIED:
-			filerr = FILERR_ACCESS_DENIED;
-			break;
-
-		case ERROR_SHARING_VIOLATION:
-			filerr = FILERR_ALREADY_OPEN;
-			break;
-
-		default:
-			filerr = FILERR_FAILURE;
-			break;
-	}
-	return filerr;
-}
-
+#include "timeconv.h"
 
 
 //============================================================
 //  win_attributes_to_entry_type
 //============================================================
 
-osd_dir_entry_type win_attributes_to_entry_type(DWORD attributes)
+osd::directory::entry::entry_type win_attributes_to_entry_type(DWORD attributes)
 {
 	if (attributes == 0xFFFFFFFF)
-		return ENTTYPE_NONE;
+		return osd::directory::entry::entry_type::NONE;
 	else if (attributes & FILE_ATTRIBUTE_DIRECTORY)
-		return ENTTYPE_DIR;
+		return osd::directory::entry::entry_type::DIR;
 	else
-		return ENTTYPE_FILE;
+		return osd::directory::entry::entry_type::FILE;
+}
+
+
+
+//============================================================
+//  win_time_point_from_filetime
+//============================================================
+
+std::chrono::system_clock::time_point win_time_point_from_filetime(LPFILETIME file_time)
+{
+	auto converted_file_time = util::ntfs_duration_from_filetime(file_time->dwHighDateTime, file_time->dwLowDateTime);
+	return util::system_clock_time_point_from_ntfs_duration(converted_file_time);
 }
 
 
@@ -80,7 +51,7 @@ osd_dir_entry_type win_attributes_to_entry_type(DWORD attributes)
 //  win_is_gui_application
 //============================================================
 
-BOOL win_is_gui_application(void)
+BOOL win_is_gui_application()
 {
 	static BOOL is_gui_frontend;
 	static BOOL is_first_time = TRUE;
@@ -130,13 +101,21 @@ BOOL win_is_gui_application(void)
 //============================================================
 //  osd_subst_env
 //============================================================
-void osd_subst_env(char **dst, const char *src)
+void osd_subst_env(std::string &dst, const std::string &src)
 {
-	TCHAR buffer[MAX_PATH];
-
-	TCHAR *t_src = tstring_from_utf8(src);
-	ExpandEnvironmentStrings(t_src, buffer, ARRAY_LENGTH(buffer));
-	*dst = utf8_from_tstring(buffer);
+	std::wstring const w_src = osd::text::to_wstring(src);
+	std::vector<wchar_t> buffer(w_src.size() + 2);
+	DWORD length(ExpandEnvironmentStringsW(w_src.c_str(), &buffer[0], buffer.size()));
+	while (length && (buffer.size() < length))
+	{
+		buffer.clear();
+		buffer.resize(length + 1);
+		length = ExpandEnvironmentStringsW(w_src.c_str(), &buffer[0], buffer.size());
+	}
+	if (length)
+		osd::text::from_wstring(dst, &buffer[0]);
+	else
+		dst.clear();
 }
 
 //-------------------------------------------------
@@ -148,68 +127,4 @@ HMODULE WINAPI GetModuleHandleUni()
 	MEMORY_BASIC_INFORMATION mbi;
 	VirtualQuery((LPCVOID)GetModuleHandleUni, &mbi, sizeof(mbi));
 	return (HMODULE)mbi.AllocationBase;
-}
-
-//-----------------------------------------------------------
-//  Lazy loaded function using LoadLibrary / GetProcAddress
-//-----------------------------------------------------------
-
-lazy_loaded_function::lazy_loaded_function(const char * name, const wchar_t* dll_name)
-	: lazy_loaded_function(name, &dll_name, 1)
-{
-}
-
-lazy_loaded_function::lazy_loaded_function(const char * name, const wchar_t** dll_names, int dll_count)
-	: m_name(name), m_module(NULL), m_initialized(false), m_pfn(nullptr)
-{
-	for (int i = 0; i < dll_count; i++)
-		m_dll_names.push_back(std::wstring(dll_names[i]));
-}
-
-lazy_loaded_function::~lazy_loaded_function()
-{
-	if (m_module != nullptr)
-	{
-		FreeLibrary(m_module);
-		m_module = nullptr;
-	}
-}
-
-int lazy_loaded_function::initialize()
-{
-	if (m_module == nullptr)
-	{
-		for (int i = 0; i < m_dll_names.size(); i++)
-		{
-			m_module = LoadLibraryW(m_dll_names[i].c_str());
-			if (m_module != NULL)
-				break;
-		}
-
-		if (m_module == NULL)
-		{
-			osd_printf_verbose("Could not find DLL to dynamically link function %s.\n", m_name.c_str());
-			return ERROR_DLL_NOT_FOUND;
-		}
-	}
-
-	if (m_pfn == nullptr)
-	{
-		m_pfn = GetProcAddress(m_module, m_name.c_str());
-		if (m_pfn == nullptr)
-		{
-			osd_printf_verbose("Could not find function address to dynamically link function %s.\n", m_name.c_str());
-			return ERROR_NOT_FOUND;
-		}
-	}
-
-	m_initialized = true;
-
-	return 0;
-}
-
-void lazy_loaded_function::check_init()
-{
-	if (!m_initialized)
-		fatalerror("Attempt to use function pointer for function %s prior to init!", name());
 }

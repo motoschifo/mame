@@ -7,8 +7,11 @@
  *
  * This is a high level emulation of the PIC used in some of the System 573 security cartridges.
  *
+ * Referred to internally in game code as "NS2K001".
+ *
  */
 
+#include "emu.h"
 #include "machine/zs01.h"
 
 #define VERBOSE_LEVEL ( 0 )
@@ -27,11 +30,13 @@ inline void ATTR_PRINTF( 3, 4 ) zs01_device::verboselog( int n_level, const char
 }
 
 // device type definition
-const device_type ZS01 = &device_creator<zs01_device>;
+DEFINE_DEVICE_TYPE(ZS01, zs01_device, "zs01", "Konami ZS01 PIC")
 
-zs01_device::zs01_device( const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock )
-	: device_t( mconfig, ZS01, "Konami ZS01 PIC", tag, owner, clock, "zs01", __FILE__ ),
+zs01_device::zs01_device( const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock ) :
+	device_t(mconfig, ZS01, tag, owner, clock),
 	device_nvram_interface(mconfig, *this),
+	m_ds2401(*this, finder_base::DUMMY_TAG),
+	m_region(*this, DEVICE_SELF),
 	m_cs( 0 ),
 	m_rst( 0 ),
 	m_scl( 0 ),
@@ -40,17 +45,15 @@ zs01_device::zs01_device( const machine_config &mconfig, const char *tag, device
 	m_state( STATE_STOP ),
 	m_shift( 0 ),
 	m_bit( 0 ),
-	m_byte( 0 )
+	m_byte( 0 ),
+	m_previous_byte( 0 )
 {
 }
 
 void zs01_device::device_start()
 {
-	m_ds2401 = siblingdevice<ds2401_device>(m_ds2401_tag);
-	if( m_ds2401 == nullptr )
-	{
-		logerror( "ds2401 '%s' not found\n", m_ds2401_tag );
-	}
+	if( !m_ds2401 )
+		logerror( "ds2401 '%s' not found\n", m_ds2401.finder_tag() );
 
 	memset( m_write_buffer, 0, sizeof( m_write_buffer ) );
 	memset( m_read_buffer, 0, sizeof( m_read_buffer ) );
@@ -65,6 +68,7 @@ void zs01_device::device_start()
 	save_item( NAME( m_shift ) );
 	save_item( NAME( m_bit ) );
 	save_item( NAME( m_byte ) );
+	save_item( NAME( m_previous_byte ) );
 	save_item( NAME( m_write_buffer ) );
 	save_item( NAME( m_read_buffer ) );
 	save_item( NAME( m_response_key ) );
@@ -72,6 +76,25 @@ void zs01_device::device_start()
 	save_item( NAME( m_command_key ) );
 	save_item( NAME( m_data_key ) );
 	save_item( NAME( m_data ) );
+	save_item( NAME( m_configuration_registers ) );
+}
+
+void zs01_device::device_reset()
+{
+	memset( m_write_buffer, 0, sizeof( m_write_buffer ) );
+	memset( m_read_buffer, 0, sizeof( m_read_buffer ) );
+	memset( m_response_key, 0, sizeof( m_response_key ) );
+
+	m_cs = 0;
+	m_rst = 0;
+	m_scl = 0;
+	m_sdaw = 0;
+	m_sdar = 0;
+	m_state = STATE_STOP;
+	m_shift = 0;
+	m_bit = 0;
+	m_byte = 0;
+	m_previous_byte = 0;
 }
 
 WRITE_LINE_MEMBER( zs01_device::write_rst )
@@ -116,14 +139,14 @@ WRITE_LINE_MEMBER( zs01_device::write_cs )
 	m_cs = state;
 }
 
-void zs01_device::decrypt( UINT8 *destination, UINT8 *source, int length, UINT8 *key, UINT8 previous_byte )
+void zs01_device::decrypt( uint8_t *destination, uint8_t *source, int length, uint8_t *key, uint8_t previous_byte )
 {
-	UINT32 a0;
-	UINT32 v1;
-	UINT32 v0;
-	UINT32 a1;
-	UINT32 t1;
-	UINT32 t0;
+	uint32_t a0;
+	uint32_t v1;
+	uint32_t v0;
+	uint32_t a1;
+	uint32_t t1;
+	uint32_t t0;
 
 	length--;
 	if( length >= 0 )
@@ -163,15 +186,15 @@ void zs01_device::decrypt( UINT8 *destination, UINT8 *source, int length, UINT8 
 	}
 }
 
-void zs01_device::decrypt2( UINT8 *destination, UINT8 *source, int length, UINT8 *key, UINT8 previous_byte )
+void zs01_device::decrypt2( uint8_t *destination, uint8_t *source, int length, uint8_t *key, uint8_t previous_byte )
 {
-	UINT32 a0;
-	UINT32 v1;
-	UINT32 v0;
-	UINT32 a1;
-	UINT32 t2;
-	UINT32 t1;
-	UINT32 t0;
+	uint32_t a0;
+	uint32_t v1;
+	uint32_t v0;
+	uint32_t a1;
+	uint32_t t2;
+	uint32_t t1;
+	uint32_t t0;
 
 	t2 = 0;
 	if( length >= 0 )
@@ -211,13 +234,13 @@ void zs01_device::decrypt2( UINT8 *destination, UINT8 *source, int length, UINT8
 	}
 }
 
-void zs01_device::encrypt( UINT8 *destination, UINT8 *source, int length, UINT8 *key, UINT32 previous_byte )
+void zs01_device::encrypt( uint8_t *destination, uint8_t *source, int length, uint8_t *key, uint32_t previous_byte )
 {
-	UINT32 t0;
-	UINT32 v0;
-	UINT32 v1;
-	UINT32 a0;
-	UINT32 a1;
+	uint32_t t0;
+	uint32_t v0;
+	uint32_t v1;
+	uint32_t a0;
+	uint32_t a1;
 
 	length--;
 	if( length >= 0 )
@@ -259,12 +282,12 @@ void zs01_device::encrypt( UINT8 *destination, UINT8 *source, int length, UINT8 
 	}
 }
 
-UINT16 zs01_device::calc_crc( UINT8 *buffer, UINT32 length )
+uint16_t zs01_device::calc_crc( uint8_t *buffer, uint32_t length )
 {
-	UINT32 v1;
-	UINT32 a3;
-	UINT32 v0;
-	UINT32 a2;
+	uint32_t v1;
+	uint32_t a3;
+	uint32_t v0;
+	uint32_t a2;
 
 	v1 = 0xffff;
 	a3 = 0;
@@ -309,9 +332,7 @@ UINT16 zs01_device::calc_crc( UINT8 *buffer, UINT32 length )
 
 int zs01_device::data_offset()
 {
-	int block = ( ( m_write_buffer[ 0 ] & 2 ) << 7 ) | m_write_buffer[ 1 ];
-
-	return block * SIZE_DATA_BUFFER;
+	return m_write_buffer[ 1 ] * SIZE_DATA_BUFFER;
 }
 
 WRITE_LINE_MEMBER( zs01_device::write_scl )
@@ -357,6 +378,8 @@ WRITE_LINE_MEMBER( zs01_device::write_scl )
 			break;
 
 		case STATE_LOAD_COMMAND:
+			// FIXME: Processing on the rising edge of the clock causes sda to change state while clock is high
+			// which is not allowed. Also need to ensure that only valid device-id's and commands are acknowledged.
 			if( m_scl == 0 && state != 0 )
 			{
 				if( m_bit < 8 )
@@ -386,50 +409,94 @@ WRITE_LINE_MEMBER( zs01_device::write_scl )
 						{
 							decrypt( m_write_buffer, m_write_buffer, sizeof( m_write_buffer ), m_command_key, 0xff );
 
+							// TODO: What is bit 1 of m_write_buffer[0]?
+
+							// Bit 2 seems to be set when the sector is >= 4 and the sector is not 0xfc
 							if( ( m_write_buffer[ 0 ] & 4 ) != 0 )
 							{
-								decrypt2( &m_write_buffer[ 2 ], &m_write_buffer[ 2 ], SIZE_DATA_BUFFER, m_data_key, 0x00 );
+								decrypt2( &m_write_buffer[ 2 ], &m_write_buffer[ 2 ], SIZE_DATA_BUFFER, m_data_key, m_previous_byte );
 							}
 
-							UINT16 crc = calc_crc( m_write_buffer, 10 );
+							uint16_t crc = calc_crc( m_write_buffer, 10 );
+							uint16_t msg_crc = ( ( m_write_buffer[ 10 ] << 8 ) | m_write_buffer[ 11 ] );
 
-							if( crc == ( ( m_write_buffer[ 10 ] << 8 ) | m_write_buffer[ 11 ] ) )
+							verboselog( 1, "-> command: %02x (%s)\n", m_write_buffer[ 0 ], ( m_write_buffer[ 0 ] & 1 ) ? "READ" : "WRITE" );
+							verboselog( 1, "-> address: %04x (%02x)\n", data_offset(), m_write_buffer[ 1 ] );
+							verboselog( 1, "-> data: %02x%02x%02x%02x%02x%02x%02x%02x\n",
+								m_write_buffer[ 2 ], m_write_buffer[ 3 ], m_write_buffer[ 4 ], m_write_buffer[ 5 ],
+								m_write_buffer[ 6 ], m_write_buffer[ 7 ], m_write_buffer[ 8 ], m_write_buffer[ 9 ] );
+							verboselog( 1, "-> crc: %04x vs %04x %s\n", crc, msg_crc, crc == msg_crc ? "" : "(BAD)");
+
+							if( crc == msg_crc )
 							{
-								verboselog( 1, "-> command: %02x\n", m_write_buffer[ 0 ] );
-								verboselog( 1, "-> address: %02x\n", m_write_buffer[ 1 ] );
-								verboselog( 1, "-> data: %02x%02x%02x%02x%02x%02x%02x%02x\n",
-									m_write_buffer[ 2 ], m_write_buffer[ 3 ], m_write_buffer[ 4 ], m_write_buffer[ 5 ],
-									m_write_buffer[ 6 ], m_write_buffer[ 7 ], m_write_buffer[ 8 ], m_write_buffer[ 9 ] );
-								verboselog( 1, "-> crc: %02x%02x\n", m_write_buffer[ 10 ], m_write_buffer[ 11 ] );
+								m_configuration_registers[ CONFIG_RC ] = 0; // Reset password fail counter
 
 								switch( m_write_buffer[ 0 ] & 1 )
 								{
 								case COMMAND_WRITE:
-									memcpy( &m_data[ data_offset() ], &m_write_buffer[ 2 ], SIZE_DATA_BUFFER );
-
-									/* todo: find out what should be returned. */
 									memset( &m_read_buffer[ 0 ], 0, sizeof( m_write_buffer ) );
+									m_read_buffer[ 0 ] = STATUS_OK;
+
+									if ( m_write_buffer[ 1 ] == 0xfd )
+									{
+										// Erase
+										std::fill( std::begin( m_data ), std::end( m_data ), 0 );
+										std::fill( std::begin( m_data_key ), std::end( m_data_key ), 0 );
+									}
+									else if ( m_write_buffer[ 1 ] == 0xfe )
+									{
+										// Configuration register
+										memcpy( m_configuration_registers, &m_write_buffer[ 2 ], SIZE_DATA_BUFFER );
+									}
+									else if ( m_write_buffer[ 1 ] == 0xff )
+									{
+										// Set password
+										memcpy( m_data_key, &m_write_buffer[ 2 ], SIZE_DATA_BUFFER );
+									}
+									else if ( data_offset() < sizeof ( m_data ) )
+									{
+										memcpy( &m_data[ data_offset() ], &m_write_buffer[ 2 ], SIZE_DATA_BUFFER );
+									}
+									else
+									{
+										verboselog( 1, "-> unknown write offset: %04x (%02x)\n", data_offset(), m_write_buffer[ 1 ] );
+									}
+
 									break;
 
 								case COMMAND_READ:
-									/* todo: find out what should be returned. */
-									memset( &m_read_buffer[ 0 ], 0, 2 );
+									m_read_buffer[ 0 ] = STATUS_OK;
 
-									switch( m_write_buffer[ 1 ] )
+									if ( m_write_buffer[ 1 ] == 0xfc )
 									{
-									case 0xfd:
+										// TODO: Unknown serial
+										// The serial is verified by the same algorithm as the one read from 0x7e8 (DS2401 serial), but the serial is different.
+										for (int i = 0; i < SIZE_DATA_BUFFER; i++)
 										{
-											/* TODO: use read/write to talk to the ds2401, which will require a timer. */
-											for( int i = 0; i < SIZE_DATA_BUFFER; i++ )
-											{
-												m_read_buffer[ 2 + i ] = m_ds2401->direct_read( SIZE_DATA_BUFFER - i - 1 );
-											}
+											m_read_buffer[2 + i] = m_ds2401->direct_read(SIZE_DATA_BUFFER - i - 1);
 										}
-										break;
-
-									default:
+									}
+									else if ( m_write_buffer[ 1 ] == 0xfd )
+									{
+										// DS2401 serial
+										/* TODO: use read/write to talk to the ds2401, which will require a timer. */
+										for( int i = 0; i < SIZE_DATA_BUFFER; i++ )
+										{
+											m_read_buffer[ 2 + i ] = m_ds2401->direct_read( SIZE_DATA_BUFFER - i - 1 );
+										}
+									}
+									else if ( m_write_buffer[ 1 ] == 0xfe )
+									{
+										// Configuration register
+										memcpy( &m_read_buffer[ 2 ], m_configuration_registers, SIZE_DATA_BUFFER );
+									}
+									else if ( data_offset() < sizeof ( m_data ) )
+									{
 										memcpy( &m_read_buffer[ 2 ], &m_data[ data_offset() ], SIZE_DATA_BUFFER );
-										break;
+									}
+									else
+									{
+										verboselog( 1, "-> unknown read offset: %04x (%02x)\n", data_offset(), m_write_buffer[ 1 ] );
 									}
 
 									memcpy( m_response_key, &m_write_buffer[ 2 ], sizeof( m_response_key ) );
@@ -439,17 +506,24 @@ WRITE_LINE_MEMBER( zs01_device::write_scl )
 							else
 							{
 								verboselog( 0, "bad crc\n" );
+								m_read_buffer[ 0 ] = STATUS_ERROR;
 
-								/* todo: find out what should be returned. */
-								memset( &m_read_buffer[ 0 ], 0xff, 2 );
+								m_configuration_registers[ CONFIG_RC ]++;
+								if ( m_configuration_registers[ CONFIG_RC ] >= m_configuration_registers[ CONFIG_RR ] )
+								{
+									// Too many bad reads, erase data
+									std::fill( std::begin( m_data ), std::end( m_data ), 0 );
+									std::fill( std::begin( m_data_key ), std::end( m_data_key ), 0 );
+								}
 							}
 
-							verboselog( 1, "<- status: %02x%02x\n",
-								m_read_buffer[ 0 ], m_read_buffer[ 1 ] );
+							verboselog( 1, "<- status: %02x\n", m_read_buffer[ 0 ] );
 
 							verboselog( 1, "<- data: %02x%02x%02x%02x%02x%02x%02x%02x\n",
 								m_read_buffer[ 2 ], m_read_buffer[ 3 ], m_read_buffer[ 4 ], m_read_buffer[ 5 ],
 								m_read_buffer[ 6 ], m_read_buffer[ 7 ], m_read_buffer[ 8 ], m_read_buffer[ 9 ] );
+
+							m_previous_byte = m_read_buffer[ 1 ];
 
 							crc = calc_crc( m_read_buffer, 10 );
 							m_read_buffer[ 10 ] = crc >> 8;
@@ -470,6 +544,8 @@ WRITE_LINE_MEMBER( zs01_device::write_scl )
 			break;
 
 		case STATE_READ_DATA:
+			// FIXME: Processing on the rising edge of the clock causes sda to change state while clock is high
+			// which is not allowed.
 			if( m_scl == 0 && state != 0 )
 			{
 				if( m_bit < 8 )
@@ -574,14 +650,27 @@ READ_LINE_MEMBER( zs01_device::read_sda )
 
 void zs01_device::nvram_default()
 {
-	memset( m_response_to_reset, 0, sizeof( m_response_to_reset ) );
-	memset( m_command_key, 0, sizeof( m_command_key ) );
+	m_response_to_reset[ 0 ] = 0x5a;
+	m_response_to_reset[ 1 ] = 0x53;
+	m_response_to_reset[ 2 ] = 0x00;
+	m_response_to_reset[ 3 ] = 0x01;
+
+	m_command_key[ 0 ] = 0xed;
+	m_command_key[ 1 ] = 0x68;
+	m_command_key[ 2 ] = 0x50;
+	m_command_key[ 3 ] = 0x4b;
+	m_command_key[ 4 ] = 0xc6;
+	m_command_key[ 5 ] = 0x44;
+	m_command_key[ 6 ] = 0x48;
+	m_command_key[ 7 ] = 0x3e;
+
 	memset( m_data_key, 0, sizeof( m_data_key ) );
+	memset( m_configuration_registers, 0, sizeof( m_configuration_registers ) );
 	memset( m_data, 0, sizeof( m_data ) );
 
-	int expected_bytes = sizeof( m_response_to_reset ) + sizeof( m_command_key ) + sizeof( m_data_key ) + sizeof( m_data );
+	int expected_bytes = sizeof( m_response_to_reset ) + sizeof( m_command_key ) + sizeof( m_data_key ) + sizeof( m_configuration_registers ) + sizeof( m_data );
 
-	if( !m_region )
+	if (!m_region.found())
 	{
 		logerror( "zs01(%s) region not found\n", tag() );
 	}
@@ -591,27 +680,34 @@ void zs01_device::nvram_default()
 	}
 	else
 	{
-		UINT8 *region = m_region->base();
+		uint8_t *region = m_region->base();
 
 		memcpy( m_response_to_reset, region, sizeof( m_response_to_reset ) ); region += sizeof( m_response_to_reset );
 		memcpy( m_command_key, region, sizeof( m_command_key ) ); region += sizeof( m_command_key );
 		memcpy( m_data_key, region, sizeof( m_data_key ) ); region += sizeof( m_data_key );
+		memcpy( m_configuration_registers, region, sizeof( m_configuration_registers ) ); region += sizeof( m_configuration_registers );
 		memcpy( m_data, region, sizeof( m_data ) ); region += sizeof( m_data );
 	}
 }
 
-void zs01_device::nvram_read( emu_file &file )
+bool zs01_device::nvram_read( util::read_stream &file )
 {
-	file.read( m_response_to_reset, sizeof( m_response_to_reset ) );
-	file.read( m_command_key, sizeof( m_command_key ) );
-	file.read( m_data_key, sizeof( m_data_key ) );
-	file.read( m_data, sizeof( m_data ) );
+	std::size_t actual;
+	bool result = !file.read( m_response_to_reset, sizeof( m_response_to_reset ), actual ) && actual == sizeof( m_response_to_reset );
+	result = result && !file.read( m_command_key, sizeof( m_command_key ), actual ) && actual == sizeof( m_command_key );
+	result = result && !file.read( m_data_key, sizeof( m_data_key ), actual ) && actual == sizeof( m_data_key );
+	result = result && !file.read( m_configuration_registers, sizeof( m_configuration_registers ), actual ) && actual == sizeof( m_configuration_registers );
+	result = result && !file.read( m_data, sizeof( m_data ), actual ) && actual == sizeof( m_data );
+	return result;
 }
 
-void zs01_device::nvram_write( emu_file &file )
+bool zs01_device::nvram_write( util::write_stream &file )
 {
-	file.write( m_response_to_reset, sizeof( m_response_to_reset ) );
-	file.write( m_command_key, sizeof( m_command_key ) );
-	file.write( m_data_key, sizeof( m_data_key ) );
-	file.write( m_data, sizeof( m_data ) );
+	std::size_t actual;
+	bool result = !file.write( m_response_to_reset, sizeof( m_response_to_reset ), actual ) && actual == sizeof( m_response_to_reset );
+	result = result && !file.write( m_command_key, sizeof( m_command_key ), actual ) && actual == sizeof( m_command_key );
+	result = result && !file.write( m_data_key, sizeof( m_data_key ), actual ) && actual == sizeof( m_data_key );
+	result = result && !file.write( m_configuration_registers, sizeof( m_configuration_registers ), actual ) && actual == sizeof( m_configuration_registers );
+	result = result && !file.write( m_data, sizeof( m_data ), actual ) && actual == sizeof( m_data );
+	return result;
 }

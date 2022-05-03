@@ -2,7 +2,7 @@
 // copyright-holders:Aaron Giles
 /***************************************************************************
 
-    divtlb.c
+    divtlb.cpp
 
     Device generic virtual TLB interface.
 
@@ -10,7 +10,6 @@
 
 #include "emu.h"
 #include "divtlb.h"
-#include "validity.h"
 
 
 
@@ -30,14 +29,15 @@
 //  device_vtlb_interface - constructor
 //-------------------------------------------------
 
-device_vtlb_interface::device_vtlb_interface(const machine_config &mconfig, device_t &device, address_spacenum space)
+device_vtlb_interface::device_vtlb_interface(const machine_config &mconfig, device_t &device, int space)
 	: device_interface(device, "vtlb"),
 		m_space(space),
 		m_dynamic(0),
 		m_fixed(0),
 		m_dynindex(0),
 		m_pageshift(0),
-		m_addrwidth(0)
+		m_addrwidth(0),
+		m_table_base(nullptr)
 {
 }
 
@@ -68,8 +68,8 @@ void device_vtlb_interface::interface_validity_check(validity_checker &valid) co
 		const address_space_config *spaceconfig = intf->space_config(m_space);
 		if (spaceconfig == nullptr)
 			osd_printf_error("No memory address space configuration found for space %d\n", m_space);
-		else if ((1 << spaceconfig->m_page_shift) <= VTLB_FLAGS_MASK || spaceconfig->m_logaddr_width <= spaceconfig->m_page_shift)
-			osd_printf_error("Invalid page shift %d for VTLB\n", spaceconfig->m_page_shift);
+		else if ((1 << spaceconfig->page_shift()) <= VTLB_FLAGS_MASK || spaceconfig->logaddr_width() <= spaceconfig->page_shift())
+			osd_printf_error("Invalid page shift %d for VTLB\n", spaceconfig->page_shift());
 	}
 }
 
@@ -83,16 +83,20 @@ void device_vtlb_interface::interface_pre_start()
 {
 	// fill in CPU information
 	const address_space_config *spaceconfig = device().memory().space_config(m_space);
-	m_pageshift = spaceconfig->m_page_shift;
-	m_addrwidth = spaceconfig->m_logaddr_width;
+	m_pageshift = spaceconfig->page_shift();
+	m_addrwidth = spaceconfig->logaddr_width();
 
 	// allocate the entry array
 	m_live.resize(m_fixed + m_dynamic);
 	memset(&m_live[0], 0, m_live.size()*sizeof(m_live[0]));
 
 	// allocate the lookup table
-	m_table.resize((size_t) 1 << (m_addrwidth - m_pageshift));
-	memset(&m_table[0], 0, m_table.size()*sizeof(m_table[0]));
+	m_table.resize((size_t)1 << (m_addrwidth - m_pageshift));
+	memset(&m_table[0], 0, m_table.size() * sizeof(m_table[0]));
+	m_refcnt.resize((size_t)1 << (m_addrwidth - m_pageshift));
+	memset(&m_refcnt[0], 0, m_refcnt.size() * sizeof(m_refcnt[0]));
+	// pointer to first element for quick access
+	m_table_base = &m_table[0];
 
 	// allocate the fixed page count array
 	if (m_fixed > 0)
@@ -112,6 +116,7 @@ void device_vtlb_interface::interface_post_start()
 {
 	device().save_item(NAME(m_live));
 	device().save_item(NAME(m_table));
+	device().save_item(NAME(m_refcnt));
 	if (m_fixed > 0)
 		device().save_item(NAME(m_fixedpages));
 }
@@ -137,7 +142,7 @@ void device_vtlb_interface::interface_pre_reset()
 //  response to an unmapped access
 //-------------------------------------------------
 
-int device_vtlb_interface::vtlb_fill(offs_t address, int intention)
+bool device_vtlb_interface::vtlb_fill(offs_t address, int intention)
 {
 	offs_t tableindex = address >> m_pageshift;
 	vtlb_entry entry = m_table[tableindex];
@@ -156,7 +161,7 @@ int device_vtlb_interface::vtlb_fill(offs_t address, int intention)
 #if PRINTF_TLB
 		osd_printf_debug("failed: no dynamic entries\n");
 #endif
-		return FALSE;
+		return false;
 	}
 
 	// ask the CPU core to translate for us
@@ -166,17 +171,25 @@ int device_vtlb_interface::vtlb_fill(offs_t address, int intention)
 #if PRINTF_TLB
 		osd_printf_debug("failed: no translation\n");
 #endif
-		return FALSE;
+		return false;
 	}
 
 	// if this is the first successful translation for this address, allocate a new entry
 	if ((entry & VTLB_FLAGS_MASK) == 0)
 	{
-		int liveindex = m_dynindex++ % m_dynamic;
+		int liveindex = m_dynindex;
+
+		m_dynindex = (m_dynindex + 1) % m_dynamic;
 
 		// if an entry already exists at this index, free it
 		if (m_live[liveindex] != 0)
-			m_table[m_live[liveindex] - 1] = 0;
+		{
+			if (m_refcnt[m_live[liveindex] - 1] <= 1)
+				m_table[m_live[liveindex] - 1] = 0;
+			else
+				m_refcnt[m_live[liveindex] - 1]--;
+		}
+
 
 		// claim this new entry
 		m_live[liveindex] = tableindex + 1;
@@ -204,7 +217,7 @@ int device_vtlb_interface::vtlb_fill(offs_t address, int intention)
 	// add the intention to the list of valid intentions and store
 	entry |= 1 << (intention & (TRANSLATE_TYPE_MASK | TRANSLATE_USER_MASK));
 	m_table[tableindex] = entry;
-	return TRUE;
+	return true;
 }
 
 
@@ -228,14 +241,19 @@ void device_vtlb_interface::vtlb_load(int entrynum, int numpages, offs_t address
 	// if an entry already exists at this index, free it
 	if (m_live[liveindex] != 0)
 	{
-		int pagecount = m_fixedpages[entrynum];
 		int oldtableindex = m_live[liveindex] - 1;
-		for (pagenum = 0; pagenum < pagecount; pagenum++)
-			m_table[oldtableindex + pagenum] = 0;
+		m_refcnt[oldtableindex]--;
+		if (m_refcnt[oldtableindex] == 0) {
+			int pagecount = m_fixedpages[entrynum];
+			for (pagenum = 0; pagenum < pagecount; pagenum++) {
+				m_table[oldtableindex + pagenum] = 0;
+			}
+		}
 	}
 
 	// claim this new entry
 	m_live[liveindex] = tableindex + 1;
+	m_refcnt[tableindex]++;
 
 	// store the raw value, making sure the "fixed" flag is set
 	value |= VTLB_FLAG_FIXED;
@@ -248,7 +266,7 @@ void device_vtlb_interface::vtlb_load(int entrynum, int numpages, offs_t address
 //  vtlb_dynload - load a dynamic VTLB entry
 //-------------------------------------------------
 
-void device_vtlb_interface::vtlb_dynload(UINT32 index, offs_t address, vtlb_entry value)
+void device_vtlb_interface::vtlb_dynload(u32 index, offs_t address, vtlb_entry value)
 {
 	vtlb_entry entry = m_table[index];
 
@@ -260,7 +278,10 @@ void device_vtlb_interface::vtlb_dynload(UINT32 index, offs_t address, vtlb_entr
 		return;
 	}
 
-	int liveindex = m_dynindex++ % m_dynamic;
+	int liveindex = m_dynindex;
+
+	m_dynindex = (m_dynindex + 1) % m_dynamic;
+
 	// is entry already live?
 	if (!(entry & VTLB_FLAG_VALID))
 	{
@@ -337,5 +358,5 @@ void device_vtlb_interface::vtlb_flush_address(offs_t address)
 
 const vtlb_entry *device_vtlb_interface::vtlb_table() const
 {
-	return &m_table[0];
+	return m_table_base;
 }

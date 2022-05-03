@@ -1,7 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Fabio Priuli
-#ifndef __NES_AVE_H
-#define __NES_AVE_H
+#ifndef MAME_BUS_NES_AVE_H
+#define MAME_BUS_NES_AVE_H
+
+#pragma once
 
 #include "nxrom.h"
 
@@ -12,13 +14,9 @@ class nes_nina001_device : public nes_nrom_device
 {
 public:
 	// construction/destruction
-	nes_nina001_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_nina001_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	// device-level overrides
-	virtual void device_start() override;
-	virtual DECLARE_WRITE8_MEMBER(write_m) override;
-
-	virtual void pcb_reset() override;
+	virtual void write_m(offs_t offset, uint8_t data) override;
 };
 
 
@@ -28,13 +26,9 @@ class nes_nina006_device : public nes_nrom_device
 {
 public:
 	// construction/destruction
-	nes_nina006_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_nina006_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	// device-level overrides
-	virtual void device_start() override;
-	virtual DECLARE_WRITE8_MEMBER(write_l) override;
-
-	virtual void pcb_reset() override;
+	virtual void write_l(offs_t offset, uint8_t data) override;
 };
 
 
@@ -44,26 +38,25 @@ class nes_maxi15_device : public nes_nrom_device
 {
 public:
 	// construction/destruction
-	nes_maxi15_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_maxi15_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-	// device-level overrides
-	virtual void device_start() override;
-	virtual DECLARE_READ8_MEMBER(read_h) override;
+	virtual u8 read_h(offs_t offset) override;
 
 	virtual void pcb_reset() override;
 
+protected:
+	// device-level overrides
+	virtual void device_start() override;
+
 private:
-	void update_banks();
-	UINT8 m_reg, m_bank;
+	u8 m_reg[2];
 };
 
 
 
-
-
 // device type definition
-extern const device_type NES_NINA001;
-extern const device_type NES_NINA006;
-extern const device_type NES_MAXI15;
+DECLARE_DEVICE_TYPE(NES_NINA001, nes_nina001_device)
+DECLARE_DEVICE_TYPE(NES_NINA006, nes_nina006_device)
+DECLARE_DEVICE_TYPE(NES_MAXI15,  nes_maxi15_device)
 
-#endif
+#endif // MAME_BUS_NES_AVE_H

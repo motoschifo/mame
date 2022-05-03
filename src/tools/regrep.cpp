@@ -6,14 +6,21 @@
 
 ****************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <new>
-#include <assert.h>
-#include "osdcore.h"
+#include "corefile.h"
+#include "corestr.h"
 #include "png.h"
+
+#include "osdcomm.h"
+
+#include <cassert>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <new>
+
+
+using util::string_format;
 
 
 /***************************************************************************
@@ -61,8 +68,8 @@ struct summary_file
 	summary_file *  next;
 	char            name[20];
 	char            source[100];
-	UINT8           status[MAX_COMPARES];
-	UINT8           matchbitmap[MAX_COMPARES];
+	uint8_t           status[MAX_COMPARES];
+	uint8_t           matchbitmap[MAX_COMPARES];
 	std::string     text[MAX_COMPARES];
 };
 
@@ -149,7 +156,7 @@ static summary_file *sort_file_list(void);
 
 /* HTML helpers */
 static util::core_file::ptr create_file_and_output_header(std::string &filename, std::string &templatefile, std::string &title);
-static void output_footer_and_close_file(util::core_file::ptr &&file, std::string &templatefile, std::string &title);
+static void output_footer_and_close_file(util::write_stream::ptr &&file, std::string &templatefile, std::string &title);
 
 /* report generators */
 static void output_report(std::string &dirname, std::string &tempheader, std::string &tempfooter, summary_file *filelist);
@@ -174,12 +181,12 @@ static inline char *trim_string(char *string)
 	int length;
 
 	/* trim leading spaces */
-	while (*string != 0 && isspace((UINT8)*string))
+	while (*string != 0 && isspace((uint8_t)*string))
 		string++;
 
 	/* trim trailing spaces */
 	length = strlen(string);
-	while (length > 0 && isspace((UINT8)string[length - 1]))
+	while (length > 0 && isspace((uint8_t)string[length - 1]))
 		string[--length] = 0;
 
 	return string;
@@ -218,7 +225,7 @@ static inline int get_unique_index(const summary_file *curfile, int index)
 
 int main(int argc, char *argv[])
 {
-	UINT32 bufsize;
+	uint32_t bufsize;
 	void *buffer;
 	int listnum;
 	int result;
@@ -235,10 +242,10 @@ int main(int argc, char *argv[])
 
 	/* read the template file into an astring */
 	std::string tempheader;
-	if (util::core_file::load(tempfilename.c_str(), &buffer, bufsize) == FILERR_NONE)
+	if (!util::core_file::load(tempfilename.c_str(), &buffer, bufsize))
 	{
 		tempheader.assign((const char *)buffer, bufsize);
-		osd_free(buffer);
+		free(buffer);
 	}
 
 	/* verify the template */
@@ -393,7 +400,7 @@ static int read_summary_log(const char *filename, int index)
 			{
 				/* find the end of the line and normalize it with a CR */
 				for (curptr = linestart; *curptr != 0 && *curptr != '\n' && *curptr != '\r'; curptr++)
-					if (!isspace((UINT8)*curptr))
+					if (!isspace((uint8_t)*curptr))
 						foundchars = 1;
 				*curptr++ = '\n';
 				*curptr = 0;
@@ -414,7 +421,7 @@ static int read_summary_log(const char *filename, int index)
 			char *end;
 
 			/* find the end */
-			for (end = start; !isspace((UINT8)*end); end++) ;
+			for (end = start; !isspace((uint8_t)*end); end++) ;
 			*end = 0;
 			strcpy(lists[index].version, start);
 			fprintf(stderr, "Parsing results from version %s\n", lists[index].version);
@@ -565,13 +572,14 @@ static util::core_file::ptr create_file_and_output_header(std::string &filename,
 	util::core_file::ptr file;
 
 	/* create the indexfile */
-	if (util::core_file::open(filename.c_str(), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE | OPEN_FLAG_CREATE_PATHS | OPEN_FLAG_NO_BOM, file) != FILERR_NONE)
+	if (util::core_file::open(filename, OPEN_FLAG_WRITE | OPEN_FLAG_CREATE | OPEN_FLAG_CREATE_PATHS | OPEN_FLAG_NO_BOM, file))
 		return util::core_file::ptr();
 
 	/* print a header */
 	std::string modified(templatefile);
 	strreplace(modified, "<!--TITLE-->", title.c_str());
-	file->write(modified.c_str(), modified.length());
+	std::size_t written;
+	file->write(modified.c_str(), modified.length(), written); // FIXME: check for errors
 
 	/* return the file */
 	return file;
@@ -583,11 +591,12 @@ static util::core_file::ptr create_file_and_output_header(std::string &filename,
     standard footer to an HTML file and close it
 -------------------------------------------------*/
 
-static void output_footer_and_close_file(util::core_file::ptr &&file, std::string &templatefile, std::string &title)
+static void output_footer_and_close_file(util::write_stream::ptr &&file, std::string &templatefile, std::string &title)
 {
 	std::string modified(templatefile);
 	strreplace(modified, "<!--TITLE-->", title.c_str());
-	file->write(modified.c_str(), modified.length());
+	std::size_t written;
+	file->write(modified.c_str(), modified.length(), written); // FIXME: check for errors
 	file.reset();
 }
 
@@ -607,7 +616,6 @@ static void output_report(std::string &dirname, std::string &tempheader, std::st
 	summary_file *buckethead[BUCKET_COUNT], **buckettailptr[BUCKET_COUNT];
 	summary_file *curfile;
 	std::string title("MAME Regressions");
-	std::string tempname;
 	int listnum, bucknum;
 	util::core_file::ptr indexfile;
 	int count = 0, total;
@@ -686,7 +694,7 @@ static void output_report(std::string &dirname, std::string &tempheader, std::st
 		*buckettailptr[bucknum] = nullptr;
 
 	/* output header */
-	tempname = string_format("%s" PATH_SEPARATOR "%s", dirname.c_str(), "index.html");
+	std::string tempname = string_format("%s" PATH_SEPARATOR "%s", dirname.c_str(), "index.html");
 	indexfile = create_file_and_output_header(tempname, tempheader, title);
 	if (!indexfile)
 	{
@@ -695,7 +703,7 @@ static void output_report(std::string &dirname, std::string &tempheader, std::st
 	}
 
 	/* iterate over buckets and output them */
-	for (bucknum = 0; bucknum < ARRAY_LENGTH(bucket_output_order); bucknum++)
+	for (bucknum = 0; bucknum < std::size(bucket_output_order); bucknum++)
 	{
 		int curbucket = bucket_output_order[bucknum];
 
@@ -719,43 +727,43 @@ static void output_report(std::string &dirname, std::string &tempheader, std::st
 static int compare_screenshots(summary_file *curfile)
 {
 	bitmap_argb32 bitmaps[MAX_COMPARES];
-	int unique[MAX_COMPARES];
+	int unique[MAX_COMPARES]{};
 	int numunique = 0;
-	int listnum;
 
 	/* iterate over all files and load their bitmaps */
-	for (listnum = 0; listnum < list_count; listnum++)
+	for (int listnum = 0; listnum < list_count; listnum++)
 		if (curfile->status[listnum] == STATUS_SUCCESS)
 		{
 			std::string fullname;
-			file_error filerr;
+			std::error_condition filerr;
 			util::core_file::ptr file;
 
 			/* get the filename for the image */
 			fullname = string_format("%s" PATH_SEPARATOR "snap" PATH_SEPARATOR "%s" PATH_SEPARATOR "final.png", lists[listnum].dir, curfile->name);
 
 			/* open the file */
-			filerr = util::core_file::open(fullname.c_str(), OPEN_FLAG_READ, file);
+			filerr = util::core_file::open(fullname, OPEN_FLAG_READ, file);
 
 			/* if that failed, look in the old location */
-			if (filerr != FILERR_NONE)
+			if (filerr)
 			{
 				/* get the filename for the image */
 				fullname = string_format("%s" PATH_SEPARATOR "snap" PATH_SEPARATOR "_%s.png", lists[listnum].dir, curfile->name);
 
 				/* open the file */
-				filerr = util::core_file::open(fullname.c_str(), OPEN_FLAG_READ, file);
+				filerr = util::core_file::open(fullname, OPEN_FLAG_READ, file);
 			}
 
 			/* if that worked, load the file */
-			if (filerr == FILERR_NONE)
+			if (!filerr)
 			{
-				png_read_bitmap(*file, bitmaps[listnum]);
+				util::png_read_bitmap(*file, bitmaps[listnum]);
 				file.reset();
 			}
 		}
 
 	/* now find all the different bitmap types */
+	int listnum;
 	for (listnum = 0; listnum < list_count; listnum++)
 	{
 		curfile->matchbitmap[listnum] = 0xff;
@@ -774,8 +782,8 @@ static int compare_screenshots(summary_file *curfile)
 				/* compare scanline by scanline */
 				for (int y = 0; y < this_bitmap.height() && !bitmaps_differ; y++)
 				{
-					UINT32 *base = &base_bitmap.pix32(y);
-					UINT32 *curr = &this_bitmap.pix32(y);
+					uint32_t const *base = &base_bitmap.pix(y);
+					uint32_t const *curr = &this_bitmap.pix(y);
 
 					/* scan the scanline */
 					int x;
@@ -831,14 +839,11 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 	bitmap_argb32 bitmaps[MAX_COMPARES];
 	std::string srcimgname;
 	std::string dstfilename;
-	std::string tempname;
 	bitmap_argb32 finalbitmap;
 	int width, height, maxwidth;
 	int bitmapcount = 0;
-	int listnum, bmnum;
 	util::core_file::ptr file;
-	file_error filerr;
-	png_error pngerr;
+	std::error_condition filerr;
 	int error = -1;
 	int starty;
 
@@ -847,20 +852,20 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 	srcimgname = string_format("snap" PATH_SEPARATOR "%s" PATH_SEPARATOR "final.png", curfile->name);
 
 	/* open and load all unique bitmaps */
-	for (listnum = 0; listnum < list_count; listnum++)
+	for (int listnum = 0; listnum < list_count; listnum++)
 		if (curfile->matchbitmap[listnum] == listnum)
 		{
-			tempname = string_format("%s" PATH_SEPARATOR "%s", lists[listnum].dir, srcimgname.c_str());
+			std::string tempname = string_format("%s" PATH_SEPARATOR "%s", lists[listnum].dir, srcimgname.c_str());
 
 			/* open the source image */
-			filerr = util::core_file::open(tempname.c_str(), OPEN_FLAG_READ, file);
-			if (filerr != FILERR_NONE)
+			filerr = util::core_file::open(tempname, OPEN_FLAG_READ, file);
+			if (filerr)
 				goto error;
 
 			/* load the source image */
-			pngerr = png_read_bitmap(*file, bitmaps[bitmapcount++]);
+			filerr = util::png_read_bitmap(*file, bitmaps[bitmapcount++]);
 			file.reset();
-			if (pngerr != PNGERR_NONE)
+			if (filerr)
 				goto error;
 		}
 
@@ -871,17 +876,17 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 	/* determine the size of the final bitmap */
 	height = width = 0;
 	maxwidth = bitmaps[0].width();
-	for (bmnum = 1; bmnum < bitmapcount; bmnum++)
+	for (int bmnum = 1; bmnum < bitmapcount; bmnum++)
 	{
 		int curwidth;
 
 		/* determine the maximal width */
-		maxwidth = MAX(maxwidth, bitmaps[bmnum].width());
+		maxwidth = std::max(maxwidth, bitmaps[bmnum].width());
 		curwidth = bitmaps[0].width() + BITMAP_SPACE + maxwidth + BITMAP_SPACE + maxwidth;
-		width = MAX(width, curwidth);
+		width = std::max(width, curwidth);
 
 		/* add to the height */
-		height += MAX(bitmaps[0].height(), bitmaps[bmnum].height());
+		height += std::max(bitmaps[0].height(), bitmaps[bmnum].height());
 		if (bmnum != 1)
 			height += BITMAP_SPACE;
 	}
@@ -891,24 +896,23 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 
 	/* now copy and compare each set of bitmaps */
 	starty = 0;
-	for (bmnum = 1; bmnum < bitmapcount; bmnum++)
+	for (int bmnum = 1; bmnum < bitmapcount; bmnum++)
 	{
-		bitmap_argb32 &bitmap1 = bitmaps[0];
-		bitmap_argb32 &bitmap2 = bitmaps[bmnum];
-		int curheight = MAX(bitmap1.height(), bitmap2.height());
-		int x, y;
+		bitmap_argb32 const &bitmap1 = bitmaps[0];
+		bitmap_argb32 const &bitmap2 = bitmaps[bmnum];
+		int curheight = std::max(bitmap1.height(), bitmap2.height());
 
 		/* iterate over rows in these bitmaps */
-		for (y = 0; y < curheight; y++)
+		for (int y = 0; y < curheight; y++)
 		{
-			UINT32 *src1 = (y < bitmap1.height()) ? &bitmap1.pix32(y) : nullptr;
-			UINT32 *src2 = (y < bitmap2.height()) ? &bitmap2.pix32(y) : nullptr;
-			UINT32 *dst1 = &finalbitmap.pix32(starty + y, 0);
-			UINT32 *dst2 = &finalbitmap.pix32(starty + y, bitmap1.width() + BITMAP_SPACE);
-			UINT32 *dstdiff = &finalbitmap.pix32(starty + y, bitmap1.width() + BITMAP_SPACE + maxwidth + BITMAP_SPACE);
+			uint32_t const *src1 = (y < bitmap1.height()) ? &bitmap1.pix(y) : nullptr;
+			uint32_t const *src2 = (y < bitmap2.height()) ? &bitmap2.pix(y) : nullptr;
+			uint32_t *dst1 = &finalbitmap.pix(starty + y, 0);
+			uint32_t *dst2 = &finalbitmap.pix(starty + y, bitmap1.width() + BITMAP_SPACE);
+			uint32_t *dstdiff = &finalbitmap.pix(starty + y, bitmap1.width() + BITMAP_SPACE + maxwidth + BITMAP_SPACE);
 
 			/* now iterate over columns */
-			for (x = 0; x < maxwidth; x++)
+			for (int x = 0; x < maxwidth; x++)
 			{
 				int pix1 = -1, pix2 = -2;
 
@@ -921,16 +925,16 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 		}
 
 		/* update the starting Y position */
-		starty += BITMAP_SPACE + MAX(bitmap1.height(), bitmap2.height());
+		starty += BITMAP_SPACE + std::max(bitmap1.height(), bitmap2.height());
 	}
 
 	/* write the final PNG */
-	filerr = util::core_file::open(dstfilename.c_str(), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, file);
-	if (filerr != FILERR_NONE)
+	filerr = util::core_file::open(dstfilename, OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, file);
+	if (filerr)
 		goto error;
-	pngerr = png_write_bitmap(*file, nullptr, finalbitmap, 0, nullptr);
+	filerr = util::png_write_bitmap(*file, nullptr, finalbitmap, 0, nullptr);
 	file.reset();
-	if (pngerr != PNGERR_NONE)
+	if (filerr)
 		goto error;
 
 	/* if we get here, we are error free */
@@ -938,7 +942,7 @@ static int generate_png_diff(const summary_file *curfile, std::string &destdir, 
 
 error:
 	if (error)
-		osd_rmfile(dstfilename.c_str());
+		osd_file::remove(dstfilename);
 	return error;
 }
 

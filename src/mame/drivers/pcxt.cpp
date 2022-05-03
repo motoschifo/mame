@@ -15,9 +15,10 @@ Notes:
 
 TODO:
 - 02851: tetriskr: Corrupt game graphics after some time of gameplay, caused by a wrong
-  reading of the i/o $3c8 bit 1.
+  reading of the i/o $3c8 bit 1. (seems fixed?)
+- tetriskr can store inputs read during the timer irq.  If ds is 0x40 when the irq is taken
+  it will corrupt the BIOS data area which can lead to corrupt graphics
 - Add a proper FDC device.
-- Filetto: Add UM5100 sound chip, might be connected to the prototyping card;
 - buzzer sound has issues in both games
 
 ********************************************************************************************
@@ -35,6 +36,8 @@ PCB Contents:
 1x UMC 8928LP-UM8272A floppy disk controller (lower board)
 1x UMC 8935CS-UM82C11 Printer Adapter Interface (lower board)
 1x UMC 8936CS-UM8250B Programmable asynchronous communications element (lower board)
+1x UMC 8937NS-UM82C8167 Real Time Clock (lower board)
+1x Yamaha V6363 CMDC QFP (lower board)
 There isn't any keyboard found connected to the pcb.
 ********************************************************************************************
 Filetto SW notes:
@@ -57,6 +60,7 @@ the main program is 9th October 1990.
 ******************************************************************************************/
 
 #include "emu.h"
+#include "bus/isa/cga.h"
 #include "cpu/i86/i86.h"
 #include "sound/hc55516.h"
 #include "machine/bankdev.h"
@@ -69,29 +73,50 @@ public:
 		: driver_device(mconfig, type, tag),
 		m_maincpu(*this, "maincpu"),
 		m_mb(*this, "mb"),
-		m_bank(*this, "bank"){ }
+		m_bank(*this, "bank"),
+		m_cvsd(*this, "voice"),
+		m_samples(*this, "samples"){ }
 
-	int m_lastvalue;
-	UINT8 m_disk_data[2];
-	UINT8 m_port_b_data;
-	UINT8 m_status;
-	UINT8 m_clr_status;
+	void tetriskr(machine_config &config);
+	void filetto(machine_config &config);
 
-	DECLARE_READ8_MEMBER(disk_iobank_r);
-	DECLARE_WRITE8_MEMBER(disk_iobank_w);
-	DECLARE_READ8_MEMBER(fdc765_status_r);
-	DECLARE_READ8_MEMBER(fdc765_data_r);
-	DECLARE_WRITE8_MEMBER(fdc765_data_w);
-	DECLARE_WRITE8_MEMBER(fdc_dor_w);
-	DECLARE_READ8_MEMBER(port_a_r);
-	DECLARE_READ8_MEMBER(port_b_r);
-	DECLARE_READ8_MEMBER(port_c_r);
-	DECLARE_WRITE8_MEMBER(port_b_w);
-
+protected:
+	virtual void machine_start() override;
 	virtual void machine_reset() override;
+	virtual void device_timer(emu_timer &timer, device_timer_id id, int param) override;
+
+private:
+	int m_lastvalue;
+	uint8_t m_disk_data[2];
+	uint8_t m_port_b_data;
+	uint8_t m_status;
+	uint8_t m_clr_status;
+	uint8_t m_voice, m_bit;
+	uint32_t m_vaddr;
+	emu_timer *m_sample;
+
+	uint8_t disk_iobank_r(offs_t offset);
+	void disk_iobank_w(offs_t offset, uint8_t data);
+	uint8_t fdc765_status_r();
+	uint8_t fdc765_data_r();
+	void fdc765_data_w(uint8_t data);
+	void fdc_dor_w(uint8_t data);
+	uint8_t port_a_r();
+	uint8_t port_b_r();
+	uint8_t port_c_r();
+	void port_b_w(uint8_t data);
+	void voice_start_w(uint8_t data);
+
 	required_device<cpu_device> m_maincpu;
 	required_device<pc_noppi_mb_device> m_mb;
 	optional_device<address_map_bank_device> m_bank;
+	optional_device<hc55516_device> m_cvsd;
+	optional_memory_region m_samples;
+	void bank_map(address_map &map);
+	void filetto_io(address_map &map);
+	void filetto_map(address_map &map);
+	void tetriskr_io(address_map &map);
+	void tetriskr_map(address_map &map);
 };
 
 
@@ -99,19 +124,19 @@ class isa8_cga_filetto_device : public isa8_cga_device
 {
 public:
 	// construction/destruction
-	isa8_cga_filetto_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	isa8_cga_filetto_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	virtual const rom_entry *device_rom_region() const override;
+	virtual const tiny_rom_entry *device_rom_region() const override;
 };
 
-const device_type ISA8_CGA_FILETTO = &device_creator<isa8_cga_filetto_device>;
+DEFINE_DEVICE_TYPE(ISA8_CGA_FILETTO, isa8_cga_filetto_device, "filetto_cga", "ISA8_CGA_FILETTO")
 
 //-------------------------------------------------
 //  isa8_cga_filetto_device - constructor
 //-------------------------------------------------
 
-isa8_cga_filetto_device::isa8_cga_filetto_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-		isa8_cga_device( mconfig, ISA8_CGA_FILETTO, "ISA8_CGA_FILETTO", tag, owner, clock, "filetto_cga", __FILE__)
+isa8_cga_filetto_device::isa8_cga_filetto_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	isa8_cga_device(mconfig, ISA8_CGA_FILETTO, tag, owner, clock)
 {
 }
 
@@ -120,7 +145,7 @@ ROM_START( filetto_cga )
 	ROM_LOAD("u67.bin", 0x0000, 0x2000, CRC(09710122) SHA1(de84bdd9245df287bbd3bb808f0c3531d13a3545) )
 ROM_END
 
-const rom_entry *isa8_cga_filetto_device::device_rom_region() const
+const tiny_rom_entry *isa8_cga_filetto_device::device_rom_region() const
 {
 	return ROM_NAME( filetto_cga );
 }
@@ -131,28 +156,30 @@ class isa8_cga_tetriskr_device : public isa8_cga_superimpose_device
 {
 public:
 	// construction/destruction
-	isa8_cga_tetriskr_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	isa8_cga_tetriskr_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	virtual UINT32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect) override;
+	virtual uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect) override;
 	virtual void device_start() override;
-	virtual const rom_entry *device_rom_region() const override;
+	virtual const tiny_rom_entry *device_rom_region() const override;
 
-	DECLARE_READ8_MEMBER(bg_bank_r);
-	DECLARE_WRITE8_MEMBER(bg_bank_w);
+	uint8_t bg_bank_r();
+	void bg_bank_w(uint8_t data);
 private:
-	UINT8 m_bg_bank;
+	required_region_ptr<uint8_t> m_bg;
+	uint8_t m_bg_bank = 0;
 };
 
 
 /* for superimposing CGA over a different source video (i.e. tetriskr) */
-const device_type ISA8_CGA_TETRISKR = &device_creator<isa8_cga_tetriskr_device>;
+DEFINE_DEVICE_TYPE(ISA8_CGA_TETRISKR, isa8_cga_tetriskr_device, "tetriskr_cga", "ISA8_CGA_TETRISKR")
 
 //-------------------------------------------------
 //  isa8_cga_tetriskr_device - constructor
 //-------------------------------------------------
 
-isa8_cga_tetriskr_device::isa8_cga_tetriskr_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-		isa8_cga_superimpose_device( mconfig, ISA8_CGA_TETRISKR, "ISA8_CGA_TETRISKR", tag, owner, clock, "tetriskr_cga", __FILE__)
+isa8_cga_tetriskr_device::isa8_cga_tetriskr_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	isa8_cga_superimpose_device(mconfig, ISA8_CGA_TETRISKR, tag, owner, clock),
+	m_bg(*this, "gfx2")
 {
 }
 
@@ -161,50 +188,40 @@ void isa8_cga_tetriskr_device::device_start()
 {
 	m_bg_bank = 0;
 	isa8_cga_superimpose_device::device_start();
-	m_isa->install_device(0x3c0, 0x3c0, 0, 0,  read8_delegate( FUNC(isa8_cga_tetriskr_device::bg_bank_r), this ), write8_delegate( FUNC(isa8_cga_tetriskr_device::bg_bank_w), this ) );
+	m_isa->install_device(0x3c0, 0x3c0, read8smo_delegate(*this, FUNC(isa8_cga_tetriskr_device::bg_bank_r)), write8smo_delegate(*this, FUNC(isa8_cga_tetriskr_device::bg_bank_w)));
 }
 
-WRITE8_MEMBER(isa8_cga_tetriskr_device::bg_bank_w)
+void isa8_cga_tetriskr_device::bg_bank_w(uint8_t data)
 {
 	m_bg_bank = (data & 0x0f) ^ 8;
 }
 
-READ8_MEMBER(isa8_cga_tetriskr_device::bg_bank_r)
+uint8_t isa8_cga_tetriskr_device::bg_bank_r()
 {
 	return 0xff;
 }
 
 
-UINT32 isa8_cga_tetriskr_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
+uint32_t isa8_cga_tetriskr_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	int x,y;
-	int yi;
-	const UINT8 *bg_rom = memregion("gfx2")->base();
-
 	//popmessage("%04x",m_start_offs);
 
-	bitmap.fill(rgb_t::black, cliprect);
+	bitmap.fill(rgb_t::black(), cliprect);
 
-	for(y=0;y<200/8;y++)
+	for(int y=cliprect.min_y;y<=cliprect.max_y;y++)
 	{
-		for(yi=0;yi<8;yi++)
+		int yi = y % 8;
+		int yj = y / 8;
+		for(int x=cliprect.min_x;x<=cliprect.max_x;x++)
 		{
-			for(x=0;x<320/8;x++)
-			{
-				UINT8 color;
-				int xi,pen_i;
+			int xi = x % 8;
+			int xj = x / 8;
+			uint8_t color = 0;
+			/* TODO: first byte seems bogus? */
+			for(int pen_i = 0;pen_i<4;pen_i++)
+				color |= ((m_bg[yj*320/8+xj+(pen_i*0x20000)+yi*0x400+m_bg_bank*0x2000+1] >> (7-xi)) & 1) << pen_i;
 
-				for(xi=0;xi<8;xi++)
-				{
-					color = 0;
-					/* TODO: first byte seems bogus? */
-					for(pen_i = 0;pen_i<4;pen_i++)
-						color |= ((bg_rom[y*320/8+x+(pen_i*0x20000)+yi*0x400+m_bg_bank*0x2000+1] >> (7-xi)) & 1) << pen_i;
-
-					if(cliprect.contains(x*8+xi, y*8+yi))
-						bitmap.pix32(y*8+yi, x*8+xi) = m_palette->pen(color);
-				}
-			}
+			bitmap.pix(y, x) = m_palette->pen(color);
 		}
 	}
 
@@ -228,21 +245,21 @@ ROM_START( tetriskr_cga )
 	ROM_LOAD( "b-9.u43", 0x70000, 0x10000, CRC(4ea22349) SHA1(14dfd3dbd51f8bd6f3290293b8ea1c165e8cf7fd))
 ROM_END
 
-const rom_entry *isa8_cga_tetriskr_device::device_rom_region() const
+const tiny_rom_entry *isa8_cga_tetriskr_device::device_rom_region() const
 {
 	return ROM_NAME( tetriskr_cga );
 }
 
-READ8_MEMBER(pcxt_state::disk_iobank_r)
+uint8_t pcxt_state::disk_iobank_r(offs_t offset)
 {
-	//printf("Read Prototyping card [%02x] @ PC=%05x\n",offset,space.device().safe_pc());
+	//printf("Read Prototyping card [%02x] @ PC=%05x\n",offset,m_maincpu->pc());
 	//if(offset == 0) return ioport("DSW")->read();
 	if(offset == 1) return ioport("IN1")->read();
 
 	return m_disk_data[offset];
 }
 
-WRITE8_MEMBER(pcxt_state::disk_iobank_w)
+void pcxt_state::disk_iobank_w(offs_t offset, uint8_t data)
 {
 /*
     BIOS does a single out $0310,$F0 on reset
@@ -284,6 +301,13 @@ WRITE8_MEMBER(pcxt_state::disk_iobank_w)
 			bank = 3;
 	}
 
+	if (!(data & 0xf0))
+	{
+		int bit = (data >> 1) - 2;
+		m_voice &= ~(1 << bit);
+		m_voice |= BIT(data, 0) << bit;
+	}
+
 	m_bank->set_bank(bank);
 
 	m_lastvalue = data;
@@ -291,17 +315,17 @@ WRITE8_MEMBER(pcxt_state::disk_iobank_w)
 	m_disk_data[offset] = data;
 }
 
-READ8_MEMBER(pcxt_state::port_a_r)
+uint8_t pcxt_state::port_a_r()
 {
 	return 0xaa;//harmless keyboard error occurs without this
 }
 
-READ8_MEMBER(pcxt_state::port_b_r)
+uint8_t pcxt_state::port_b_r()
 {
 	return m_port_b_data;
 }
 
-READ8_MEMBER(pcxt_state::port_c_r)
+uint8_t pcxt_state::port_c_r()
 {
 	return 0x00;// DIPS?
 }
@@ -309,13 +333,12 @@ READ8_MEMBER(pcxt_state::port_c_r)
 /*'buzzer' sound routes here*/
 /* Filetto uses this for either beep and um5100 sound routing,probably there's a mux somewhere.*/
 /* The Korean Tetris uses it as a regular buzzer,probably the sound is all in there...*/
-WRITE8_MEMBER(pcxt_state::port_b_w)
+void pcxt_state::port_b_w(uint8_t data)
 {
 	m_mb->m_pit8253->write_gate2(BIT(data, 0));
 	m_mb->pc_speaker_set_spkrdata(BIT(data, 1));
 	m_port_b_data = data;
-// device_t *cvsd = machine().device("cvsd");
-//  hc55516_digit_w(cvsd, data);
+//  m_cvsd->digit_w(data);
 }
 
 /*Floppy Disk Controller 765 device*/
@@ -325,9 +348,9 @@ WRITE8_MEMBER(pcxt_state::port_b_w)
 #define FDC_WRITE 0x40
 #define FDC_READ 0x00 /*~0x40*/
 
-READ8_MEMBER(pcxt_state::fdc765_status_r)
+uint8_t pcxt_state::fdc765_status_r()
 {
-	UINT8 tmp;
+	uint8_t tmp;
 	tmp = m_status | 0x80;
 	m_clr_status++;
 	if(m_clr_status == 0x10)
@@ -338,58 +361,76 @@ READ8_MEMBER(pcxt_state::fdc765_status_r)
 	return tmp;
 }
 
-READ8_MEMBER(pcxt_state::fdc765_data_r)
+uint8_t pcxt_state::fdc765_data_r()
 {
 	m_status = (FDC_READ);
 	m_mb->m_pic8259->ir6_w(0);
 	return 0xc0;
 }
 
-WRITE8_MEMBER(pcxt_state::fdc765_data_w)
+void pcxt_state::fdc765_data_w(uint8_t data)
 {
 	m_status = (FDC_WRITE);
 }
 
 
-WRITE8_MEMBER(pcxt_state::fdc_dor_w)
+void pcxt_state::fdc_dor_w(uint8_t data)
 {
 	m_mb->m_pic8259->ir6_w(1);
 }
 
-static ADDRESS_MAP_START( filetto_map, AS_PROGRAM, 8, pcxt_state )
-	AM_RANGE(0xc0000, 0xcffff) AM_DEVICE("bank", address_map_bank_device, amap8)
-	AM_RANGE(0xf0000, 0xfffff) AM_ROM AM_REGION("bios", 0)
-ADDRESS_MAP_END
+// TODO: um5100 device; the actual codec may be sightly different
+void pcxt_state::voice_start_w(uint8_t data)
+{
+	m_sample->adjust(attotime::zero, 0, attotime::from_hz(28000));
+	m_bit = 7;
+	m_vaddr = ((m_voice & 0xf / 5) | (BIT(m_voice, 4) << 2)) * 0x8000;
+	logerror("%x %x\n",m_voice,m_vaddr);
+}
 
-static ADDRESS_MAP_START( filetto_io, AS_IO, 8, pcxt_state )
-	ADDRESS_MAP_GLOBAL_MASK(0x3ff)
-	AM_RANGE(0x0060, 0x0060) AM_READ(port_a_r)  //not a real 8255
-	AM_RANGE(0x0061, 0x0061) AM_READWRITE(port_b_r, port_b_w)
-	AM_RANGE(0x0062, 0x0062) AM_READ(port_c_r)
-	AM_RANGE(0x0000, 0x00ff) AM_DEVICE("mb", pc_noppi_mb_device, map)
-	AM_RANGE(0x0201, 0x0201) AM_READ_PORT("COIN") //game port
-	AM_RANGE(0x0310, 0x0311) AM_READWRITE(disk_iobank_r,disk_iobank_w) //Prototyping card
-	AM_RANGE(0x0312, 0x0312) AM_READ_PORT("IN0") //Prototyping card,read only
-	AM_RANGE(0x03f2, 0x03f2) AM_WRITE(fdc_dor_w)
-	AM_RANGE(0x03f4, 0x03f4) AM_READ(fdc765_status_r) //765 Floppy Disk Controller (FDC) Status
-	AM_RANGE(0x03f5, 0x03f5) AM_READWRITE(fdc765_data_r,fdc765_data_w)//FDC Data
-ADDRESS_MAP_END
+void pcxt_state::filetto_map(address_map &map)
+{
+	map(0xc0000, 0xcffff).m(m_bank, FUNC(address_map_bank_device::amap8));
+	map(0xf0000, 0xfffff).rom().region("bios", 0);
+}
 
-static ADDRESS_MAP_START( tetriskr_map, AS_PROGRAM, 8, pcxt_state )
-	AM_RANGE(0xf0000, 0xfffff) AM_ROM AM_REGION("bios", 0)
-ADDRESS_MAP_END
+void pcxt_state::filetto_io(address_map &map)
+{
+	map.global_mask(0x3ff);
+	map(0x0000, 0x00ff).m(m_mb, FUNC(pc_noppi_mb_device::map));
+	map(0x0060, 0x0060).r(FUNC(pcxt_state::port_a_r));  //not a real 8255
+	map(0x0061, 0x0061).rw(FUNC(pcxt_state::port_b_r), FUNC(pcxt_state::port_b_w));
+	map(0x0062, 0x0062).r(FUNC(pcxt_state::port_c_r));
+	map(0x0201, 0x0201).portr("COIN"); //game port
+	map(0x0310, 0x0311).rw(FUNC(pcxt_state::disk_iobank_r), FUNC(pcxt_state::disk_iobank_w)); //Prototyping card
+	map(0x0312, 0x0312).portr("IN0"); //Prototyping card,read only
+	map(0x0313, 0x0313).w(FUNC(pcxt_state::voice_start_w));
+	map(0x03f2, 0x03f2).w(FUNC(pcxt_state::fdc_dor_w));
+	map(0x03f4, 0x03f4).r(FUNC(pcxt_state::fdc765_status_r)); //765 Floppy Disk Controller (FDC) Status
+	map(0x03f5, 0x03f5).rw(FUNC(pcxt_state::fdc765_data_r), FUNC(pcxt_state::fdc765_data_w));//FDC Data
+}
 
-static ADDRESS_MAP_START( tetriskr_io, AS_IO, 8, pcxt_state )
-	ADDRESS_MAP_GLOBAL_MASK(0x3ff)
-	AM_RANGE(0x0000, 0x00ff) AM_DEVICE("mb", pc_noppi_mb_device, map)
-	AM_RANGE(0x03c8, 0x03c8) AM_READ_PORT("IN0")
-	AM_RANGE(0x03c9, 0x03c9) AM_READ_PORT("IN1")
-//  AM_RANGE(0x03ce, 0x03ce) AM_READ_PORT("IN1") //read then discarded?
-ADDRESS_MAP_END
+void pcxt_state::tetriskr_map(address_map &map)
+{
+	map(0xf0000, 0xfffff).rom().region("bios", 0);
+}
 
-static ADDRESS_MAP_START( bank_map, AS_0, 8, pcxt_state )
-	AM_RANGE(0x00000, 0x3ffff) AM_ROM AM_REGION("game_prg", 0)
-ADDRESS_MAP_END
+void pcxt_state::tetriskr_io(address_map &map)
+{
+	map.global_mask(0x3ff);
+	map(0x0000, 0x00ff).m(m_mb, FUNC(pc_noppi_mb_device::map));
+	map(0x0060, 0x0060).r(FUNC(pcxt_state::port_a_r));  //not a real 8255
+	map(0x0061, 0x0061).rw(FUNC(pcxt_state::port_b_r), FUNC(pcxt_state::port_b_w));
+	map(0x0062, 0x0062).r(FUNC(pcxt_state::port_c_r));
+	map(0x03c8, 0x03c8).portr("IN0");
+	map(0x03c9, 0x03c9).portr("IN1");
+//  map(0x03ce, 0x03ce).portr("IN1"); //read then discarded?
+}
+
+void pcxt_state::bank_map(address_map &map)
+{
+	map(0x00000, 0x3ffff).rom().region("game_prg", 0);
+}
 
 static INPUT_PORTS_START( filetto )
 	PORT_START("IN0")
@@ -468,49 +509,77 @@ static INPUT_PORTS_START( tetriskr )
 	PORT_BIT( 0xff, IP_ACTIVE_HIGH, IPT_UNUSED )
 INPUT_PORTS_END
 
+void pcxt_state::device_timer(emu_timer &timer, device_timer_id id, int param)
+{
+	m_cvsd->digit_w(BIT(m_samples->as_u8(m_vaddr), m_bit));
+	m_cvsd->clock_w(1);
+	m_cvsd->clock_w(0);
+	if (m_bit == 0)
+	{
+		m_vaddr++;
+		m_bit = 8;
+		if (!(m_vaddr % 0x8000))
+			m_sample->adjust(attotime::never);
+	}
+	m_bit--;
+}
+
+void pcxt_state::machine_start()
+{
+	m_sample = timer_alloc();
+
+	m_status = 0;
+	m_clr_status = 0;
+}
+
 void pcxt_state::machine_reset()
 {
 	m_lastvalue = -1;
+	m_voice = 0;
 }
 
-static SLOT_INTERFACE_START( filetto_isa8_cards )
-	SLOT_INTERFACE_INTERNAL("filetto",  ISA8_CGA_FILETTO)
-	SLOT_INTERFACE_INTERNAL("tetriskr", ISA8_CGA_TETRISKR)
-SLOT_INTERFACE_END
+static void filetto_isa8_cards(device_slot_interface &device)
+{
+	device.option_add_internal("filetto",  ISA8_CGA_FILETTO);
+	device.option_add_internal("tetriskr", ISA8_CGA_TETRISKR);
+}
 
 
-static MACHINE_CONFIG_START( filetto, pcxt_state )
-	MCFG_CPU_ADD("maincpu", I8088, XTAL_14_31818MHz/3)
-	MCFG_CPU_PROGRAM_MAP(filetto_map)
-	MCFG_CPU_IO_MAP(filetto_io)
-	MCFG_CPU_IRQ_ACKNOWLEDGE_DEVICE("mb:pic8259", pic8259_device, inta_cb)
-	MCFG_PCNOPPI_MOTHERBOARD_ADD("mb","maincpu")
-	MCFG_ISA8_SLOT_ADD("mb:isa", "isa1", filetto_isa8_cards, "filetto", true)
+void pcxt_state::filetto(machine_config &config)
+{
+	I8088(config, m_maincpu, XTAL(14'318'181)/3);
+	m_maincpu->set_addrmap(AS_PROGRAM, &pcxt_state::filetto_map);
+	m_maincpu->set_addrmap(AS_IO, &pcxt_state::filetto_io);
+	m_maincpu->set_irq_acknowledge_callback("mb:pic8259", FUNC(pic8259_device::inta_cb));
 
-	MCFG_SOUND_ADD("voice", HC55516, 8000000/4)//8923S-UM5100 is a HC55536 with ROM hook-up
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mb:mono", 0.60)
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("640K")
+	PCNOPPI_MOTHERBOARD(config, m_mb, 0).set_cputag(m_maincpu);
+	m_mb->int_callback().set_inputline(m_maincpu, 0);
+	m_mb->nmi_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
-	MCFG_DEVICE_ADD("bank", ADDRESS_MAP_BANK, 0)
-	MCFG_DEVICE_PROGRAM_MAP(bank_map)
-	MCFG_ADDRESS_MAP_BANK_ENDIANNESS(ENDIANNESS_LITTLE)
-	MCFG_ADDRESS_MAP_BANK_DATABUS_WIDTH(8)
-	MCFG_ADDRESS_MAP_BANK_ADDRBUS_WIDTH(18)
-	MCFG_ADDRESS_MAP_BANK_STRIDE(0x10000)
-MACHINE_CONFIG_END
+	ISA8_SLOT(config, "isa1", 0, "mb:isa", filetto_isa8_cards, "filetto", true); // FIXME: determine ISA bus clock
 
-static MACHINE_CONFIG_START( tetriskr, pcxt_state )
-	MCFG_CPU_ADD("maincpu", I8088, XTAL_14_31818MHz/3)
-	MCFG_CPU_PROGRAM_MAP(tetriskr_map)
-	MCFG_CPU_IO_MAP(tetriskr_io)
-	MCFG_CPU_IRQ_ACKNOWLEDGE_DEVICE("mb:pic8259", pic8259_device, inta_cb)
-	MCFG_PCNOPPI_MOTHERBOARD_ADD("mb","maincpu")
+	HC55516(config, m_cvsd, 0).add_route(ALL_OUTPUTS, "mb:mono", 0.60); //8923S-UM5100 is a HC55536 with ROM hook-up
 
-	MCFG_ISA8_SLOT_ADD("mb:isa", "isa1", filetto_isa8_cards, "tetriskr", true)
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("640K")
-MACHINE_CONFIG_END
+	RAM(config, RAM_TAG).set_default_size("640K");
+
+	ADDRESS_MAP_BANK(config, m_bank).set_map(&pcxt_state::bank_map).set_options(ENDIANNESS_LITTLE, 8, 18, 0x10000);
+}
+
+void pcxt_state::tetriskr(machine_config &config)
+{
+	I8088(config, m_maincpu, XTAL(14'318'181)/3);
+	m_maincpu->set_addrmap(AS_PROGRAM, &pcxt_state::tetriskr_map);
+	m_maincpu->set_addrmap(AS_IO, &pcxt_state::tetriskr_io);
+	m_maincpu->set_irq_acknowledge_callback("mb:pic8259", FUNC(pic8259_device::inta_cb));
+
+	PCNOPPI_MOTHERBOARD(config, m_mb, 0).set_cputag(m_maincpu);
+	m_mb->int_callback().set_inputline(m_maincpu, 0);
+	m_mb->nmi_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+
+	ISA8_SLOT(config, "isa1", 0, "mb:isa", filetto_isa8_cards, "tetriskr", true); // FIXME: determine ISA bus clock
+
+	RAM(config, RAM_TAG).set_default_size("64K");
+}
 
 ROM_START( filetto )
 	ROM_REGION( 0x10000, "bios", 0 )
@@ -530,14 +599,19 @@ ROM_START( filetto )
 	ROM_LOAD( "m3.u4", 0x30000, 0x10000, CRC(0c1e8a67) SHA1(f1b9280c65fcfcb5ec481cae48eb6f52d6cdbc9d) )
 
 	ROM_REGION( 0x40000, "samples", 0 ) // UM5100 sample roms?
-	ROM_LOAD16_BYTE("v1.u15",  0x00000, 0x20000, CRC(613ddd07) SHA1(ebda3d559315879819cb7034b5696f8e7861fe42) )
-	ROM_LOAD16_BYTE("v2.u14",  0x00001, 0x20000, CRC(427e012e) SHA1(50514a6307e63078fe7444a96e39d834684db7df) )
+	ROM_LOAD("v1.u15",  0x00000, 0x20000, CRC(613ddd07) SHA1(ebda3d559315879819cb7034b5696f8e7861fe42) )
+	ROM_LOAD("v2.u14",  0x20000, 0x20000, CRC(427e012e) SHA1(50514a6307e63078fe7444a96e39d834684db7df) )
 ROM_END
 
 ROM_START( tetriskr )
 	ROM_REGION( 0x10000, "bios", 0 ) /* code */
 	ROM_LOAD( "b-10.u10", 0x0000, 0x10000, CRC(efc2a0f6) SHA1(5f0f1e90237bee9b78184035a32055b059a91eb3) )
+	ROM_FILL( 0x1bdb, 1, 0xba ) // patch to work around input bug mentioned above
+	ROM_FILL( 0x1bdc, 1, 0x00 )
+	ROM_FILL( 0x1bdd, 1, 0x01 )
+	ROM_FILL( 0x1bde, 1, 0x8e )
+	ROM_FILL( 0x1bdf, 1, 0xda )
 ROM_END
 
-GAME( 1990, filetto,  0, filetto,  filetto, driver_device,  0,  ROT0,  "Novarmatic", "Filetto (v1.05 901009)",MACHINE_IMPERFECT_SOUND )
-GAME( 1988?,tetriskr, 0, tetriskr, tetriskr, driver_device,  0, ROT0,  "bootleg",    "Tetris (bootleg of Mirrorsoft PC-XT Tetris version)", MACHINE_IMPERFECT_SOUND | MACHINE_NOT_WORKING )
+GAME( 1990, filetto,  0, filetto,  filetto,  pcxt_state, empty_init, ROT0,  "Novarmatic", "Filetto (v1.05 901009)",                             MACHINE_IMPERFECT_SOUND )
+GAME( 1988?,tetriskr, 0, tetriskr, tetriskr, pcxt_state, empty_init, ROT0,  "bootleg",    "Tetris (Korean bootleg of Mirrorsoft PC-XT Tetris)", MACHINE_IMPERFECT_SOUND )

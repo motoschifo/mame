@@ -2,7 +2,7 @@
 // copyright-holders:Ernesto Corvi
 /***************************************************************************
 
-Knuckle Joe - (c) 1985 Taito Corporation
+  Knuckle Joe
 
 ***************************************************************************/
 
@@ -16,59 +16,57 @@ Knuckle Joe - (c) 1985 Taito Corporation
 
 ***************************************************************************/
 
-PALETTE_INIT_MEMBER(kncljoe_state, kncljoe)
+void kncljoe_state::kncljoe_palette(palette_device &palette) const
 {
-	const UINT8 *color_prom = memregion("proms")->base();
-	int i;
+	uint8_t const *color_prom = memregion("proms")->base();
 
-	/* create a lookup table for the palette */
-	for (i = 0; i < 0x80; i++)
+	// create a lookup table for the palette
+	for (int i = 0; i < 0x80; i++)
 	{
-		int r = pal4bit(color_prom[i + 0x000]);
-		int g = pal4bit(color_prom[i + 0x100]);
-		int b = pal4bit(color_prom[i + 0x200]);
+		int const r = pal4bit(color_prom[i + 0x000]);
+		int const g = pal4bit(color_prom[i + 0x100]);
+		int const b = pal4bit(color_prom[i + 0x200]);
 
 		palette.set_indirect_color(i, rgb_t(r, g, b));
 	}
 
-	for (i = 0x80; i < 0x90; i++)
+	for (int i = 0; i < 0x10; i++)
 	{
 		int bit0, bit1, bit2;
-		int r, g, b;
 
-		/* red component */
+		// red component
 		bit0 = 0;
-		bit1 = (color_prom[(i - 0x80) + 0x300] >> 6) & 0x01;
-		bit2 = (color_prom[(i - 0x80) + 0x300] >> 7) & 0x01;
-		r = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		bit1 = BIT(color_prom[i + 0x300], 6);
+		bit2 = BIT(color_prom[i + 0x300], 7);
+		int const r = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
 
-		/* green component */
-		bit0 = (color_prom[(i - 0x80) + 0x300] >> 3) & 0x01;
-		bit1 = (color_prom[(i - 0x80) + 0x300] >> 4) & 0x01;
-		bit2 = (color_prom[(i - 0x80) + 0x300] >> 5) & 0x01;
-		g = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		// green component
+		bit0 = BIT(color_prom[i + 0x300], 3);
+		bit1 = BIT(color_prom[i + 0x300], 4);
+		bit2 = BIT(color_prom[i + 0x300], 5);
+		int const g = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
 
-		/* blue component */
-		bit0 = (color_prom[(i - 0x80) + 0x300] >> 0) & 0x01;
-		bit1 = (color_prom[(i - 0x80) + 0x300] >> 1) & 0x01;
-		bit2 = (color_prom[(i - 0x80) + 0x300] >> 2) & 0x01;
-		b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		// blue component
+		bit0 = BIT(color_prom[i + 0x300], 0);
+		bit1 = BIT(color_prom[i + 0x300], 1);
+		bit2 = BIT(color_prom[i + 0x300], 2);
+		int const b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
 
-		palette.set_indirect_color(i, rgb_t(r, g, b));
+		palette.set_indirect_color(i + 0x80, rgb_t(r, g, b));
 	}
 
-	/* color_prom now points to the beginning of the lookup table */
+	// color_prom now points to the beginning of the lookup table
 	color_prom += 0x320;
 
-	/* chars */
-	for (i = 0; i < 0x80; i++)
+	// chars
+	for (int i = 0; i < 0x80; i++)
 		palette.set_pen_indirect(i, i);
 
-	/* sprite lookup table */
-	for (i = 0x80; i < 0x100; i++)
+	// sprite lookup table
+	for (int i = 0; i < 0x80; i++)
 	{
-		UINT8 ctabentry = (color_prom[i - 0x80] & 0x0f) | 0x80;
-		palette.set_pen_indirect(i, ctabentry);
+		uint8_t const ctabentry = (color_prom[i] & 0x0f) | 0x80;
+		palette.set_pen_indirect(i + 0x80, ctabentry);
 	}
 }
 
@@ -85,7 +83,7 @@ TILE_GET_INFO_MEMBER(kncljoe_state::get_bg_tile_info)
 	int attr = m_videoram[2 * tile_index + 1];
 	int code = m_videoram[2 * tile_index] + ((attr & 0xc0) << 2) + (m_tile_bank << 10);
 
-	SET_TILE_INFO_MEMBER(0,
+	tileinfo.set(0,
 			code,
 			attr & 0xf,
 			TILE_FLIPXY((attr & 0x30) >> 4));
@@ -101,7 +99,7 @@ TILE_GET_INFO_MEMBER(kncljoe_state::get_bg_tile_info)
 
 void kncljoe_state::video_start()
 {
-	m_bg_tilemap = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(kncljoe_state::get_bg_tile_info),this), TILEMAP_SCAN_ROWS, 8, 8, 64, 32);
+	m_bg_tilemap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(kncljoe_state::get_bg_tile_info)), TILEMAP_SCAN_ROWS, 8, 8, 64, 32);
 
 	m_bg_tilemap->set_scroll_rows(4);
 }
@@ -114,15 +112,14 @@ void kncljoe_state::video_start()
 
 ***************************************************************************/
 
-WRITE8_MEMBER(kncljoe_state::kncljoe_videoram_w)
+void kncljoe_state::kncljoe_videoram_w(offs_t offset, uint8_t data)
 {
 	m_videoram[offset] = data;
 	m_bg_tilemap->mark_tile_dirty(offset / 2);
 }
 
-WRITE8_MEMBER(kncljoe_state::kncljoe_control_w)
+void kncljoe_state::kncljoe_control_w(uint8_t data)
 {
-	int i;
 	/*
 	        0x01    screen flip
 	        0x02    coin counter#1
@@ -139,27 +136,19 @@ WRITE8_MEMBER(kncljoe_state::kncljoe_control_w)
 	machine().bookkeeping().coin_counter_w(0, data & 0x02);
 	machine().bookkeeping().coin_counter_w(1, data & 0x20);
 
-	i = (data & 0x10) >> 4;
-	if (m_tile_bank != i)
+	if (m_tile_bank != BIT(data, 4))
 	{
-		m_tile_bank = i;
+		m_tile_bank = BIT(data, 4);
 		m_bg_tilemap->mark_all_dirty();
 	}
 
-	i = (data & 0x04) >> 2;
-	if (m_sprite_bank != i)
-	{
-		m_sprite_bank = i;
-		memset(memregion("maincpu")->base() + 0xf100, 0, 0x180);
-	}
+	m_sprite_bank = BIT(data, 2);
 }
 
-WRITE8_MEMBER(kncljoe_state::kncljoe_scroll_w)
+void kncljoe_state::kncljoe_scroll_w(offs_t offset, uint8_t data)
 {
-	int scrollx;
-
 	m_scrollregs[offset] = data;
-	scrollx = m_scrollregs[0] | m_scrollregs[1] << 8;
+	int scrollx = m_scrollregs[0] | m_scrollregs[1] << 8;
 	m_bg_tilemap->set_scrollx(0, scrollx);
 	m_bg_tilemap->set_scrollx(1, scrollx);
 	m_bg_tilemap->set_scrollx(2, scrollx);
@@ -176,41 +165,26 @@ WRITE8_MEMBER(kncljoe_state::kncljoe_scroll_w)
 
 void kncljoe_state::draw_sprites( bitmap_ind16 &bitmap, const rectangle &cliprect )
 {
-	UINT8 *spriteram = m_spriteram;
-	rectangle clip = cliprect;
 	gfx_element *gfx = m_gfxdecode->gfx(1 + m_sprite_bank);
-	int i, j;
-	static const int pribase[4]={0x0180, 0x0080, 0x0100, 0x0000};
-	const rectangle &visarea = m_screen->visible_area();
 
-	/* score covers sprites */
-	if (m_flipscreen)
+	for (int i = 0; i < 4; i++)
 	{
-		if (clip.max_y > visarea.max_y - 64)
-			clip.max_y = visarea.max_y - 64;
-	}
-	else
-	{
-		if (clip.min_y < visarea.min_y + 64)
-			clip.min_y = visarea.min_y + 64;
-	}
+		// clip vertical strip for each layer
+		rectangle clip = cliprect;
+		clip.min_y = m_flipscreen ? (191 - i * 64) : (i * 64 + 1);
+		clip.max_y = clip.min_y + 63;
+		clip &= cliprect;
 
-	for (i = 0; i < 4; i++)
-		for (j = 0x7c; j >= 0; j -= 4)
+		for (int j = 0x7c; j >= 0; j -= 4)
 		{
-			int offs = pribase[i] + j;
-			int sy = spriteram[offs];
-			int sx = spriteram[offs + 3];
-			int code = spriteram[offs + 2];
-			int attr = spriteram[offs + 1];
+			int offs = bitswap<2>(~i, 0, 1) << 7 | j;
+			int sy = m_spriteram[offs] + 1;
+			int sx = m_spriteram[offs + 3];
+			int attr = m_spriteram[offs + 1];
+			int code = m_spriteram[offs + 2] | ((attr & 0x10) << 5) | ((attr & 0x20) << 3);
 			int flipx = attr & 0x40;
 			int flipy = !(attr & 0x80);
 			int color = attr & 0x0f;
-
-			if (attr & 0x10)
-				code += 512;
-			if (attr & 0x20)
-				code += 256;
 
 			if (m_flipscreen)
 			{
@@ -229,9 +203,10 @@ void kncljoe_state::draw_sprites( bitmap_ind16 &bitmap, const rectangle &cliprec
 				flipx,flipy,
 				sx,sy,0);
 		}
+	}
 }
 
-UINT32 kncljoe_state::screen_update_kncljoe(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t kncljoe_state::screen_update_kncljoe(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	m_bg_tilemap->draw(screen, bitmap, cliprect, 0, 0);
 	draw_sprites(bitmap, cliprect);

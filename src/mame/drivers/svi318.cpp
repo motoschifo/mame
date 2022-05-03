@@ -5,24 +5,41 @@
 
     Spectravideo SVI-318/328
 
-    TODO:
-    - Expansion port (and all attached peripherals)
-
 ***************************************************************************/
 
 #include "emu.h"
+
 #include "cpu/z80/z80.h"
-#include "machine/ram.h"
-#include "machine/i8255.h"
-#include "video/tms9928a.h"
-#include "sound/ay8910.h"
-#include "sound/speaker.h"
-#include "sound/wave.h"
 #include "imagedev/cassette.h"
-#include "formats/svi_cas.h"
-#include "bus/generic/slot.h"
+#include "machine/bankdev.h"
+#include "machine/i8255.h"
+#include "machine/ram.h"
+#include "sound/ay8910.h"
+#include "sound/spkrdev.h"
+#include "video/tms9928a.h"
+
 #include "bus/generic/carts.h"
-#include "softlist.h"
+#include "bus/generic/slot.h"
+#include "bus/svi3x8/expander/expander.h"
+
+#include "softlist_dev.h"
+#include "speaker.h"
+
+#include "formats/svi_cas.h"
+
+
+//**************************************************************************
+//  CONSTANTS & MACROS
+//**************************************************************************
+
+#define IS_SVI328  (m_ram->size() == 64 * 1024)
+
+#define CCS1       (m_cart == 0 && offset < 0x4000)
+#define CCS2       (m_cart == 0 && offset >= 0x4000 && offset < 0x8000)
+#define CCS3       (m_cart == 0 && m_rom2 == 0 && offset >= 0x8000 && offset < 0xc000)
+#define CCS4       (m_cart == 0 && m_rom3 == 0 && offset >= 0xc000)
+#define ROMCS      (m_romdis == 1 && offset < 0x8000)
+#define RAMCS      (m_ramdis == 1 && offset >= 0x8000)
 
 
 //**************************************************************************
@@ -32,44 +49,83 @@
 class svi3x8_state : public driver_device
 {
 public:
-	svi3x8_state(const machine_config &mconfig, device_type type, const char *tag)
-		: driver_device(mconfig, type, tag),
+	svi3x8_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
 		m_maincpu(*this, "maincpu"),
 		m_ram(*this, RAM_TAG),
+		m_io(*this, "io"),
 		m_basic(*this, "basic"),
+		m_vdp(*this, "vdp"),
 		m_speaker(*this, "speaker"),
 		m_cassette(*this, "cassette"),
-		m_cart(*this, "cartslot"),
-		m_keyboard(*this, "KEY"),
+		m_cart_rom(*this, "cartslot"),
+		m_expander(*this, "exp"),
+		m_keyboard(*this, "KEY.%u", 0),
 		m_buttons(*this, "BUTTONS"),
+		m_led_caps_lock(*this, "led_caps_lock"),
+		m_intvdp(0), m_intexp(0),
+		m_romdis(1), m_ramdis(1),
+		m_cart(1), m_bk21(1),
+		m_rom2(1), m_rom3(1),
+		m_ctrl1(-1),
 		m_keyboard_row(0)
 	{}
 
-	DECLARE_READ8_MEMBER( ppi_port_a_r );
-	DECLARE_READ8_MEMBER( ppi_port_b_r );
-	DECLARE_WRITE8_MEMBER( ppi_port_c_w );
-	DECLARE_WRITE8_MEMBER( psg_port_b_w );
+	void svi318(machine_config &config);
+	void svi328n(machine_config &config);
+	void svi318p(machine_config &config);
+	void svi318n(machine_config &config);
+	void svi328p(machine_config &config);
+
+private:
+	uint8_t ppi_port_a_r();
+	uint8_t ppi_port_b_r();
+	void ppi_port_c_w(uint8_t data);
+	void bank_w(uint8_t data);
 	DECLARE_WRITE_LINE_MEMBER( intvdp_w );
 
-	DECLARE_DEVICE_IMAGE_LOAD_MEMBER(cartridge);
+	uint8_t mreq_r(offs_t offset);
+	void mreq_w(offs_t offset, uint8_t data);
 
-protected:
+	// from expander bus
+	DECLARE_WRITE_LINE_MEMBER( intexp_w );
+	DECLARE_WRITE_LINE_MEMBER( romdis_w );
+	DECLARE_WRITE_LINE_MEMBER( ramdis_w );
+	DECLARE_WRITE_LINE_MEMBER( ctrl1_w );
+
+	DECLARE_DEVICE_IMAGE_LOAD_MEMBER(cart_load);
+
+	void svi3x8_io(address_map &map);
+	void svi3x8_io_bank(address_map &map);
+	void svi3x8_mem(address_map &map);
+
 	virtual void machine_start() override;
 	virtual void machine_reset() override;
 
-private:
-	void reset_memory_configuration();
-
 	required_device<cpu_device> m_maincpu;
 	required_device<ram_device> m_ram;
+	required_device<address_map_bank_device> m_io;
 	required_memory_region m_basic;
+	required_device<tms9928a_device> m_vdp;
 	required_device<speaker_sound_device> m_speaker;
 	required_device<cassette_image_device> m_cassette;
-	required_device<generic_slot_device> m_cart;
+	required_device<generic_slot_device> m_cart_rom;
+	required_device<svi_expander_device> m_expander;
 	required_ioport_array<16> m_keyboard;
 	required_ioport m_buttons;
+	output_finder<> m_led_caps_lock;
 
-	UINT8 m_keyboard_row;
+	int m_intvdp;
+	int m_intexp;
+	int m_romdis;
+	int m_ramdis;
+	int m_cart;
+	int m_bk21;
+	int m_rom2;
+	int m_rom3;
+	int m_ctrl1;
+
+	uint8_t m_keyboard_row;
 };
 
 
@@ -77,22 +133,30 @@ private:
 //  ADDRESS MAPS
 //**************************************************************************
 
-static ADDRESS_MAP_START( svi3x8_mem, AS_PROGRAM, 8, svi3x8_state )
-	ADDRESS_MAP_UNMAP_HIGH
-ADDRESS_MAP_END
+void svi3x8_state::svi3x8_mem(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x0000, 0xffff).rw(FUNC(svi3x8_state::mreq_r), FUNC(svi3x8_state::mreq_w));
+}
 
-static ADDRESS_MAP_START( svi3x8_io, AS_IO, 8, svi3x8_state )
-	ADDRESS_MAP_GLOBAL_MASK(0xff)
-	AM_RANGE(0x80, 0x80) AM_MIRROR(0x22) AM_DEVWRITE("vdp", tms9928a_device, vram_write)
-	AM_RANGE(0x81, 0x81) AM_MIRROR(0x22) AM_DEVWRITE("vdp", tms9928a_device, register_write)
-	AM_RANGE(0x84, 0x84) AM_MIRROR(0x22) AM_DEVREAD("vdp", tms9928a_device, vram_read)
-	AM_RANGE(0x85, 0x85) AM_MIRROR(0x22) AM_DEVREAD("vdp", tms9928a_device, register_read)
-	AM_RANGE(0x88, 0x88) AM_MIRROR(0x23) AM_DEVWRITE("psg", ay8910_device, address_w)
-	AM_RANGE(0x8c, 0x8c) AM_MIRROR(0x23) AM_DEVWRITE("psg", ay8910_device, data_w)
-	AM_RANGE(0x90, 0x90) AM_MIRROR(0x23) AM_DEVREAD("psg", ay8910_device, data_r)
-	AM_RANGE(0x94, 0x97) AM_DEVWRITE("ppi", i8255_device, write)
-	AM_RANGE(0x98, 0x9a) AM_DEVREAD("ppi", i8255_device, read)
-ADDRESS_MAP_END
+void svi3x8_state::svi3x8_io(address_map &map)
+{
+	map.global_mask(0xff);
+	map(0x00, 0xff).m(m_io, FUNC(address_map_bank_device::amap8));
+}
+
+void svi3x8_state::svi3x8_io_bank(address_map &map)
+{
+	map(0x000, 0x0ff).rw(m_expander, FUNC(svi_expander_device::iorq_r), FUNC(svi_expander_device::iorq_w));
+	map(0x100, 0x17f).rw(m_expander, FUNC(svi_expander_device::iorq_r), FUNC(svi_expander_device::iorq_w));
+	map(0x180, 0x181).mirror(0x22).w(m_vdp, FUNC(tms9928a_device::write));
+	map(0x184, 0x185).mirror(0x22).r(m_vdp, FUNC(tms9928a_device::read));
+	map(0x188, 0x188).mirror(0x23).w("psg", FUNC(ay8910_device::address_w));
+	map(0x18c, 0x18c).mirror(0x23).w("psg", FUNC(ay8910_device::data_w));
+	map(0x190, 0x190).mirror(0x23).r("psg", FUNC(ay8910_device::data_r));
+	map(0x194, 0x197).w("ppi", FUNC(i8255_device::write));
+	map(0x198, 0x19a).r("ppi", FUNC(i8255_device::read));
+}
 
 
 //**************************************************************************
@@ -133,7 +197,7 @@ static INPUT_PORTS_START( svi318 )
 	PORT_START("KEY.3")
 	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_H)           PORT_CHAR('h') PORT_CHAR('H')
 	PORT_BIT(0x02, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_I)           PORT_CHAR('i') PORT_CHAR('I')
-	PORT_BIT(0x04, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_J)           PORT_CHAR('0') PORT_CHAR('J')
+	PORT_BIT(0x04, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_J)           PORT_CHAR('j') PORT_CHAR('J')
 	PORT_BIT(0x08, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_K)           PORT_CHAR('k') PORT_CHAR('K')
 	PORT_BIT(0x10, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_L)           PORT_CHAR('l') PORT_CHAR('L')
 	PORT_BIT(0x20, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_M)           PORT_CHAR('m') PORT_CHAR('M')
@@ -249,7 +313,7 @@ static INPUT_PORTS_START( svi328 )
 	PORT_BIT (0x10, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_ASTERISK)   PORT_CHAR(UCHAR_MAMEKEY(ASTERISK))
 	PORT_BIT (0x20, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_SLASH_PAD)  PORT_CHAR(UCHAR_MAMEKEY(SLASH_PAD))
 	PORT_BIT (0x40, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_ENTER_PAD)  PORT_CHAR(UCHAR_MAMEKEY(DEL_PAD))
-	PORT_BIT (0x80, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_DEL_PAD)    PORT_NAME("Keypad ,")
+	PORT_BIT (0x80, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_CODE(KEYCODE_DEL_PAD)    PORT_CHAR(UCHAR_MAMEKEY(COMMA_PAD))
 INPUT_PORTS_END
 
 
@@ -259,9 +323,12 @@ INPUT_PORTS_END
 
 WRITE_LINE_MEMBER( svi3x8_state::intvdp_w )
 {
-	// note: schematics show a CNTRL line that allows switching between
-	// IRQ and NMI for the interrupt
-	m_maincpu->set_input_line(INPUT_LINE_IRQ0, state);
+	m_intvdp = state;
+
+	if (m_ctrl1 == 0)
+		m_maincpu->set_input_line(INPUT_LINE_NMI, m_intvdp ? ASSERT_LINE : CLEAR_LINE);
+	else
+		m_maincpu->set_input_line(INPUT_LINE_IRQ0, (m_intvdp || m_intexp) ? ASSERT_LINE : CLEAR_LINE);
 }
 
 
@@ -269,76 +336,101 @@ WRITE_LINE_MEMBER( svi3x8_state::intvdp_w )
 //  MACHINE EMULATION
 //**************************************************************************
 
-void svi3x8_state::reset_memory_configuration()
-{
-	m_maincpu->space(AS_PROGRAM).install_rom(0x0000, 0x7fff, m_basic->base());
-
-	if (m_ram->size() == 64 * 1024)
-	{
-		// SVI-328
-		m_maincpu->space(AS_PROGRAM).install_ram(0x8000, 0xffff, m_ram->pointer());
-	}
-	else
-	{
-		// SVI-318
-		m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x8000, 0xbfff);
-		m_maincpu->space(AS_PROGRAM).install_ram(0xc000, 0xffff, m_ram->pointer());
-	}
-}
-
 void svi3x8_state::machine_start()
 {
+	m_led_caps_lock.resolve();
+
 	// register for save states
+	save_item(NAME(m_intvdp));
+	save_item(NAME(m_intexp));
+	save_item(NAME(m_romdis));
+	save_item(NAME(m_ramdis));
+	save_item(NAME(m_cart));
+	save_item(NAME(m_bk21));
+	save_item(NAME(m_rom2));
+	save_item(NAME(m_rom3));
+	save_item(NAME(m_ctrl1));
 	save_item(NAME(m_keyboard_row));
 }
 
 void svi3x8_state::machine_reset()
 {
-	reset_memory_configuration();
+	m_intvdp = 0;
+	m_intexp = 0;
+	m_romdis = 1;
+	m_ramdis = 1;
+	m_cart = 1;
+	m_bk21 = 1;
+	m_rom2 = 1;
+	m_rom3 = 1;
+	m_keyboard_row = 0;
+
+	if (m_ctrl1 == -1)
+		ctrl1_w(1);
 }
 
-WRITE8_MEMBER( svi3x8_state::psg_port_b_w )
+uint8_t svi3x8_state::mreq_r(offs_t offset)
 {
-	reset_memory_configuration();
+	// ctrl1 inverts a15
+	if (m_ctrl1 == 0)
+		offset ^= 0x8000;
 
-	// CART
-	if (BIT(data, 0) == 0)
-	{
-		if (m_cart->exists())
-			m_maincpu->space(AS_PROGRAM).install_rom(0x0000, 0x7fff, m_cart->get_rom_base());
-		else
-			m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x0000, 0x7fff);
-	}
-	else
-	{
-		// BK21 (SV-328)
-		if (BIT(data, 1) == 0)
-		{
-			if (m_ram->size() == 64 * 1024)
-				m_maincpu->space(AS_PROGRAM).install_ram(0x0000, 0x7fff, m_ram->pointer() + 0x8000);
-			else
-				m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x0000, 0x7fff);
-		}
+	if (CCS1 || CCS2 || CCS3 || CCS4)
+		return m_cart_rom->read_rom(offset);
 
-		// BK22 (SV-807)
-		if (BIT(data, 2) == 0)
-			m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x8000, 0xffff);
+	uint8_t data = m_expander->mreq_r(offset);
 
-		// BK31 (SV-807)
-		if (BIT(data, 3) == 0)
-			m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x0000, 0x7fff);
+	if (ROMCS)
+		data = m_basic->as_u8(offset);
 
-		// BK32 (SV-807)
-		if (BIT(data, 4) == 0)
-			m_maincpu->space(AS_PROGRAM).unmap_readwrite(0x8000, 0xffff);
-	}
+	if (m_bk21 == 0 && IS_SVI328 && offset < 0x8000)
+		data = m_ram->read(offset);
 
-	output().set_value("led_caps_lock", BIT(data, 5));
+	if (RAMCS && (IS_SVI328 || offset >= 0xc000))
+		data = m_ram->read(IS_SVI328 ? offset : offset - 0xc000);
+
+	return data;
 }
 
-READ8_MEMBER( svi3x8_state::ppi_port_a_r )
+void svi3x8_state::mreq_w(offs_t offset, uint8_t data)
 {
-	UINT8 data = 0x3f;
+	// ctrl1 inverts a15
+	if (m_ctrl1 == 0)
+		offset ^= 0x8000;
+
+	if (CCS1 || CCS2 || CCS3 || CCS4)
+		return;
+
+	m_expander->mreq_w(offset, data);
+
+	if (m_bk21 == 0 && IS_SVI328 && offset < 0x8000)
+		m_ram->write(offset, data);
+
+	if (RAMCS && (IS_SVI328 || offset >= 0xc000))
+		m_ram->write(IS_SVI328 ? offset : offset - 0xc000, data);
+}
+
+void svi3x8_state::bank_w(uint8_t data)
+{
+	logerror("bank_w: %02x\n", data);
+
+	m_cart = BIT(data, 0);
+	m_bk21 = BIT(data, 1);
+
+	m_expander->bk21_w(BIT(data, 1));
+	m_expander->bk22_w(BIT(data, 2));
+	m_expander->bk31_w(BIT(data, 3));
+	m_expander->bk32_w(BIT(data, 4));
+
+	m_rom2 = BIT(data, 6);
+	m_rom3 = BIT(data, 7);
+
+	m_led_caps_lock = BIT(data, 5);
+}
+
+uint8_t svi3x8_state::ppi_port_a_r()
+{
+	uint8_t data = 0x3f;
 
 	// bit 0-3, paddle or tablet input
 
@@ -352,13 +444,13 @@ READ8_MEMBER( svi3x8_state::ppi_port_a_r )
 	return data;
 }
 
-READ8_MEMBER( svi3x8_state::ppi_port_b_r )
+uint8_t svi3x8_state::ppi_port_b_r()
 {
 	// bit 0-7, keyboard data
 	return m_keyboard[m_keyboard_row]->read();
 }
 
-WRITE8_MEMBER( svi3x8_state::ppi_port_c_w )
+void svi3x8_state::ppi_port_c_w(uint8_t data)
 {
 	// bit 0-3, keyboard row
 	m_keyboard_row = data & 0x0f;
@@ -366,10 +458,38 @@ WRITE8_MEMBER( svi3x8_state::ppi_port_c_w )
 	// bit 4-6, cassette
 	m_cassette->change_state(BIT(data, 4) ? CASSETTE_MOTOR_DISABLED : CASSETTE_MOTOR_ENABLED, CASSETTE_MASK_MOTOR);
 	m_cassette->output(BIT(data, 5) ? -1.0 : +1.0);
-	m_cassette->change_state(BIT(data, 6) ? CASSETTE_SPEAKER_ENABLED : CASSETTE_SPEAKER_MUTED, CASSETTE_MASK_SPEAKER);
+	//m_cassette->change_state(BIT(data, 6) ? CASSETTE_SPEAKER_ENABLED : CASSETTE_SPEAKER_MUTED, CASSETTE_MASK_SPEAKER);
 
 	// bit 7, mix psg sound (keyboard click)
 	m_speaker->level_w(BIT(data, 7));
+}
+
+WRITE_LINE_MEMBER( svi3x8_state::intexp_w )
+{
+	m_intexp = state;
+
+	if (m_ctrl1 == 0)
+		m_maincpu->set_input_line(INPUT_LINE_IRQ0, m_intexp ? ASSERT_LINE : CLEAR_LINE);
+	else
+		m_maincpu->set_input_line(INPUT_LINE_IRQ0, (m_intvdp || m_intexp) ? ASSERT_LINE : CLEAR_LINE);
+}
+
+WRITE_LINE_MEMBER( svi3x8_state::romdis_w )
+{
+	m_romdis = state;
+}
+
+WRITE_LINE_MEMBER( svi3x8_state::ramdis_w )
+{
+	m_ramdis = state;
+}
+
+WRITE_LINE_MEMBER( svi3x8_state::ctrl1_w )
+{
+	m_ctrl1 = state;
+
+	// ctrl1 disables internal io address decoding
+	m_io->set_bank(m_ctrl1);
 }
 
 
@@ -377,20 +497,14 @@ WRITE8_MEMBER( svi3x8_state::ppi_port_c_w )
 //  CARTRIDGE
 //**************************************************************************
 
-DEVICE_IMAGE_LOAD_MEMBER( svi3x8_state, cartridge )
+DEVICE_IMAGE_LOAD_MEMBER( svi3x8_state::cart_load )
 {
-	UINT32 size = m_cart->common_get_size("rom");
+	uint32_t size = m_cart_rom->common_get_size("rom");
 
-	if (size != 0x8000)
-	{
-		popmessage("Cartridge image '%s' invalid size: %u bytes", image.filename(), size);
-		return IMAGE_INIT_FAIL;
-	}
+	m_cart_rom->rom_alloc(size, GENERIC_ROM8_WIDTH, ENDIANNESS_LITTLE);
+	m_cart_rom->common_load_rom(m_cart_rom->get_rom_base(), size, "rom");
 
-	m_cart->rom_alloc(size, GENERIC_ROM8_WIDTH, ENDIANNESS_LITTLE);
-	m_cart->common_load_rom(m_cart->get_rom_base(), size, "rom");
-
-	return IMAGE_INIT_PASS;
+	return image_init_result::PASS;
 }
 
 
@@ -398,88 +512,98 @@ DEVICE_IMAGE_LOAD_MEMBER( svi3x8_state, cartridge )
 //  MACHINE DEFINTIONS
 //**************************************************************************
 
-static MACHINE_CONFIG_START( svi318, svi3x8_state )
+void svi3x8_state::svi318(machine_config &config)
+{
 	// basic machine hardware
-	MCFG_CPU_ADD("maincpu", Z80, XTAL_10_738635MHz / 3)
-	MCFG_CPU_PROGRAM_MAP(svi3x8_mem)
-	MCFG_CPU_IO_MAP(svi3x8_io)
+	Z80(config, m_maincpu, XTAL(10'738'635) / 3);
+	m_maincpu->set_addrmap(AS_PROGRAM, &svi3x8_state::svi3x8_mem);
+	m_maincpu->set_addrmap(AS_IO, &svi3x8_state::svi3x8_io);
 
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("16K")
+	RAM(config, m_ram).set_default_size("16K");
 
-	MCFG_DEVICE_ADD("ppi", I8255, 0)
-	MCFG_I8255_IN_PORTA_CB(READ8(svi3x8_state, ppi_port_a_r))
-	MCFG_I8255_IN_PORTB_CB(READ8(svi3x8_state, ppi_port_b_r))
-	MCFG_I8255_OUT_PORTC_CB(WRITE8(svi3x8_state, ppi_port_c_w))
+	ADDRESS_MAP_BANK(config, "io").set_map(&svi3x8_state::svi3x8_io_bank).set_data_width(8).set_addr_width(9).set_stride(0x100);
 
-	// video hardware
-	MCFG_DEVICE_ADD("vdp", TMS9929A, XTAL_10_738635MHz / 2)
-	MCFG_TMS9928A_VRAM_SIZE(0x4000)
-	MCFG_TMS9928A_OUT_INT_LINE_CB(WRITELINE(svi3x8_state, intvdp_w))
-	MCFG_TMS9928A_SCREEN_ADD_PAL("screen")
-	MCFG_SCREEN_UPDATE_DEVICE("vdp", tms9929a_device, screen_update)
+	i8255_device &ppi(I8255(config, "ppi"));
+	ppi.in_pa_callback().set(FUNC(svi3x8_state::ppi_port_a_r));
+	ppi.in_pb_callback().set(FUNC(svi3x8_state::ppi_port_b_r));
+	ppi.out_pc_callback().set(FUNC(svi3x8_state::ppi_port_c_w));
 
 	// sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("mono")
-	MCFG_SOUND_ADD("speaker", SPEAKER_SOUND, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.25)
-	MCFG_SOUND_WAVE_ADD(WAVE_TAG, "cassette")
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.25)
-	MCFG_SOUND_ADD("psg", AY8910, XTAL_10_738635MHz / 6)
-	MCFG_AY8910_PORT_A_READ_CB(IOPORT("JOY"))
-	MCFG_AY8910_PORT_B_WRITE_CB(WRITE8(svi3x8_state, psg_port_b_w))
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.75)
+	SPEAKER(config, "mono").front_center();
+	SPEAKER_SOUND(config, "speaker").add_route(ALL_OUTPUTS, "mono", 0.50);
+	ay8910_device &psg(AY8910(config, "psg", XTAL(10'738'635) / 6));
+	psg.port_a_read_callback().set_ioport("JOY");
+	psg.port_b_write_callback().set(FUNC(svi3x8_state::bank_w));
+	psg.add_route(ALL_OUTPUTS, "mono", 0.75);
 
 	// cassette
-	MCFG_CASSETTE_ADD("cassette")
-	MCFG_CASSETTE_FORMATS(svi_cassette_formats)
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED)
-	MCFG_CASSETTE_INTERFACE("svi318_cass")
-	MCFG_SOFTWARE_LIST_ADD("cass_list", "svi318_cass")
+	CASSETTE(config, m_cassette);
+	m_cassette->set_default_state(CASSETTE_STOPPED);
+	m_cassette->add_route(ALL_OUTPUTS, "mono", 0.05);
+	m_cassette->set_formats(svi_cassette_formats);
+	m_cassette->set_interface("svi318_cass");
+	SOFTWARE_LIST(config, "cass_list").set_original("svi318_cass");
 
 	// cartridge slot
-	MCFG_GENERIC_CARTSLOT_ADD("cartslot", generic_plain_slot, "svi318_cart")
-	MCFG_GENERIC_EXTENSIONS("bin,rom")
-	MCFG_GENERIC_LOAD(svi3x8_state, cartridge)
-	MCFG_SOFTWARE_LIST_ADD("cart_list", "svi318_cart")
-MACHINE_CONFIG_END
+	GENERIC_CARTSLOT(config, "cartslot", generic_plain_slot, "svi318_cart", "bin,rom").set_device_load(FUNC(svi3x8_state::cart_load));
+	SOFTWARE_LIST(config, "cart_list").set_original("svi318_cart");
 
-static MACHINE_CONFIG_DERIVED( svi318n, svi318 )
-	MCFG_DEVICE_REMOVE("vdp")
-	MCFG_DEVICE_REMOVE("screen")
-	MCFG_DEVICE_ADD("vdp", TMS9928A, XTAL_10_738635MHz / 2)
-	MCFG_TMS9928A_VRAM_SIZE(0x4000)
-	MCFG_TMS9928A_OUT_INT_LINE_CB(WRITELINE(svi3x8_state, intvdp_w))
-	MCFG_TMS9928A_SCREEN_ADD_NTSC("screen")
-	MCFG_SCREEN_UPDATE_DEVICE("vdp", tms9928a_device, screen_update)
-MACHINE_CONFIG_END
+	// expander bus
+	SVI_EXPANDER(config, m_expander, svi_expander_modules);
+	m_expander->int_handler().set(FUNC(svi3x8_state::intexp_w));
+	m_expander->romdis_handler().set(FUNC(svi3x8_state::romdis_w));
+	m_expander->ramdis_handler().set(FUNC(svi3x8_state::ramdis_w));
+	m_expander->ctrl1_handler().set(FUNC(svi3x8_state::ctrl1_w));
+	m_expander->excsr_handler().set(m_vdp, FUNC(tms9928a_device::read));
+	m_expander->excsw_handler().set(m_vdp, FUNC(tms9928a_device::write));
+}
 
-static MACHINE_CONFIG_DERIVED( svi328, svi318 )
-	MCFG_DEVICE_REMOVE(RAM_TAG)
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("64K")
-MACHINE_CONFIG_END
+void svi3x8_state::svi318p(machine_config &config)
+{
+	svi318(config);
 
-static MACHINE_CONFIG_DERIVED( svi328n, svi318n )
-	MCFG_DEVICE_REMOVE(RAM_TAG)
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("64K")
-MACHINE_CONFIG_END
+	// video hardware
+	TMS9929A(config, m_vdp, XTAL(10'738'635)).set_screen("screen");
+	m_vdp->set_vram_size(0x4000);
+	m_vdp->int_callback().set(FUNC(svi3x8_state::intvdp_w));
+	SCREEN(config, "screen", SCREEN_TYPE_RASTER);
+}
+
+void svi3x8_state::svi318n(machine_config &config)
+{
+	svi318(config);
+	TMS9928A(config, m_vdp, XTAL(10'738'635)).set_screen("screen");
+	m_vdp->set_vram_size(0x4000);
+	m_vdp->int_callback().set(FUNC(svi3x8_state::intvdp_w));
+	SCREEN(config, "screen", SCREEN_TYPE_RASTER);
+}
+
+void svi3x8_state::svi328p(machine_config &config)
+{
+	svi318p(config);
+	m_ram->set_default_size("64K");
+}
+
+void svi3x8_state::svi328n(machine_config &config)
+{
+	svi318n(config);
+	m_ram->set_default_size("64K");
+}
 
 
 //**************************************************************************
 //  ROM DEFINITIONS
 //**************************************************************************
 
-// note: should be split into two 16k chips, document differenes
+// note: should be split into two 16k chips, document differences
 ROM_START( svi318 )
 	ROM_REGION(0x8000, "basic", 0)
 	ROM_SYSTEM_BIOS(0, "v111", "SV BASIC v1.11")
-	ROMX_LOAD("svi111.rom", 0x0000, 0x8000, CRC(bc433df6) SHA1(10349ce675f6d6d47f0976e39cb7188eba858d89), ROM_BIOS(1))
+	ROMX_LOAD("svi111.rom", 0x0000, 0x8000, CRC(bc433df6) SHA1(10349ce675f6d6d47f0976e39cb7188eba858d89), ROM_BIOS(0))
 	ROM_SYSTEM_BIOS(1, "v11", "SV BASIC v1.1")
-	ROMX_LOAD("svi110.rom", 0x0000, 0x8000, CRC(709904e9) SHA1(7d8daf52f78371ca2c9443e04827c8e1f98c8f2c), ROM_BIOS(2))
+	ROMX_LOAD("svi110.rom", 0x0000, 0x8000, CRC(709904e9) SHA1(7d8daf52f78371ca2c9443e04827c8e1f98c8f2c), ROM_BIOS(1))
 	ROM_SYSTEM_BIOS(2, "v10", "SV BASIC v1.0")
-	ROMX_LOAD("svi100.rom", 0x0000, 0x8000, CRC(98d48655) SHA1(07758272df475e5e06187aa3574241df1b14035b), ROM_BIOS(3))
+	ROMX_LOAD("svi100.rom", 0x0000, 0x8000, CRC(98d48655) SHA1(07758272df475e5e06187aa3574241df1b14035b), ROM_BIOS(2))
 ROM_END
 
 #define rom_svi318n rom_svi318
@@ -491,8 +615,8 @@ ROM_END
 //  SYSTEM DRIVERS
 //**************************************************************************
 
-//    YEAR  NAME     PARENT    COMPAT  MACHINE  INPUT   CLASS         INIT  COMPANY         FULLNAME   FLAGS
-COMP( 1983, svi318,  0,        0,      svi318,  svi318, driver_device, 0,    "Spectravideo", "SVI-318 (PAL)",  MACHINE_SUPPORTS_SAVE)
-COMP( 1983, svi318n, svi318,   0,      svi318n, svi318, driver_device, 0,    "Spectravideo", "SVI-318 (NTSC)", MACHINE_SUPPORTS_SAVE)
-COMP( 1983, svi328,  0,        0,      svi328,  svi328, driver_device, 0,    "Spectravideo", "SVI-328 (PAL)",  MACHINE_SUPPORTS_SAVE)
-COMP( 1983, svi328n, svi328,   0,      svi328n, svi328, driver_device, 0,    "Spectravideo", "SVI-328 (NTSC)", MACHINE_SUPPORTS_SAVE)
+//    YEAR  NAME     PARENT  COMPAT  MACHINE  INPUT   CLASS         INIT        COMPANY         FULLNAME          FLAGS
+COMP( 1983, svi318,  0,      0,      svi318p, svi318, svi3x8_state, empty_init, "Spectravideo", "SVI-318 (PAL)",  MACHINE_SUPPORTS_SAVE )
+COMP( 1983, svi318n, svi318, 0,      svi318n, svi318, svi3x8_state, empty_init, "Spectravideo", "SVI-318 (NTSC)", MACHINE_SUPPORTS_SAVE )
+COMP( 1983, svi328,  0,      0,      svi328p, svi328, svi3x8_state, empty_init, "Spectravideo", "SVI-328 (PAL)",  MACHINE_SUPPORTS_SAVE )
+COMP( 1983, svi328n, svi328, 0,      svi328n, svi328, svi3x8_state, empty_init, "Spectravideo", "SVI-328 (NTSC)", MACHINE_SUPPORTS_SAVE )

@@ -6,14 +6,15 @@
 
 ***************************************************************************/
 
+#include "emu.h"
 #include "ctronics.h"
 
 // class centronics_device
 
-const device_type CENTRONICS = &device_creator<centronics_device>;
+DEFINE_DEVICE_TYPE(CENTRONICS, centronics_device, "centronics", "Centronics")
 
-centronics_device::centronics_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, CENTRONICS, "Centronics", tag, owner, clock, "centronics", __FILE__),
+centronics_device::centronics_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, CENTRONICS, tag, owner, clock),
 	device_slot_interface(mconfig, *this),
 	m_strobe_handler(*this),
 	m_data0_handler(*this),
@@ -31,6 +32,7 @@ centronics_device::centronics_device(const machine_config &mconfig, const char *
 	m_autofd_handler(*this),
 	m_fault_handler(*this),
 	m_init_handler(*this),
+	m_sense_handler(*this),
 	m_select_in_handler(*this),
 	m_dev(nullptr)
 {
@@ -39,6 +41,12 @@ centronics_device::centronics_device(const machine_config &mconfig, const char *
 void centronics_device::device_config_complete()
 {
 	m_dev = dynamic_cast<device_centronics_peripheral_interface *>(get_card_device());
+}
+
+void centronics_device::device_reset()
+{
+	if (m_dev && m_dev->supports_pin35_5v())
+		m_sense_handler(1);
 }
 
 void centronics_device::device_start()
@@ -59,7 +67,10 @@ void centronics_device::device_start()
 	m_autofd_handler.resolve_safe();
 	m_fault_handler.resolve_safe();
 	m_init_handler.resolve_safe();
+	m_sense_handler.resolve_safe();
 	m_select_in_handler.resolve_safe();
+
+	m_sense_handler(0);
 
 	// pull up
 	m_strobe_handler(1);
@@ -79,6 +90,18 @@ void centronics_device::device_start()
 	m_fault_handler(1);
 	m_init_handler(1);
 	m_select_in_handler(1);
+}
+
+void centronics_device::set_output_latch(output_latch_device &latch)
+{
+	latch.bit_handler<0>().set(*this, FUNC(centronics_device::write_data0));
+	latch.bit_handler<1>().set(*this, FUNC(centronics_device::write_data1));
+	latch.bit_handler<2>().set(*this, FUNC(centronics_device::write_data2));
+	latch.bit_handler<3>().set(*this, FUNC(centronics_device::write_data3));
+	latch.bit_handler<4>().set(*this, FUNC(centronics_device::write_data4));
+	latch.bit_handler<5>().set(*this, FUNC(centronics_device::write_data5));
+	latch.bit_handler<6>().set(*this, FUNC(centronics_device::write_data6));
+	latch.bit_handler<7>().set(*this, FUNC(centronics_device::write_data7));
 }
 
 WRITE_LINE_MEMBER( centronics_device::write_strobe ) { if (m_dev) m_dev->input_strobe(state); }
@@ -103,7 +126,7 @@ WRITE_LINE_MEMBER( centronics_device::write_select_in ) { if (m_dev) m_dev->inpu
 // class device_centronics_peripheral_interface
 
 device_centronics_peripheral_interface::device_centronics_peripheral_interface(const machine_config &mconfig, device_t &device)
-	: device_slot_card_interface(mconfig, device)
+	: device_interface(device, "centronics")
 {
 	m_slot = dynamic_cast<centronics_device *>(device.owner());
 }
@@ -120,15 +143,22 @@ device_centronics_peripheral_interface::~device_centronics_peripheral_interface(
 #include "nec_p72.h"
 #include "printer.h"
 #include "covox.h"
+#include "samdac.h"
+#include "chessmec.h"
+#include "smartboard.h"
 
-SLOT_INTERFACE_START(centronics_devices)
-	SLOT_INTERFACE("pl80", COMX_PL80)
-	SLOT_INTERFACE("ex800", EPSON_EX800)
-	SLOT_INTERFACE("lx800", EPSON_LX800)
-	SLOT_INTERFACE("lx810l", EPSON_LX810L)
-	SLOT_INTERFACE("ap2000", EPSON_AP2000)
-	SLOT_INTERFACE("p72", NEC_P72)
-	SLOT_INTERFACE("printer", CENTRONICS_PRINTER)
-	SLOT_INTERFACE("covox", CENTRONICS_COVOX)
-	SLOT_INTERFACE("covox_stereo", CENTRONICS_COVOX_STEREO)
-SLOT_INTERFACE_END
+void centronics_devices(device_slot_interface &device)
+{
+	device.option_add("pl80", COMX_PL80);
+	device.option_add("ex800", EPSON_EX800);
+	device.option_add("lx800", EPSON_LX800);
+	device.option_add("lx810l", EPSON_LX810L);
+	device.option_add("ap2000", EPSON_AP2000);
+	device.option_add("p72", NEC_P72);
+	device.option_add("printer", CENTRONICS_PRINTER);
+	device.option_add("covox", CENTRONICS_COVOX);
+	device.option_add("covox_stereo", CENTRONICS_COVOX_STEREO);
+	device.option_add("samdac", CENTRONICS_SAMDAC);
+	device.option_add("chessmec", CENTRONICS_CHESSMEC);
+	device.option_add("smartboard", CENTRONICS_SMARTBOARD);
+}

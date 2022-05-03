@@ -7,14 +7,15 @@
     Exidy Sorcerer disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_SORC_DSK_H
+#define MAME_FORMATS_SORC_DSK_H
 
-#ifndef EXI_DSK_H
-#define EXI_DSK_H
+#pragma once
 
-#include "flopimg.h"
+#include "flopimg_legacy.h"
 
 /**************************************************************************/
 
 LEGACY_FLOPPY_OPTIONS_EXTERN(sorcerer);
 
-#endif /* EXI_DSK_H */
+#endif // MAME_FORMATS_SORC_DSK_H

@@ -1,7 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Fabio Priuli
-#ifndef __NES_BENSHIENG_H
-#define __NES_BENSHIENG_H
+#ifndef MAME_BUS_NES_BENSHIENG_H
+#define MAME_BUS_NES_BENSHIENG_H
+
+#pragma once
 
 #include "nxrom.h"
 
@@ -12,23 +14,22 @@ class nes_benshieng_device : public nes_nrom_device
 {
 public:
 	// construction/destruction
-	nes_benshieng_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_benshieng_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-	// device-level overrides
-	virtual void device_start() override;
-	virtual DECLARE_WRITE8_MEMBER(write_h) override;
+	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
 
+protected:
+	// device-level overrides
+	virtual void device_start() override;
+
 private:
-	void update_banks();
-	UINT8 m_dipsetting;
-	UINT8 m_mmc_prg_bank[4];
-	UINT8 m_mmc_vrom_bank[4];
+	u8 m_dipsetting;
 };
 
 
 // device type definition
-extern const device_type NES_BENSHIENG;
+DECLARE_DEVICE_TYPE(NES_BENSHIENG, nes_benshieng_device)
 
-#endif
+#endif // MAME_BUS_NES_BENSHIENG_H

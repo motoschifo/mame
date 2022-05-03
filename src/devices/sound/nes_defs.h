@@ -9,7 +9,7 @@
   Who Wants to Know? (wwtk@mail.com)
 
   This core is written with the advise and consent of Matthew Conte and is
-  released under the GNU Public License.  This core is freely avaiable for
+  released under the GNU Public License.  This core is freely available for
   use in any freeware project, subject to the following terms:
 
   Any modifications to this code must be duly noted in the source and
@@ -23,208 +23,121 @@
 
  *****************************************************************************/
 
+#ifndef MAME_SOUND_NES_DEFS_H
+#define MAME_SOUND_NES_DEFS_H
+
 #pragma once
 
-#ifndef __NES_DEFS_H__
-#define __NES_DEFS_H__
-
-#include "nes_defs.h"
-
-/* BOOLEAN CONSTANTS */
-#ifndef TRUE
-#define TRUE   1
-#define FALSE  0
-#endif
-
-/* REGULAR TYPE DEFINITIONS */
-typedef INT8          int8;
-typedef INT16         int16;
-typedef INT32         int32;
-typedef UINT8         uint8;
-typedef UINT16        uint16;
-typedef UINT32        uint32;
-typedef UINT8         boolean;
-
-
-/* QUEUE TYPES */
-#ifdef USE_QUEUE
-
-#define QUEUE_SIZE 0x2000
-#define QUEUE_MAX  (QUEUE_SIZE-1)
-
-struct queue_t
-{
-		queue_t():
-		pos(0),
-		reg(""),val("") {}
-
-	int pos;
-	unsigned char reg, val;
-};
-
-#endif
-
-/* REGISTER DEFINITIONS */
-#define  APU_WRA0    0x00
-#define  APU_WRA1    0x01
-#define  APU_WRA2    0x02
-#define  APU_WRA3    0x03
-#define  APU_WRB0    0x04
-#define  APU_WRB1    0x05
-#define  APU_WRB2    0x06
-#define  APU_WRB3    0x07
-#define  APU_WRC0    0x08
-#define  APU_WRC2    0x0A
-#define  APU_WRC3    0x0B
-#define  APU_WRD0    0x0C
-#define  APU_WRD2    0x0E
-#define  APU_WRD3    0x0F
-#define  APU_WRE0    0x10
-#define  APU_WRE1    0x11
-#define  APU_WRE2    0x12
-#define  APU_WRE3    0x13
-#define  APU_SMASK   0x15
-#define  APU_IRQCTRL 0x17
-
-#define  NOISE_LONG     0x4000
-#define  NOISE_SHORT    93
-
-/* CHANNEL TYPE DEFINITIONS */
-
-/* Square Wave */
-struct square_t
-{
-		square_t()
-		{
-			for (auto & elem : regs)
-			{
-				elem = 0;
-			}
-			vbl_length =0;
-			freq = 0;
-			phaseacc = 0.0;
-			output_vol = 0.0;
-			env_phase = 0.0;
-			sweep_phase = 0.0;
-			adder = 0;
-			env_vol = 0;
-			enabled = false;
-		}
-
-	uint8 regs[4];
-	int vbl_length;
-	int freq;
-	float phaseacc;
-	float output_vol;
-	float env_phase;
-	float sweep_phase;
-	uint8 adder;
-	uint8 env_vol;
-	boolean enabled;
-};
-
-/* Triangle Wave */
-struct triangle_t
-{
-		triangle_t()
-		{
-			for (auto & elem : regs)
-			{
-				elem = 0;
-			}
-			linear_length =0;
-			vbl_length =0;
-			write_latency = 0;
-			phaseacc = 0.0;
-			output_vol = 0.0;
-			adder = 0;
-			counter_started = false;
-			enabled = false;
-		}
-
-	uint8 regs[4]; /* regs[1] unused */
-	int linear_length;
-	int vbl_length;
-	int write_latency;
-	float phaseacc;
-	float output_vol;
-	uint8 adder;
-	boolean counter_started;
-	boolean enabled;
-};
-
-/* Noise Wave */
-struct noise_t
-{
-		noise_t()
-		{
-			for (auto & elem : regs)
-			{
-				elem = 0;
-			}
-			cur_pos =0;
-			vbl_length =0;
-			phaseacc = 0.0;
-			output_vol = 0.0;
-			env_phase = 0.0;
-			env_vol = 0;
-			enabled = false;
-		}
-
-	uint8 regs[4]; /* regs[1] unused */
-	int cur_pos;
-	int vbl_length;
-	float phaseacc;
-	float output_vol;
-	float env_phase;
-	uint8 env_vol;
-	boolean enabled;
-};
-
-/* DPCM Wave */
-struct dpcm_t
-{
-		dpcm_t()
-		{
-		for (auto & elem : regs)
-		{
-			elem = 0;
-		}
-		address = 0;
-		length = 0;
-		bits_left = 0;
-		phaseacc = 0.0;
-		output_vol = 0.0;
-		cur_byte = 0;
-		enabled = false;
-		irq_occurred = false;
-		memory = nullptr;
-		vol = 0;
-		}
-
-	uint8 regs[4];
-	uint32 address;
-	uint32 length;
-	int bits_left;
-	float phaseacc;
-	float output_vol;
-	uint8 cur_byte;
-	boolean enabled;
-	boolean irq_occurred;
-	address_space *memory;
-	signed char vol;
-};
 
 /* APU type */
 struct apu_t
 {
-		apu_t()
+	/* CHANNEL TYPE DEFINITIONS */
+
+	/* Square Wave */
+	struct square_t
+	{
+		square_t()
 		{
-		memset(regs, 0, sizeof(regs));
-		buffer = nullptr;
-		buf_pos = 0;
-		step_mode = 0;
+			for (auto & elem : regs)
+				elem = 0;
 		}
+
+		u8 regs[4];
+		int vbl_length = 0;
+		int freq = 0;
+		float phaseacc = 0.0;
+		float env_phase = 0.0;
+		float sweep_phase = 0.0;
+		u8 adder = 0;
+		u8 env_vol = 0;
+		bool enabled = false;
+		u8 output = 0;
+	};
+
+	/* Triangle Wave */
+	struct triangle_t
+	{
+		triangle_t()
+		{
+			for (auto & elem : regs)
+				elem = 0;
+		}
+
+		u8 regs[4]; /* regs[1] unused */
+		int linear_length = 0;
+		bool linear_reload = false;
+		int vbl_length = 0;
+		int write_latency = 0;
+		float phaseacc = 0.0;
+		u8 adder = 0;
+		bool counter_started = false;
+		bool enabled = false;
+		u8 output = 0;
+	};
+
+	/* Noise Wave */
+	struct noise_t
+	{
+		noise_t()
+		{
+			for (auto & elem : regs)
+				elem = 0;
+		}
+
+		u8 regs[4]; /* regs[1] unused */
+		u32 seed = 1;
+		int vbl_length = 0;
+		float phaseacc = 0.0;
+		float env_phase = 0.0;
+		u8 env_vol = 0;
+		bool enabled = false;
+		u8 output = 0;
+	};
+
+	/* DPCM Wave */
+	struct dpcm_t
+	{
+		dpcm_t()
+		{
+			for (auto & elem : regs)
+				elem = 0;
+		}
+
+		u8 regs[4];
+		u32 address = 0;
+		u32 length = 0;
+		int bits_left = 0;
+		float phaseacc = 0.0;
+		u8 cur_byte = 0;
+		bool enabled = false;
+		bool irq_occurred = false;
+		s16 vol = 0;
+		u8 output = 0;
+	};
+
+
+	/* REGISTER DEFINITIONS */
+	static constexpr unsigned WRA0    = 0x00;
+	static constexpr unsigned WRA1    = 0x01;
+	static constexpr unsigned WRA2    = 0x02;
+	static constexpr unsigned WRA3    = 0x03;
+	static constexpr unsigned WRB0    = 0x04;
+	static constexpr unsigned WRB1    = 0x05;
+	static constexpr unsigned WRB2    = 0x06;
+	static constexpr unsigned WRB3    = 0x07;
+	static constexpr unsigned WRC0    = 0x08;
+	static constexpr unsigned WRC2    = 0x0A;
+	static constexpr unsigned WRC3    = 0x0B;
+	static constexpr unsigned WRD0    = 0x0C;
+	static constexpr unsigned WRD2    = 0x0E;
+	static constexpr unsigned WRD3    = 0x0F;
+	static constexpr unsigned WRE0    = 0x10;
+	static constexpr unsigned WRE1    = 0x11;
+	static constexpr unsigned WRE2    = 0x12;
+	static constexpr unsigned WRE3    = 0x13;
+	static constexpr unsigned SMASK   = 0x15;
+	static constexpr unsigned IRQCTRL = 0x17;
 
 	/* Sound channels */
 	square_t   squ[2];
@@ -232,34 +145,16 @@ struct apu_t
 	noise_t    noi;
 	dpcm_t     dpcm;
 
-	/* APU registers */
-	unsigned char regs[0x18];
-
-	/* Sound pointers */
-	void *buffer;
-
-#ifdef USE_QUEUE
-
-	/* Event queue */
-	queue_t queue[QUEUE_SIZE];
-	int head, tail;
-
-#else
-
-	int buf_pos;
-
-#endif
-
-	int step_mode;
+	int step_mode = 0;
 };
 
 /* CONSTANTS */
 
 /* vblank length table used for squares, triangle, noise */
-static const uint8 vbl_length[32] =
+static const u8 vbl_length[32] =
 {
-	5, 127, 10, 1, 19,  2, 40,  3, 80,  4, 30,  5, 7,  6, 13,  7,
-	6,   8, 12, 9, 24, 10, 48, 11, 96, 12, 36, 13, 8, 14, 16, 15
+	10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
+	12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
 };
 
 /* frequency limit of square channels */
@@ -268,23 +163,30 @@ static const int freq_limit[8] =
 	0x3FF, 0x555, 0x666, 0x71C, 0x787, 0x7C1, 0x7E0, 0x7F0,
 };
 
-/* table of noise frequencies */
-static const int noise_freq[16] =
+// table of noise period
+// each fundamental is determined as: freq = master / period / 93
+static const int noise_freq[2][16] =
 {
-	4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 2046
+	{ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 }, // NTSC
+	{ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 }  // PAL
 };
 
-/* dpcm transfer freqs */
-static const int dpcm_clocks[16] =
+// dpcm (cpu) cycle period
+// each frequency is determined as: freq = master / period
+static const int dpcm_clocks[2][16] =
 {
-	428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 85, 72, 54
+	{ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54 }, // NTSC
+	{ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98, 78, 66, 50 }  // PAL
 };
 
 /* ratios of pos/neg pulse for square waves */
 /* 2/16 = 12.5%, 4/16 = 25%, 8/16 = 50%, 12/16 = 75% */
 static const int duty_lut[4] =
 {
-	2, 4, 8, 12
+	0b01000000, // 01000000 (12.5%)
+	0b01100000, // 01100000 (25%)
+	0b01111000, // 01111000 (50%)
+	0b10011111, // 10011111 (25% negated)
 };
 
-#endif /* __NES_DEFS_H__ */
+#endif // MAME_SOUND_NES_DEFS_H

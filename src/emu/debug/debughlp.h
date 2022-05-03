@@ -8,15 +8,19 @@
 
 *********************************************************************/
 
-#ifndef __DEBUGHLP_H__
-#define __DEBUGHLP_H__
+#ifndef MAME_EMU_DEBUG_DEBUGHLP_H
+#define MAME_EMU_DEBUG_DEBUGHLP_H
+
+#pragma once
+
+#include <string_view>
 
 
 /***************************************************************************
     FUNCTION PROTOTYPES
 ***************************************************************************/
 
-/* help management */
-const char *        debug_get_help(const char *tag);
+// help management
+const char *debug_get_help(std::string_view tag);
 
-#endif
+#endif // MAME_EMU_DEBUG_DEBUGHLP_H

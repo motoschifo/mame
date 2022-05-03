@@ -106,11 +106,98 @@ and off as it normally does during speech). Once START has gone low-high-low, th
 #include "emu.h"
 #include "s14001a.h"
 
-// device definition
-const device_type S14001A = &device_creator<s14001a_device>;
+namespace {
 
-s14001a_device::s14001a_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, S14001A, "S14001A", tag, owner, clock, "s14001a", __FILE__),
+uint8_t Mux8To2(bool bVoicedP2, uint8_t uPPQtrP2, uint8_t uDeltaAdrP2, uint8_t uRomDataP2)
+{
+	// pick two bits of rom data as delta
+
+	if (bVoicedP2 && (uPPQtrP2 & 0x01)) // mirroring
+		uDeltaAdrP2 ^= 0x03; // count backwards
+
+	// emulate 8 to 2 mux to obtain delta from byte (bigendian)
+	return uRomDataP2 >> (~uDeltaAdrP2 << 1 & 0x06) & 0x03;
+}
+
+
+void CalculateIncrement(bool bVoicedP2, uint8_t uPPQtrP2, bool bPPQStartP2, uint8_t uDelta, uint8_t uDeltaOldP2, uint8_t &uDeltaOldP1, uint8_t &uIncrementP2, bool &bAddP2)
+{
+	// uPPQtr, pitch period quarter counter; 2 lsb of uLength
+	// bPPStart, start of a pitch period
+	// implemented to mimic silicon (a bit)
+
+	// beginning of a pitch period
+	if ((uPPQtrP2 == 0x00) && bPPQStartP2) // note this is done for voiced and unvoiced
+		uDeltaOldP2 = 0x02;
+
+	static constexpr uint8_t uIncrements[4][4] =
+	{
+	//    00  01  10  11
+		{ 3,  3,  1,  1,}, // 00
+		{ 1,  1,  0,  0,}, // 01
+		{ 0,  0,  1,  1,}, // 10
+		{ 1,  1,  3,  3 }, // 11
+	};
+
+	bool const MIRROR = BIT(uPPQtrP2, 0);
+
+	// calculate increment from delta, always done even if silent to update uDeltaOld
+	// in silicon a PLA determined 0,1,3 and add/subtract and passed uDelta to uDeltaOld
+	if (!bVoicedP2 || !MIRROR)
+	{
+		uIncrementP2 = uIncrements[uDelta][uDeltaOldP2];
+		bAddP2       = uDelta >= 0x02;
+	}
+	else
+	{
+		uIncrementP2 = uIncrements[uDeltaOldP2][uDelta];
+		bAddP2       = uDeltaOldP2 < 0x02;
+	}
+	uDeltaOldP1 = uDelta;
+	if (bVoicedP2 && bPPQStartP2 && MIRROR)
+		uIncrementP2 = 0; // no change when first starting mirroring
+}
+
+
+uint8_t CalculateOutput(bool bVoiced, bool bXSilence, uint8_t uPPQtr, bool bPPQStart, uint8_t uLOutput, uint8_t uIncrementP2, bool bAddP2)
+{
+	// implemented to mimic silicon (a bit)
+	// limits output to 0x00 and 0x0f
+
+	bool const SILENCE = BIT(uPPQtr, 1);
+
+	// determine output
+	if (bXSilence || (bVoiced && SILENCE))
+		return 7;
+
+	// beginning of a pitch period
+	if ((uPPQtr == 0x00) && bPPQStart) // note this is done for voiced and nonvoiced
+		uLOutput = 7;
+
+	// adder
+	uint8_t uTmp = uLOutput;
+	if (!bAddP2)
+		uTmp ^= 0x0F; // turns subtraction into addition
+
+	// add 0, 1, 3; limit at 15
+	uTmp += uIncrementP2;
+	if (uTmp > 15)
+		uTmp = 15;
+
+	if (!bAddP2)
+		uTmp ^= 0x0F; // turns addition back to subtraction
+
+	return uTmp;
+}
+
+} // anonymous namespace
+
+
+// device definition
+DEFINE_DEVICE_TYPE(S14001A, s14001a_device, "s14001a", "SSi TSI S14001A")
+
+s14001a_device::s14001a_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, S14001A, tag, owner, clock),
 		device_sound_interface(mconfig, *this),
 		m_SpeechRom(*this, DEVICE_SELF),
 		m_stream(nullptr),
@@ -127,13 +214,43 @@ ALLOW_SAVE_TYPE(s14001a_device::states); // allow save_item on a non-fundamental
 
 void s14001a_device::device_start()
 {
-	m_stream = machine().sound().stream_alloc(*this, 0, 1, clock() ? clock() : machine().sample_rate());
+	m_stream = stream_alloc(0, 1, clock() ? clock() : machine().sample_rate());
 
 	// resolve callbacks
 	m_ext_read_handler.resolve();
 	m_bsy_handler.resolve();
 
-	// note: zerofill is done already by MAME core
+	// zero-fill
+	m_bPhase1 = false;
+	m_uStateP1 = m_uStateP2 = states::IDLE;
+	m_uDAR13To05P1 = 0;
+	m_uDAR13To05P2 = 0;
+	m_uDAR04To00P1 = 0;
+	m_uDAR04To00P2 = 0;
+	m_uCWARP1 = 0;
+	m_uCWARP2 = 0;
+	m_bStopP1 = false;
+	m_bStopP2 = false;
+	m_bVoicedP1 = false;
+	m_bVoicedP2 = false;
+	m_bSilenceP1 = false;
+	m_bSilenceP2 = false;
+	m_uLengthP1 = 0;
+	m_uLengthP2 = 0;
+	m_uXRepeatP1 = 0;
+	m_uXRepeatP2 = 0;
+	m_uDeltaOldP1 = 0;
+	m_uDeltaOldP2 = 0;
+	m_bDAR04To00CarryP2 = false;
+	m_bPPQCarryP2 = false;
+	m_bRepeatCarryP2 = false;
+	m_bLengthCarryP2 = false;
+	m_RomAddrP1 = 0;
+	m_uRomAddrP2 = 0;
+	m_bBusyP1 = false;
+	m_bStart = false;
+	m_uWord = 0;
+
 	ClearStatistics();
 	m_uOutputP1 = m_uOutputP2 = 7;
 
@@ -185,13 +302,13 @@ void s14001a_device::device_start()
 //  sound_stream_update - handle a stream update
 //-------------------------------------------------
 
-void s14001a_device::sound_stream_update(sound_stream &stream, stream_sample_t **inputs, stream_sample_t **outputs, int samples)
+void s14001a_device::sound_stream_update(sound_stream &stream, std::vector<read_stream_view> const &inputs, std::vector<write_stream_view> &outputs)
 {
-	for (int i = 0; i < samples; i++)
+	for (int i = 0; i < outputs[0].samples(); i++)
 	{
 		Clock();
-		INT16 sample = m_uOutputP2 - 7; // range -7..8
-		outputs[0][i] = sample * 0xf00;
+		int16_t sample = m_uOutputP2 - 7; // range -7..8
+		outputs[0].put_int(i, sample, 8);
 	}
 }
 
@@ -205,32 +322,32 @@ void s14001a_device::force_update()
 	m_stream->update();
 }
 
-READ_LINE_MEMBER(s14001a_device::romen_r)
+int s14001a_device::romen_r()
 {
 	m_stream->update();
 	return (m_bPhase1) ? 1 : 0;
 }
 
-READ_LINE_MEMBER(s14001a_device::busy_r)
+int s14001a_device::busy_r()
 {
 	m_stream->update();
 	return (m_bBusyP1) ? 1 : 0;
 }
 
-WRITE8_MEMBER(s14001a_device::data_w)
+void s14001a_device::data_w(uint8_t data)
 {
 	m_stream->update();
 	m_uWord = data & 0x3f; // C0-C5
 }
 
-WRITE_LINE_MEMBER(s14001a_device::start_w)
+void s14001a_device::start_w(int state)
 {
 	m_stream->update();
 	m_bStart = (state != 0);
-	if (m_bStart) m_uStateP1 = WORDWAIT;
+	if (m_bStart) m_uStateP1 = states::WORDWAIT;
 }
 
-void s14001a_device::set_clock(UINT32 clock)
+void s14001a_device::set_clock(uint32_t clock)
 {
 	m_stream->update();
 	m_stream->set_sample_rate(clock);
@@ -241,7 +358,7 @@ void s14001a_device::set_clock(UINT32 clock)
     Device emulation
 **************************************************************************/
 
-UINT8 s14001a_device::readmem(UINT16 offset, bool phase)
+uint8_t s14001a_device::readmem(uint16_t offset, bool phase)
 {
 	offset &= 0xfff; // 11-bit internal
 	return ((m_ext_read_handler.isnull()) ? m_SpeechRom[offset & (m_SpeechRom.bytes() - 1)] : m_ext_read_handler(offset));
@@ -292,31 +409,31 @@ bool s14001a_device::Clock()
 	// logic done during phase 1
 	switch (m_uStateP1)
 	{
-	case IDLE:
+	case states::IDLE:
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
 
 		if (m_bBusyP1 && !m_bsy_handler.isnull())
 			m_bsy_handler(0);
 		m_bBusyP1 = false;
 		break;
 
-	case WORDWAIT:
+	case states::WORDWAIT:
 		// the delta address register latches the word number into bits 03 to 08
 		// all other bits forced to 0.  04 to 08 makes a multiply by two.
 		m_uDAR13To05P1 = (m_uWord&0x3C)>>2;
 		m_uDAR04To00P1 = (m_uWord&0x03)<<3;
 		m_RomAddrP1 = (m_uDAR13To05P1<<3)|(m_uDAR04To00P1>>2); // remove lower two bits
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = CWARMSB;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::CWARMSB;
 
 		if (!m_bBusyP1 && !m_bsy_handler.isnull())
 			m_bsy_handler(1);
 		m_bBusyP1 = true;
 		break;
 
-	case CWARMSB:
+	case states::CWARMSB:
 		if (m_uPrintLevel >= 1)
 			printf("\n speaking word %02x",m_uWord);
 
@@ -328,20 +445,20 @@ bool s14001a_device::Clock()
 		m_RomAddrP1 = (m_uDAR13To05P1<<3)|(m_uDAR04To00P1>>2); // remove lower two bits
 
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = CWARLSB;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::CWARLSB;
 		break;
 
-	case CWARLSB:
+	case states::CWARLSB:
 		m_uCWARP1   = m_uCWARP2|(readmem(m_uRomAddrP2,m_bPhase1)>>4); // setup in previous state
 		m_RomAddrP1 = m_uCWARP1;
 
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = DARMSB;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::DARMSB;
 		break;
 
-	case DARMSB:
+	case states::DARMSB:
 		m_uDAR13To05P1 = readmem(m_uRomAddrP2,m_bPhase1)<<1; // 9 bit counter, 8 MSBs from ROM, lsb zeroed
 		m_uDAR04To00P1 = 0;
 		m_uCWARP1++;
@@ -349,11 +466,11 @@ bool s14001a_device::Clock()
 		m_uNControlWords++; // statistics
 
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = CTRLBITS;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::CTRLBITS;
 		break;
 
-	case CTRLBITS:
+	case states::CTRLBITS:
 		m_bStopP1    = readmem(m_uRomAddrP2,m_bPhase1)&0x80? true: false;
 		m_bVoicedP1  = readmem(m_uRomAddrP2,m_bPhase1)&0x40? true: false;
 		m_bSilenceP1 = readmem(m_uRomAddrP2,m_bPhase1)&0x20? true: false;
@@ -364,15 +481,15 @@ bool s14001a_device::Clock()
 		m_RomAddrP1  = (m_uDAR13To05P1<<3)|(m_uDAR04To00P1>>2); // remove lower two bits
 
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = PLAY;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::PLAY;
 
 		if (m_uPrintLevel >= 2)
 			printf("\n cw %d %d %d %d %d",m_bStopP1,m_bVoicedP1,m_bSilenceP1,m_uLengthP1>>4,m_uXRepeatP1);
 
 		break;
 
-	case PLAY:
+	case states::PLAY:
 	{
 		// statistics
 		if (m_bPPQCarryP2)
@@ -387,8 +504,8 @@ bool s14001a_device::Clock()
 		// end statistics
 
 		// modify output
-		UINT8 uDeltaP2;     // signal line
-		UINT8 uIncrementP2; // signal lines
+		uint8_t uDeltaP2;     // signal line
+		uint8_t uIncrementP2; // signal lines
 		bool bAddP2;        // signal line
 		uDeltaP2 = Mux8To2(m_bVoicedP2,
 					m_uLengthP2 & 0x03,     // pitch period quater counter
@@ -450,115 +567,25 @@ bool s14001a_device::Clock()
 		m_RomAddrP1 = (m_uDAR13To05P1<<3) | m_RomAddrP1>>2;
 
 		// next state
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else if (m_bStopP2 && m_bLengthCarryP2) m_uStateP1 = DELAY;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else if (m_bStopP2 && m_bLengthCarryP2) m_uStateP1 = states::DELAY;
 		else if (m_bLengthCarryP2)
 		{
-			m_uStateP1  = DARMSB;
+			m_uStateP1  = states::DARMSB;
 			m_RomAddrP1 = m_uCWARP1; // output correct address
 		}
-		else m_uStateP1 = PLAY;
+		else m_uStateP1 = states::PLAY;
 		break;
 	}
 
-	case DELAY:
+	case states::DELAY:
 		m_uOutputP1 = 7;
-		if (m_bStart) m_uStateP1 = WORDWAIT;
-		else          m_uStateP1 = IDLE;
+		if (m_bStart) m_uStateP1 = states::WORDWAIT;
+		else          m_uStateP1 = states::IDLE;
 		break;
 	}
 
 	return true;
-}
-
-UINT8 s14001a_device::Mux8To2(bool bVoicedP2, UINT8 uPPQtrP2, UINT8 uDeltaAdrP2, UINT8 uRomDataP2)
-{
-	// pick two bits of rom data as delta
-
-	if (bVoicedP2 && uPPQtrP2&0x01) // mirroring
-	{
-		uDeltaAdrP2 ^= 0x03; // count backwards
-	}
-	// emulate 8 to 2 mux to obtain delta from byte (bigendian)
-	switch (uDeltaAdrP2)
-	{
-	case 0x00:
-		return (uRomDataP2&0xC0)>>6;
-	case 0x01:
-		return (uRomDataP2&0x30)>>4;
-	case 0x02:
-		return (uRomDataP2&0x0C)>>2;
-	case 0x03:
-		return (uRomDataP2&0x03)>>0;
-	}
-	return 0xFF;
-}
-
-void s14001a_device::CalculateIncrement(bool bVoicedP2, UINT8 uPPQtrP2, bool bPPQStartP2, UINT8 uDelta, UINT8 uDeltaOldP2, UINT8 &uDeltaOldP1, UINT8 &uIncrementP2, bool &bAddP2)
-{
-	// uPPQtr, pitch period quarter counter; 2 lsb of uLength
-	// bPPStart, start of a pitch period
-	// implemented to mimic silicon (a bit)
-
-	// beginning of a pitch period
-	if (uPPQtrP2 == 0x00 && bPPQStartP2) // note this is done for voiced and unvoiced
-	{
-		uDeltaOldP2 = 0x02;
-	}
-	static const UINT8 uIncrements[4][4] =
-	{
-	//    00  01  10  11
-		{ 3,  3,  1,  1,}, // 00
-		{ 1,  1,  0,  0,}, // 01
-		{ 0,  0,  1,  1,}, // 10
-		{ 1,  1,  3,  3 }, // 11
-	};
-
-#define MIRROR  (uPPQtrP2&0x01)
-
-	// calculate increment from delta, always done even if silent to update uDeltaOld
-	// in silicon a PLA determined 0,1,3 and add/subtract and passed uDelta to uDeltaOld
-	if (!bVoicedP2 || !MIRROR)
-	{
-		uIncrementP2 = uIncrements[uDelta][uDeltaOldP2];
-		bAddP2       = uDelta >= 0x02;
-	}
-	else
-	{
-		uIncrementP2 = uIncrements[uDeltaOldP2][uDelta];
-		bAddP2       = uDeltaOldP2 < 0x02;
-	}
-	uDeltaOldP1 = uDelta;
-	if (bVoicedP2 && bPPQStartP2 && MIRROR) uIncrementP2 = 0; // no change when first starting mirroring
-}
-
-UINT8 s14001a_device::CalculateOutput(bool bVoiced, bool bXSilence, UINT8 uPPQtr, bool bPPQStart, UINT8 uLOutput, UINT8 uIncrementP2, bool bAddP2)
-{
-	// implemented to mimic silicon (a bit)
-	// limits output to 0x00 and 0x0f
-	UINT8 uTmp; // used for subtraction
-
-#define SILENCE (uPPQtr&0x02)
-
-	// determine output
-	if (bXSilence || (bVoiced && SILENCE)) return 7;
-
-	// beginning of a pitch period
-	if (uPPQtr == 0x00 && bPPQStart) // note this is done for voiced and nonvoiced
-	{
-		uLOutput = 7;
-	}
-
-	// adder
-	uTmp = uLOutput;
-	if (!bAddP2) uTmp ^= 0x0F; // turns subtraction into addition
-
-	// add 0, 1, 3; limit at 15
-	uTmp += uIncrementP2;
-	if (uTmp > 15) uTmp = 15;
-
-	if (!bAddP2) uTmp ^= 0x0F; // turns addition back to subtraction
-	return uTmp;
 }
 
 void s14001a_device::ClearStatistics()
@@ -569,7 +596,7 @@ void s14001a_device::ClearStatistics()
 	m_uNControlWords = 0;
 }
 
-void s14001a_device::GetStatistics(UINT32 &uNPitchPeriods, UINT32 &uNVoiced, UINT32 uNControlWords)
+void s14001a_device::GetStatistics(uint32_t &uNPitchPeriods, uint32_t &uNVoiced, uint32_t &uNControlWords)
 {
 	uNPitchPeriods = m_uNPitchPeriods;
 	uNVoiced = m_uNVoiced;

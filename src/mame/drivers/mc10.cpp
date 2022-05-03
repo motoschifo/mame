@@ -1,31 +1,31 @@
 // license:BSD-3-Clause
-// copyright-holders:Nathan Woods, Dirk Best
+// copyright-holders:Nathan Woods, Dirk Best, tim lindner
 /***************************************************************************
 
     TRS-80 Radio Shack MicroColor Computer
 
 ***************************************************************************/
 
-
 #include "emu.h"
-#include "cpu/m6800/m6800.h"
-#include "sound/dac.h"
-#include "video/mc6847.h"
-#include "video/ef9345.h"
+
+#include "cpu/m6800/m6801.h"
 #include "imagedev/cassette.h"
 #include "imagedev/printer.h"
-#include "formats/coco_cas.h"
+#include "bus/mc10/mc10_cart.h"
+#include "bus/rs232/rs232.h"
 #include "machine/ram.h"
-#include "softlist.h"
+#include "machine/timer.h"
+#include "sound/dac.h"
+#include "video/ef9345.h"
+#include "video/mc6847.h"
 
-//printer state
-enum
+#include "softlist_dev.h"
+#include "speaker.h"
+
+#include "formats/coco_cas.h"
+
+namespace
 {
-	PRINTER_WAIT,
-	PRINTER_REC,
-	PRINTER_DONE
-};
-
 
 /***************************************************************************
     TYPE DEFINITIONS
@@ -35,94 +35,118 @@ class mc10_state : public driver_device
 {
 public:
 	mc10_state(const machine_config &mconfig, device_type type, const char *tag)
-		: driver_device(mconfig, type, tag),
-	m_maincpu(*this, "maincpu"),
-	m_mc6847(*this, "mc6847"),
-	m_ef9345(*this, "ef9345"),
-	m_dac(*this, "dac"),
-	m_ram(*this, RAM_TAG),
-	m_cassette(*this, "cassette"),
-	m_printer(*this, "printer")
-	{ }
+		: driver_device(mconfig, type, tag)
+		, m_maincpu(*this, "maincpu")
+		, m_ram(*this, RAM_TAG)
+		, m_mc10cart(*this, "ext")
+		, m_mc6847(*this, "mc6847")
+		, m_dac(*this, "dac")
+		, m_cassette(*this, "cassette")
+		, m_rs232(*this, "rs232")
+		, m_pb(*this, "pb%u", 0U)
+	{}
+
+	void mc10_base(machine_config &config);
+	void mc10_video(machine_config &config);
+	void mc10(machine_config &config);
+	void alice(machine_config &config);
+	void mc10_bfff_w_dac(uint8_t data);
+	uint8_t mc10_bfff_r();
+
+protected:
+	void mc10_bfff_w(uint8_t data);
+
+	uint8_t mc10_port1_r();
+	void mc10_port1_w(uint8_t data);
+	uint8_t mc10_port2_r();
+	void mc10_port2_w(uint8_t data);
+
+	uint8_t mc6847_videoram_r(offs_t offset);
+
+	// device-level overrides
+	virtual void driver_start() override;
+	virtual void driver_reset() override;
 
 	required_device<m6803_cpu_device> m_maincpu;
-	optional_device<mc6847_base_device> m_mc6847;
-	optional_device<ef9345_device> m_ef9345;
-	required_device<dac_device> m_dac;
 	required_device<ram_device> m_ram;
+	optional_device<mc10cart_slot_device> m_mc10cart;
+
+	uint8_t m_keyboard_strobe = 0;
+	uint8_t m_port2 = 0;
+
+	uint8_t read_keyboard_strobe(bool single_line);
+
+	mc10cart_slot_device &mc10cart() { return *m_mc10cart; }
+
+private:
+	void mc10_mem(address_map &map);
+
+	optional_device<mc6847_base_device> m_mc6847;
+	required_device<dac_bit_interface> m_dac;
 	required_device<cassette_image_device> m_cassette;
-	required_device<printer_image_device> m_printer;
-
-	UINT8 *m_ram_base;
-	UINT32 m_ram_size;
-	UINT8 m_keyboard_strobe;
-	UINT8 m_port2;
-
-	// printer
-	UINT8 m_pr_buffer;
-	UINT8 m_pr_counter;
-	UINT8 m_pr_state;
-
-	DECLARE_READ8_MEMBER( mc10_bfff_r );
-	DECLARE_WRITE8_MEMBER( mc10_bfff_w );
-	DECLARE_READ8_MEMBER( alice90_bfff_r );
-	DECLARE_WRITE8_MEMBER( alice32_bfff_w );
-	DECLARE_READ8_MEMBER( mc10_port1_r );
-	DECLARE_WRITE8_MEMBER( mc10_port1_w );
-	DECLARE_READ8_MEMBER( mc10_port2_r );
-	DECLARE_WRITE8_MEMBER( mc10_port2_w );
-	DECLARE_READ8_MEMBER( mc6847_videoram_r );
-	DECLARE_DRIVER_INIT(mc10);
-	TIMER_DEVICE_CALLBACK_MEMBER(alice32_scanline);
+	required_device<rs232_port_device> m_rs232;
+	required_ioport_array<8> m_pb;
 };
 
+class alice32_state : public mc10_state
+{
+public:
+	alice32_state(const machine_config &mconfig, device_type type, const char *tag)
+		: mc10_state(mconfig, type, tag)
+		, m_ef9345(*this, "ef9345")
+	{}
+
+	void alice32(machine_config &config);
+	void alice90(machine_config &config);
+	void alice32_bfff_w(uint8_t data);
+	uint8_t alice90_bfff_r();
+
+protected:
+	// device-level overrides
+	virtual void driver_start() override;
+
+	TIMER_DEVICE_CALLBACK_MEMBER(alice32_scanline);
+	required_device<ef9345_device> m_ef9345;
+
+private:
+	void alice32_mem(address_map &map);
+	void alice90_mem(address_map &map);
+};
 
 /***************************************************************************
     MEMORY MAPPED I/O
 ***************************************************************************/
 
-READ8_MEMBER( mc10_state::mc10_bfff_r )
+uint8_t mc10_state::read_keyboard_strobe(bool single_line)
 {
-	UINT8 result = 0xff;
+	bool read = false;
+	uint8_t result = 0xff;
 
-	if (!BIT(m_keyboard_strobe, 0)) result &= ioport("pb0")->read();
-	if (!BIT(m_keyboard_strobe, 1)) result &= ioport("pb1")->read();
-	if (!BIT(m_keyboard_strobe, 2)) result &= ioport("pb2")->read();
-	if (!BIT(m_keyboard_strobe, 3)) result &= ioport("pb3")->read();
-	if (!BIT(m_keyboard_strobe, 4)) result &= ioport("pb4")->read();
-	if (!BIT(m_keyboard_strobe, 5)) result &= ioport("pb5")->read();
-	if (!BIT(m_keyboard_strobe, 6)) result &= ioport("pb6")->read();
-	if (!BIT(m_keyboard_strobe, 7)) result &= ioport("pb7")->read();
+	for (int i = m_pb.size() - 1; (i >= 0) && (!read || !single_line); i--)
+	{
+		if (!BIT(m_keyboard_strobe, i))
+		{
+			result &= m_pb[i]->read();
+			read = true;
+		}
+	}
 
 	return result;
 }
 
-READ8_MEMBER( mc10_state::alice90_bfff_r )
+uint8_t mc10_state::mc10_bfff_r()
 {
-	UINT8 result = 0xff;
-
-	if (!BIT(m_keyboard_strobe, 7)) result &= ioport("pb7")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 6)) result &= ioport("pb6")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 5)) result &= ioport("pb5")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 4)) result &= ioport("pb4")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 3)) result &= ioport("pb3")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 2)) result &= ioport("pb2")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 1)) result &= ioport("pb1")->read();
-	else
-	if (!BIT(m_keyboard_strobe, 0)) result &= ioport("pb0")->read();
-
-	return result;
+	return read_keyboard_strobe(false);
 }
 
-WRITE8_MEMBER( mc10_state::mc10_bfff_w )
+uint8_t alice32_state::alice90_bfff_r()
 {
-	/* bit 2 to 6, mc6847 mode lines */
+	return read_keyboard_strobe(true);
+}
+
+void mc10_state::mc10_bfff_w(uint8_t data)
+{
+	// bit 2 to 6, mc6847 mode lines
 	m_mc6847->gm2_w(BIT(data, 2));
 	m_mc6847->intext_w(BIT(data, 2));
 	m_mc6847->gm1_w(BIT(data, 3));
@@ -130,80 +154,60 @@ WRITE8_MEMBER( mc10_state::mc10_bfff_w )
 	m_mc6847->ag_w(BIT(data, 5));
 	m_mc6847->css_w(BIT(data, 6));
 
-	/* bit 7, dac output */
-	m_dac->write_unsigned8(BIT(data, 7));
+	mc10_bfff_w_dac(data);
 }
 
-WRITE8_MEMBER( mc10_state::alice32_bfff_w )
+void mc10_state::mc10_bfff_w_dac(uint8_t data)
 {
-	/* bit 7, dac output */
-	m_dac->write_unsigned8(BIT(data, 7));
+	// bit 7, dac output
+	m_dac->write(BIT(data, 7));
 }
 
+void alice32_state::alice32_bfff_w(uint8_t data)
+{
+	mc10_bfff_w_dac(data);
+}
 
 /***************************************************************************
     MC6803 I/O
 ***************************************************************************/
 
-/* keyboard strobe */
-READ8_MEMBER( mc10_state::mc10_port1_r )
+uint8_t mc10_state::mc10_port1_r()
 {
 	return m_keyboard_strobe;
 }
 
-/* keyboard strobe */
-WRITE8_MEMBER( mc10_state::mc10_port1_w )
+void mc10_state::mc10_port1_w(uint8_t data)
 {
 	m_keyboard_strobe = data;
 }
 
-READ8_MEMBER( mc10_state::mc10_port2_r )
+uint8_t mc10_state::mc10_port2_r()
 {
-	UINT8 result = 0xeb;
+	uint8_t result = 0xeb;
 
-	/* bit 1, keyboard line pa6 */
-	if (!BIT(m_keyboard_strobe, 0)) result &= ioport("pb0")->read() >> 5;
-	if (!BIT(m_keyboard_strobe, 2)) result &= ioport("pb2")->read() >> 5;
-	if (!BIT(m_keyboard_strobe, 7)) result &= ioport("pb7")->read() >> 5;
+	// bit 1, keyboard line pa6
+	if (!BIT(m_keyboard_strobe, 0)) result &= m_pb[0]->read() >> 5;
+	if (!BIT(m_keyboard_strobe, 2)) result &= m_pb[2]->read() >> 5;
+	if (!BIT(m_keyboard_strobe, 7)) result &= m_pb[7]->read() >> 5;
 
-	/* bit 2, printer ots input */
-	result |= (m_printer->is_ready() ? 0 : 4);
+	// bit 2, rs232 input
+	result |= (m_rs232->rxd_r() ? 1 : 0) << 2;
 
-	/* bit 3, rs232 input */
+	// bit 3, printer ots input
+	result |= (m_rs232->cts_r() ? 1 : 0) << 3;
 
-	/* bit 4, cassette input */
-	result |= ((m_cassette)->input() >= 0 ? 1 : 0) << 4;
+	// bit 4, cassette input
+	result |= (m_cassette->input() >= 0 ? 1 : 0) << 4;
 
 	return result;
 }
 
-WRITE8_MEMBER( mc10_state::mc10_port2_w )
+void mc10_state::mc10_port2_w(uint8_t data)
 {
-	/* bit 0, cassette & printer output */
+	// bit 0, cassette & printer output
 	m_cassette->output( BIT(data, 0) ? +1.0 : -1.0);
-
-	switch (m_pr_state)
-	{
-		case PRINTER_WAIT:
-			if (BIT(m_port2, 0) && !BIT(data, 0))
-			{
-				m_pr_state = PRINTER_REC;
-				m_pr_counter = 8;
-				m_pr_buffer = 0;
-			}
-			break;
-		case PRINTER_REC:
-			if (m_pr_counter--)
-				m_pr_buffer |= (BIT(data,0)<<(7-m_pr_counter));
-			else
-				m_pr_state = PRINTER_DONE;
-			break;
-		case PRINTER_DONE:
-			if (BIT(data,0))
-				m_printer->output(m_pr_buffer);
-			m_pr_state = PRINTER_WAIT;
-			break;
-	}
+	m_rs232->write_txd(BIT(data, 0) ? 1 : 0);
 
 	m_port2 = data;
 }
@@ -213,90 +217,86 @@ WRITE8_MEMBER( mc10_state::mc10_port2_w )
     VIDEO EMULATION
 ***************************************************************************/
 
-READ8_MEMBER( mc10_state::mc6847_videoram_r )
+uint8_t mc10_state::mc6847_videoram_r(offs_t offset)
 {
 	if (offset == ~0) return 0xff;
-	m_mc6847->inv_w(BIT(m_ram_base[offset], 6));
-	m_mc6847->as_w(BIT(m_ram_base[offset], 7));
 
-	return m_ram_base[offset];
+	uint8_t result = m_ram->read(offset);
+	m_mc6847->inv_w(BIT(result, 6));
+	m_mc6847->as_w(BIT(result, 7));
+	return result;
 }
 
-TIMER_DEVICE_CALLBACK_MEMBER(mc10_state::alice32_scanline)
+TIMER_DEVICE_CALLBACK_MEMBER(alice32_state::alice32_scanline)
 {
-	m_ef9345->update_scanline((UINT16)param);
+	m_ef9345->update_scanline((uint16_t)param);
 }
 
 /***************************************************************************
     DRIVER INIT
 ***************************************************************************/
 
-DRIVER_INIT_MEMBER(mc10_state,mc10)
+void mc10_state::driver_reset()
 {
-	address_space &prg = m_maincpu->space(AS_PROGRAM);
-
-	/* initialize keyboard strobe */
 	m_keyboard_strobe = 0x00;
-
-	/* initialize memory */
-	m_ram_base = m_ram->pointer();
-	m_ram_size = m_ram->size();
-	m_pr_state = PRINTER_WAIT;
-
-	membank("bank1")->set_base(m_ram_base);
-
-	/* initialize memory expansion */
-	if (m_ram_size == 20*1024)
-		membank("bank2")->set_base(m_ram_base + 0x1000);
-	else if (m_ram_size == 24*1024)
-		membank("bank2")->set_base(m_ram_base + 0x2000);
-	else  if (m_ram_size != 32*1024)        //ensure that is not alice90
-		prg.nop_readwrite(0x5000, 0x8fff);
-
-	/* register for state saving */
-	save_item(NAME(m_keyboard_strobe));
-
-	//for alice32 force port4 DDR to 0xff at startup
-	if (!strcmp(machine().system().name, "alice32") || !strcmp(machine().system().name, "alice90"))
-		m_maincpu->m6801_io_w(prg, 0x05, 0xff);
 }
 
+void mc10_state::driver_start()
+{
+	driver_device::driver_start();
+
+	save_item(NAME(m_keyboard_strobe));
+
+	address_space &space = m_maincpu->space(AS_PROGRAM);
+	u32 ram_size = m_ram->size();
+
+	// don't step on hardware page at 0xbf00
+	if (ram_size == 0x8000)
+		ram_size -= 0x100;
+
+	space.install_ram(0x4000, 0x4000+ram_size-1, m_ram->pointer());
+}
+
+void alice32_state::driver_start()
+{
+	driver_device::driver_start();
+
+	save_item(NAME(m_keyboard_strobe));
+
+	address_space &space = m_maincpu->space(AS_PROGRAM);
+	u32 ram_size = m_ram->size();
+
+	space.install_ram(0x3000, 0x3000+ram_size-1, m_ram->pointer());
+}
 
 /***************************************************************************
     ADDRESS MAPS
 ***************************************************************************/
 
-static ADDRESS_MAP_START( mc10_mem, AS_PROGRAM, 8 , mc10_state)
-	AM_RANGE(0x0100, 0x3fff) AM_NOP /* unused */
-	AM_RANGE(0x4000, 0x4fff) AM_RAMBANK("bank1") /* 4k internal ram */
-	AM_RANGE(0x5000, 0x8fff) AM_RAMBANK("bank2") /* 16k memory expansion */
-	AM_RANGE(0x9000, 0xbffe) AM_NOP /* unused */
-	AM_RANGE(0xbfff, 0xbfff) AM_READWRITE(mc10_bfff_r, mc10_bfff_w)
-	AM_RANGE(0xe000, 0xffff) AM_ROM AM_REGION("maincpu", 0x0000) /* ROM */
-ADDRESS_MAP_END
+void mc10_state::mc10_mem(address_map &map)
+{
+	// mc10 / alice: RAM start at 0x4000, installed in driver_start
+	map(0xbfff, 0xbfff).rw(FUNC(mc10_state::mc10_bfff_r), FUNC(mc10_state::mc10_bfff_w));
+	map(0xe000, 0xffff).rom().region("maincpu", 0x0000);
+}
 
-static ADDRESS_MAP_START( mc10_io, AS_IO, 8 , mc10_state)
-	AM_RANGE(M6801_PORT1, M6801_PORT1) AM_READWRITE(mc10_port1_r, mc10_port1_w)
-	AM_RANGE(M6801_PORT2, M6801_PORT2) AM_READWRITE(mc10_port2_r, mc10_port2_w)
-ADDRESS_MAP_END
+void alice32_state::alice32_mem(address_map &map)
+{
+	// alice32: RAM start at 0x3000, installed in driver_start
+	map(0xbf20, 0xbf29).rw(m_ef9345, FUNC(ef9345_device::data_r), FUNC(ef9345_device::data_w));
+	map(0xbfff, 0xbfff).rw(FUNC(mc10_state::mc10_bfff_r), FUNC(alice32_state::alice32_bfff_w));
+	map(0xc000, 0xffff).rom().region("maincpu", 0x0000);
+}
 
-static ADDRESS_MAP_START( alice32_mem, AS_PROGRAM, 8 , mc10_state)
-	AM_RANGE(0x0100, 0x2fff) AM_NOP /* unused */
-	AM_RANGE(0x3000, 0x4fff) AM_RAMBANK("bank1") /* 8k internal ram */
-	AM_RANGE(0x5000, 0x8fff) AM_RAMBANK("bank2") /* 16k memory expansion */
-	AM_RANGE(0x9000, 0xafff) AM_NOP /* unused */
-	AM_RANGE(0xbf20, 0xbf29) AM_DEVREADWRITE("ef9345", ef9345_device, data_r, data_w)
-	AM_RANGE(0xbfff, 0xbfff) AM_READWRITE(mc10_bfff_r, alice32_bfff_w)
-	AM_RANGE(0xc000, 0xffff) AM_ROM AM_REGION("maincpu", 0x0000) /* ROM */
-ADDRESS_MAP_END
+void alice32_state::alice90_mem(address_map &map)
+{
+	// alice90: RAM start at 0x3000, installed in driver_start
+	map(0xbf20, 0xbf29).rw(m_ef9345, FUNC(ef9345_device::data_r), FUNC(ef9345_device::data_w));
+	map(0xbfff, 0xbfff).rw(FUNC(alice32_state::alice90_bfff_r), FUNC(alice32_state::alice32_bfff_w));
+	map(0xc000, 0xffff).rom().region("maincpu", 0x0000);
+}
 
-static ADDRESS_MAP_START( alice90_mem, AS_PROGRAM, 8 , mc10_state)
-	AM_RANGE(0x0100, 0x2fff) AM_NOP /* unused */
-	AM_RANGE(0x3000, 0xafff) AM_RAMBANK("bank1")    /* 32k internal ram */
-	AM_RANGE(0xbf20, 0xbf29) AM_DEVREADWRITE("ef9345", ef9345_device, data_r, data_w)
-	AM_RANGE(0xbfff, 0xbfff) AM_READWRITE(alice90_bfff_r, alice32_bfff_w)
-	AM_RANGE(0xc000, 0xffff) AM_ROM AM_REGION("maincpu", 0x0000) /* ROM */
-ADDRESS_MAP_END
+
 
 /***************************************************************************
     INPUT PORTS
@@ -315,7 +315,7 @@ ADDRESS_MAP_END
  */
 
 /*  Port                                        Key description                 Emulated key                  Natural key     Shift 1         Shift 2 (Ctrl) */
-static INPUT_PORTS_START( mc10 )
+INPUT_PORTS_START( mc10 )
 	PORT_START("pb0") /* KEY ROW 0 */
 	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_NAME("@     INPUT")        PORT_CODE(KEYCODE_OPENBRACE)  PORT_CHAR('@')
 	PORT_BIT(0x02, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_NAME("H     THEN")         PORT_CODE(KEYCODE_H)          PORT_CHAR('H')
@@ -394,7 +394,7 @@ INPUT_PORTS_END
 
 /* Alice uses an AZERTY keyboard */
 /*  Port                                        Key description                 Emulated key                  Natural key     Shift 1         Shift 2 (Ctrl) */
-static INPUT_PORTS_START( alice )
+INPUT_PORTS_START( alice )
 	PORT_START("pb0") /* KEY ROW 0 */
 	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_NAME("@     INPUT")        PORT_CODE(KEYCODE_OPENBRACE)  PORT_CHAR('@')
 	PORT_BIT(0x02, IP_ACTIVE_LOW, IPT_KEYBOARD) PORT_NAME("H     THEN")         PORT_CODE(KEYCODE_H)          PORT_CHAR('H')
@@ -471,101 +471,130 @@ static INPUT_PORTS_START( alice )
 	PORT_BIT(0x80, IP_ACTIVE_LOW, IPT_UNUSED)
 INPUT_PORTS_END
 
+static DEVICE_INPUT_DEFAULTS_START( printer )
+	DEVICE_INPUT_DEFAULTS( "RS232_RXBAUD", 0xff, RS232_BAUD_600 )
+	DEVICE_INPUT_DEFAULTS( "RS232_DATABITS", 0xff, RS232_DATABITS_8 )
+	DEVICE_INPUT_DEFAULTS( "RS232_PARITY", 0xff, RS232_PARITY_NONE )
+	DEVICE_INPUT_DEFAULTS( "RS232_STOPBITS", 0xff, RS232_STOPBITS_1 )
+DEVICE_INPUT_DEFAULTS_END
 
 /***************************************************************************
     MACHINE DRIVERS
 ***************************************************************************/
 
-static MACHINE_CONFIG_START( mc10, mc10_state )
-
+void mc10_state::mc10_base(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", M6803, XTAL_3_579545MHz)  /* 0,894886 MHz */
-	MCFG_CPU_PROGRAM_MAP(mc10_mem)
-	MCFG_CPU_IO_MAP(mc10_io)
-
-	/* video hardware */
-	MCFG_SCREEN_MC6847_NTSC_ADD("screen", "mc6847")
-
-	MCFG_DEVICE_ADD("mc6847", MC6847_NTSC, XTAL_3_579545MHz)
-	MCFG_MC6847_INPUT_CALLBACK(READ8(mc10_state, mc6847_videoram_r))
+	M6803(config, m_maincpu, XTAL(3'579'545));  /* 0,894886 MHz */
+	m_maincpu->set_addrmap(AS_PROGRAM, &mc10_state::mc10_mem);
+	m_maincpu->in_p1_cb().set(FUNC(mc10_state::mc10_port1_r));
+	m_maincpu->out_p1_cb().set(FUNC(mc10_state::mc10_port1_w));
+	m_maincpu->in_p2_cb().set(FUNC(mc10_state::mc10_port2_r));
+	m_maincpu->out_p2_cb().set(FUNC(mc10_state::mc10_port2_w));
 
 	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
-	MCFG_SOUND_ADD("dac", DAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.00)
+	SPEAKER(config, "speaker").front_center();
+	DAC_1BIT(config, m_dac, 0).add_route(ALL_OUTPUTS, "speaker", 0.0625);
 
-	MCFG_CASSETTE_ADD("cassette")
-	MCFG_CASSETTE_FORMATS(coco_cassette_formats)
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED | CASSETTE_SPEAKER_ENABLED | CASSETTE_MOTOR_ENABLED)
-	MCFG_CASSETTE_INTERFACE("mc10_cass")
+	CASSETTE(config, m_cassette);
+	m_cassette->set_formats(alice32_cassette_formats);
+	m_cassette->set_default_state(CASSETTE_STOPPED | CASSETTE_SPEAKER_ENABLED | CASSETTE_MOTOR_ENABLED);
+	m_cassette->add_route(ALL_OUTPUTS, "speaker", 0.05);
+	m_cassette->set_interface("mc10_cass");
 
 	/* printer */
-	MCFG_DEVICE_ADD("printer", PRINTER, 0)
+	rs232_port_device &rs232(RS232_PORT(config, "rs232", default_rs232_devices, "rs_printer"));
+	rs232.set_option_device_input_defaults("rs_printer", DEVICE_INPUT_DEFAULTS_NAME(printer));
+}
 
+void mc10_state::mc10_video(machine_config &config)
+{
 	/* internal ram */
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("20K")
-	MCFG_RAM_EXTRA_OPTIONS("4K")
-
-	/* Software lists */
-	MCFG_SOFTWARE_LIST_ADD("cass_list", "mc10")
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_START( alice32, mc10_state )
-
-	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", M6803, XTAL_3_579545MHz)
-	MCFG_CPU_PROGRAM_MAP(alice32_mem)
-	MCFG_CPU_IO_MAP(mc10_io)
+	RAM(config, m_ram).set_default_size("4K").set_extra_options("8K,20K,32K");
 
 	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(60)
-	MCFG_SCREEN_UPDATE_DEVICE("ef9345", ef9345_device, screen_update)
-	MCFG_SCREEN_SIZE(336, 270)
-	MCFG_SCREEN_VISIBLE_AREA(00, 336-1, 00, 270-1)
-	MCFG_PALETTE_ADD("palette", 8)
+	SCREEN(config, "screen", SCREEN_TYPE_RASTER).set_raw(3.579545_MHz_XTAL * 2, 456, 0, 320, 262, 0, 240);
 
-	MCFG_DEVICE_ADD("ef9345", EF9345, 0)
-	MCFG_EF9345_PALETTE("palette")
-	MCFG_TIMER_DRIVER_ADD_SCANLINE("alice32_sl", mc10_state, alice32_scanline, "screen", 0, 10)
+	mc6847_ntsc_device &vdg(MC6847_NTSC(config, "mc6847", XTAL(3'579'545)));
+	vdg.set_screen("screen");
+	vdg.input_callback().set(FUNC(mc10_state::mc6847_videoram_r));
+}
 
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
-	MCFG_SOUND_ADD("dac", DAC, 0)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.00)
+void mc10_state::mc10(machine_config &config)
+{
+	mc10_base(config);
+	mc10_video(config);
 
-	MCFG_CASSETTE_ADD("cassette")
-	MCFG_CASSETTE_FORMATS(alice32_cassette_formats)
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED | CASSETTE_SPEAKER_ENABLED | CASSETTE_MOTOR_ENABLED)
-	MCFG_CASSETTE_INTERFACE("mc10_cass")
+	/* expansion port hardware */
+	mc10cart_slot_device &cartslot(MC10CART_SLOT(config, "ext", DERIVED_CLOCK(1, 1), mc10_cart_add_basic_devices, nullptr));
+	cartslot.set_memspace(m_maincpu, AS_PROGRAM);
+	cartslot.nmi_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
-	/* printer */
-	MCFG_DEVICE_ADD("printer", PRINTER, 0)
+	/* Software lists */
+	SOFTWARE_LIST(config, "cass_list").set_original("mc10");
+}
+
+void mc10_state::alice(machine_config &config)
+{
+	mc10_base(config);
+	mc10_video(config);
+
+	/* expansion port hardware */
+	mc10cart_slot_device &cartslot(MC10CART_SLOT(config, "ext", DERIVED_CLOCK(1, 1), alice_cart_add_basic_devices, nullptr));
+	cartslot.set_memspace(m_maincpu, AS_PROGRAM);
+	cartslot.nmi_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+
+	/* Software lists */
+	SOFTWARE_LIST(config, "cass_list").set_original("mc10");
+}
+
+void alice32_state::alice32(machine_config &config)
+{
+	mc10_base(config);
+
+	/* basic machine hardware */
+	m_maincpu->set_addrmap(AS_PROGRAM, &alice32_state::alice32_mem);
+
+	/* video hardware */
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_refresh_hz(60);
+	screen.set_screen_update("ef9345", FUNC(ef9345_device::screen_update));
+	screen.set_size(336, 270);
+	screen.set_visarea(00, 336-1, 00, 270-1);
+	PALETTE(config, "palette").set_entries(8);
+
+	EF9345(config, m_ef9345, 0);
+	m_ef9345->set_screen("screen");
+	m_ef9345->set_palette_tag("palette");
+	TIMER(config, "alice32_sl").configure_scanline(FUNC(alice32_state::alice32_scanline), "screen", 0, 10);
+
+	/* expansion port hardware */
+	mc10cart_slot_device &cartslot(MC10CART_SLOT(config, "ext", DERIVED_CLOCK(1, 1), alice32_cart_add_basic_devices, nullptr));
+	cartslot.set_memspace(m_maincpu, AS_PROGRAM);
+	cartslot.nmi_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	/* internal ram */
+	RAM(config, m_ram).set_default_size("8K").set_extra_options("24K");
+
+	/* Software lists */
+	SOFTWARE_LIST(config, "cass_list").set_original("alice32");
+	SOFTWARE_LIST(config, "mc10_cass").set_compatible("mc10");
+}
+
+void alice32_state::alice90(machine_config &config)
+{
+	alice32(config);
+
+	/* basic machine hardware */
+	m_maincpu->set_addrmap(AS_PROGRAM, &alice32_state::alice90_mem);
 
 	/* internal ram */
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("24K")
-	MCFG_RAM_EXTRA_OPTIONS("8K")
+	m_ram->set_default_size("32K");
 
 	/* Software lists */
-	MCFG_SOFTWARE_LIST_ADD("cass_list", "alice32")
-	MCFG_SOFTWARE_LIST_COMPATIBLE_ADD("mc10_cass", "mc10")
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_DERIVED( alice90, alice32 )
-	MCFG_CPU_MODIFY("maincpu")
-	MCFG_CPU_PROGRAM_MAP(alice90_mem)
-
-	MCFG_RAM_MODIFY(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("32K")
-
-	/* Software lists */
-	MCFG_SOFTWARE_LIST_MODIFY("cass_list", "alice90")
-	MCFG_SOFTWARE_LIST_COMPATIBLE_ADD("alice32_cass", "alice32")
-	MCFG_DEVICE_REMOVE("mc10_cass")
-MACHINE_CONFIG_END
-
+	subdevice<software_list_device>("cass_list")->set_original("alice90");
+	SOFTWARE_LIST(config, "alice32_cass").set_compatible("alice32");
+	config.device_remove("mc10_cass");
+}
 
 /***************************************************************************
     ROM DEFINITIONS
@@ -597,12 +626,14 @@ ROM_START( alice90 )
 	ROM_LOAD( "charset.rom", 0x0000, 0x2000, BAD_DUMP CRC(b2f49eb3) SHA1(d0ef530be33bfc296314e7152302d95fdf9520fc) )            // from dcvg5k
 ROM_END
 
+}
+
 /***************************************************************************
     GAME DRIVERS
 ***************************************************************************/
 
-/*    YEAR  NAME   PARENT  COMPAT  MACHINE  INPUT  INIT  COMPANY              FULLNAME  FLAGS */
-COMP( 1983, mc10,  0,      0,      mc10,    mc10, mc10_state,  mc10, "Tandy Radio Shack", "MC-10",  MACHINE_SUPPORTS_SAVE )
-COMP( 1983, alice, mc10,   0,      mc10,    alice, mc10_state, mc10, "Matra & Hachette",  "Alice",  MACHINE_SUPPORTS_SAVE )
-COMP( 1984, alice32,       0, 0,   alice32, alice, mc10_state, mc10, "Matra & Hachette",  "Alice 32",  MACHINE_IMPERFECT_GRAPHICS | MACHINE_SUPPORTS_SAVE )
-COMP( 1985, alice90, alice32, 0,   alice90, alice, mc10_state, mc10, "Matra & Hachette",  "Alice 90",  MACHINE_IMPERFECT_GRAPHICS | MACHINE_SUPPORTS_SAVE )
+//    YEAR  NAME     PARENT   COMPAT  MACHINE  INPUT  CLASS          INIT        COMPANY              FULLNAME     FLAGS
+COMP( 1983, mc10,    0,       0,      mc10,    mc10,  mc10_state,    empty_init, "Tandy Radio Shack", "MC-10",     MACHINE_SUPPORTS_SAVE )
+COMP( 1983, alice,   mc10,    0,      alice,   alice, mc10_state,    empty_init, "Matra & Hachette",  "Alice",     MACHINE_SUPPORTS_SAVE )
+COMP( 1984, alice32, 0,       0,      alice32, alice, alice32_state, empty_init, "Matra & Hachette",  "Alice 32",  MACHINE_IMPERFECT_GRAPHICS | MACHINE_SUPPORTS_SAVE )
+COMP( 1985, alice90, alice32, 0,      alice90, alice, alice32_state, empty_init, "Matra & Hachette",  "Alice 90",  MACHINE_IMPERFECT_GRAPHICS | MACHINE_SUPPORTS_SAVE )

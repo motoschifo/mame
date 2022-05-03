@@ -29,8 +29,8 @@
 ***************************************************************************/
 
 #include "emu.h"
-#include "debugger.h"
 #include "dsp32.h"
+#include "dsp32dis.h"
 
 
 //**************************************************************************
@@ -136,14 +136,14 @@
 //  DEVICE INTERFACE
 //**************************************************************************
 
-const device_type DSP32C = &device_creator<dsp32c_device>;
+DEFINE_DEVICE_TYPE(DSP32C, dsp32c_device, "dsp32c", "AT&T DSP32C")
 
 //-------------------------------------------------
 //  dsp32c_device - constructor
 //-------------------------------------------------
 
-dsp32c_device::dsp32c_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: cpu_device(mconfig, DSP32C, "DSP32C", tag, owner, clock, "dsp32c", __FILE__),
+dsp32c_device::dsp32c_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: cpu_device(mconfig, DSP32C, tag, owner, clock),
 		m_program_config("program", ENDIANNESS_LITTLE, 32, 24),
 		m_pin(0),
 		m_pout(0),
@@ -173,12 +173,10 @@ dsp32c_device::dsp32c_device(const machine_config &mconfig, const char *tag, dev
 		m_icount(0),
 		m_lastpins(0),
 		m_ppc(0),
-		m_program(nullptr),
-		m_direct(nullptr),
 		m_output_pins_changed(*this)
 {
 	// set our instruction counter
-	m_icountptr = &m_icount;
+	set_icountptr(m_icount);
 }
 
 //-------------------------------------------------
@@ -190,13 +188,12 @@ void dsp32c_device::device_start()
 	m_output_pins_changed.resolve_safe();
 
 	// get our address spaces
-	m_program = &space(AS_PROGRAM);
-	m_direct = &m_program->direct();
+	space(AS_PROGRAM).cache(m_cache);
+	space(AS_PROGRAM).specific(m_program);
 
 	// register our state for the debugger
 	state_add(STATE_GENPC,     "GENPC",     m_r[15]).noshow();
-	state_add(STATE_GENPCBASE, "GENPCBASE", m_ppc).noshow();
-	state_add(STATE_GENSP,     "GENSP",     m_r[21]).noshow();
+	state_add(STATE_GENPCBASE, "CURPC",     m_ppc).noshow();
 	state_add(STATE_GENFLAGS,  "GENFLAGS",  m_iotemp).callimport().callexport().formatstr("%6s").noshow();
 	state_add(DSP32_PC,        "PC",        m_r[15]).mask(0xffffff);
 	for (int regnum = 0; regnum <= 14; regnum++)
@@ -301,13 +298,15 @@ void dsp32c_device::device_reset()
 
 //-------------------------------------------------
 //  memory_space_config - return the configuration
-//  of the specified address space, or NULL if
+//  of the specified address space, or nullptr if
 //  the space doesn't exist
 //-------------------------------------------------
 
-const address_space_config *dsp32c_device::memory_space_config(address_spacenum spacenum) const
+device_memory_interface::space_config_vector dsp32c_device::memory_space_config() const
 {
-	return (spacenum == AS_PROGRAM) ? &m_program_config : nullptr;
+	return space_config_vector {
+		std::make_pair(AS_PROGRAM, &m_program_config)
+	};
 }
 
 
@@ -395,38 +394,14 @@ void dsp32c_device::state_string_export(const device_state_entry &entry, std::st
 
 
 //-------------------------------------------------
-//  disasm_min_opcode_bytes - return the length
-//  of the shortest instruction, in bytes
-//-------------------------------------------------
-
-UINT32 dsp32c_device::disasm_min_opcode_bytes() const
-{
-	return 4;
-}
-
-
-//-------------------------------------------------
-//  disasm_max_opcode_bytes - return the length
-//  of the longest instruction, in bytes
-//-------------------------------------------------
-
-UINT32 dsp32c_device::disasm_max_opcode_bytes() const
-{
-	return 4;
-}
-
-
-//-------------------------------------------------
-//  disasm_disassemble - call the disassembly
+//  disassemble - call the disassembly
 //  helper function
 //-------------------------------------------------
 
-offs_t dsp32c_device::disasm_disassemble(char *buffer, offs_t pc, const UINT8 *oprom, const UINT8 *opram, UINT32 options)
+std::unique_ptr<util::disasm_interface> dsp32c_device::create_disassembler()
 {
-	extern CPU_DISASSEMBLE( dsp32c );
-	return CPU_DISASSEMBLE_NAME(dsp32c)(this, buffer, pc, oprom, opram, options);
+	return std::make_unique<dsp32c_disassembler>();
 }
-
 
 
 
@@ -434,55 +409,55 @@ offs_t dsp32c_device::disasm_disassemble(char *buffer, offs_t pc, const UINT8 *o
 //  MEMORY ACCESSORS
 //**************************************************************************
 
-inline UINT32 dsp32c_device::ROPCODE(offs_t pc)
+inline uint32_t dsp32c_device::ROPCODE(offs_t pc)
 {
-	return m_direct->read_dword(pc);
+	return m_cache.read_dword(pc);
 }
 
-inline UINT8 dsp32c_device::RBYTE(offs_t addr)
+inline uint8_t dsp32c_device::RBYTE(offs_t addr)
 {
-	return m_program->read_byte(addr);
+	return m_program.read_byte(addr);
 }
 
-inline void dsp32c_device::WBYTE(offs_t addr, UINT8 data)
+inline void dsp32c_device::WBYTE(offs_t addr, uint8_t data)
 {
-	m_program->write_byte(addr, data);
+	m_program.write_byte(addr, data);
 }
 
-inline UINT16 dsp32c_device::RWORD(offs_t addr)
+inline uint16_t dsp32c_device::RWORD(offs_t addr)
 {
 #if DETECT_MISALIGNED_MEMORY
 	if (!WORD_ALIGNED(addr))
 		osd_printf_error("Unaligned word read @ %06X, PC=%06X\n", addr, PC);
 #endif
-	return m_program->read_word(addr);
+	return m_program.read_word(addr);
 }
 
-inline UINT32 dsp32c_device::RLONG(offs_t addr)
+inline uint32_t dsp32c_device::RLONG(offs_t addr)
 {
 #if DETECT_MISALIGNED_MEMORY
 	if (!DWORD_ALIGNED(addr))
 		osd_printf_error("Unaligned long read @ %06X, PC=%06X\n", addr, PC);
 #endif
-	return m_program->read_dword(addr);
+	return m_program.read_dword(addr);
 }
 
-inline void dsp32c_device::WWORD(offs_t addr, UINT16 data)
+inline void dsp32c_device::WWORD(offs_t addr, uint16_t data)
 {
 #if DETECT_MISALIGNED_MEMORY
 	if (!WORD_ALIGNED(addr))
 		osd_printf_error("Unaligned word write @ %06X, PC=%06X\n", addr, PC);
 #endif
-	m_program->write_word(addr, data);
+	m_program.write_word(addr, data);
 }
 
-inline void dsp32c_device::WLONG(offs_t addr, UINT32 data)
+inline void dsp32c_device::WLONG(offs_t addr, uint32_t data)
 {
 #if DETECT_MISALIGNED_MEMORY
 	if (!DWORD_ALIGNED(addr))
 		osd_printf_error("Unaligned long write @ %06X, PC=%06X\n", addr, PC);
 #endif
-	m_program->write_dword(addr, data);
+	m_program.write_dword(addr, data);
 }
 
 
@@ -508,9 +483,9 @@ void dsp32c_device::set_irq_line(int irqline, int state)
 //  REGISTER HANDLING
 //**************************************************************************
 
-void dsp32c_device::update_pcr(UINT16 newval)
+void dsp32c_device::update_pcr(uint16_t newval)
 {
-	UINT16 oldval = m_pcr;
+	uint16_t oldval = m_pcr;
 	m_pcr = newval;
 
 	// reset the chip if we get a reset
@@ -528,7 +503,7 @@ void dsp32c_device::update_pins(void)
 {
 	if (m_pcr & PCR_ENI)
 	{
-		UINT16 newoutput = 0;
+		uint16_t newoutput = 0;
 
 		if (m_pcr & PCR_PIFs)
 			newoutput |= DSP32_OUTPUT_PIF;
@@ -550,7 +525,7 @@ void dsp32c_device::update_pins(void)
 //  CORE INCLUDE
 //**************************************************************************
 
-#include "dsp32ops.inc"
+#include "dsp32ops.hxx"
 
 
 
@@ -563,7 +538,7 @@ void dsp32c_device::update_pins(void)
 //  cycles it takes for one instruction to execute
 //-------------------------------------------------
 
-UINT32 dsp32c_device::execute_min_cycles() const
+uint32_t dsp32c_device::execute_min_cycles() const noexcept
 {
 	return 4;
 }
@@ -574,7 +549,7 @@ UINT32 dsp32c_device::execute_min_cycles() const
 //  cycles it takes for one instruction to execute
 //-------------------------------------------------
 
-UINT32 dsp32c_device::execute_max_cycles() const
+uint32_t dsp32c_device::execute_max_cycles() const noexcept
 {
 	return 4;
 }
@@ -585,7 +560,7 @@ UINT32 dsp32c_device::execute_max_cycles() const
 //  input/interrupt lines
 //-------------------------------------------------
 
-UINT32 dsp32c_device::execute_input_lines() const
+uint32_t dsp32c_device::execute_input_lines() const noexcept
 {
 	return 2;
 }
@@ -630,7 +605,7 @@ void dsp32c_device::execute_run()
 //  PARALLEL INTERFACE WRITES
 //**************************************************************************
 
-const UINT32 dsp32c_device::s_regmap[4][16] =
+const uint32_t dsp32c_device::s_regmap[4][16] =
 {
 	{   // DSP32 compatible mode
 		PIO_PAR|LOWER, PIO_PAR|UPPER, PIO_PDR|LOWER, PIO_PDR|UPPER,
@@ -681,7 +656,7 @@ void dsp32c_device::dma_load()
 	// only process if DMA is enabled
 	if (m_pcr & PCR_DMA)
 	{
-		UINT32 addr = m_par | (m_pare << 16);
+		uint32_t addr = m_par | (m_pare << 16);
 
 		// 16-bit case
 		if (!(m_pcr & PCR_DMA32))
@@ -690,7 +665,7 @@ void dsp32c_device::dma_load()
 		// 32-bit case
 		else
 		{
-			UINT32 temp = RLONG(addr & 0xfffffc);
+			uint32_t temp = RLONG(addr & 0xfffffc);
 			m_pdr = temp >> 16;
 			m_pdr2 = temp & 0xffff;
 		}
@@ -706,7 +681,7 @@ void dsp32c_device::dma_store()
 	// only process if DMA is enabled
 	if (m_pcr & PCR_DMA)
 	{
-		UINT32 addr = m_par | (m_pare << 16);
+		uint32_t addr = m_par | (m_pare << 16);
 
 		// 16-bit case
 		if (!(m_pcr & PCR_DMA32))
@@ -724,8 +699,8 @@ void dsp32c_device::dma_store()
 
 void dsp32c_device::pio_w(int reg, int data)
 {
-	UINT16 mask;
-	UINT8 mode;
+	uint16_t mask;
+	uint8_t mode;
 
 	// look up register and mask
 	mode = ((m_pcr >> 8) & 2) | ((m_pcr >> 1) & 1);
@@ -806,8 +781,8 @@ void dsp32c_device::pio_w(int reg, int data)
 
 int dsp32c_device::pio_r(int reg)
 {
-	UINT16 mask, result = 0xffff;
-	UINT8 mode, shift = 0;
+	uint16_t mask, result = 0xffff;
+	uint8_t mode, shift = 0;
 
 	// look up register and mask
 	mode = ((m_pcr >> 8) & 2) | ((m_pcr >> 1) & 1);

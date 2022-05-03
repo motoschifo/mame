@@ -2,113 +2,114 @@
 // copyright-holders:Tomasz Slanina, David Haywood
 /* ST0016 - CPU (z80) + Sound + Video */
 
+#ifndef MAME_MACHINE_ST0016_H
+#define MAME_MACHINE_ST0016_H
+
 #pragma once
 
-#ifndef __ST0016_CPU__
-#define __ST0016_CPU__
-
-#include "emu.h"
 #include "cpu/z80/z80.h"
 #include "sound/st0016.h"
-
-extern UINT8 macs_cart_slot;
-
-#define ISMACS  (st0016_game&0x80)
-#define ISMACS1 (((st0016_game&0x180)==0x180))
-#define ISMACS2 (((st0016_game&0x180)==0x080))
+#include "screen.h"
 
 
-#define ST0016_MAX_SPR_BANK   0x10
-#define ST0016_MAX_CHAR_BANK  0x10000
-#define ST0016_MAX_PAL_BANK   4
-
-#define ST0016_SPR_BANK_SIZE  0x1000
-#define ST0016_CHAR_BANK_SIZE 0x20
-#define ST0016_PAL_BANK_SIZE  0x200
-
-#define UNUSED_PEN 1024
-
-#define ST0016_SPR_BANK_MASK  (ST0016_MAX_SPR_BANK-1)
-#define ST0016_CHAR_BANK_MASK (ST0016_MAX_CHAR_BANK-1)
-#define ST0016_PAL_BANK_MASK  (ST0016_MAX_PAL_BANK-1)
-
-
-
-class st0016_cpu_device : public z80_device
+class st0016_cpu_device : public z80_device, public device_gfx_interface, public device_video_interface, public device_mixer_interface
 {
 public:
-	st0016_cpu_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32);
+	enum
+	{
+		AS_CHARAM = AS_OPCODES + 1
+	};
 
-	DECLARE_WRITE8_MEMBER(st0016_sprite_bank_w);
-	DECLARE_WRITE8_MEMBER(st0016_palette_bank_w);
-	DECLARE_WRITE8_MEMBER(st0016_character_bank_w);
-	DECLARE_READ8_MEMBER(st0016_sprite_ram_r);
-	DECLARE_WRITE8_MEMBER(st0016_sprite_ram_w);
-	DECLARE_READ8_MEMBER(st0016_sprite2_ram_r);
-	DECLARE_WRITE8_MEMBER(st0016_sprite2_ram_w);
-	DECLARE_READ8_MEMBER(st0016_palette_ram_r);
-	DECLARE_WRITE8_MEMBER(st0016_palette_ram_w);
-	DECLARE_READ8_MEMBER(st0016_character_ram_r);
-	DECLARE_WRITE8_MEMBER(st0016_character_ram_w);
-	DECLARE_READ8_MEMBER(st0016_vregs_r);
-	DECLARE_READ8_MEMBER(st0016_dma_r);
-	DECLARE_WRITE8_MEMBER(st0016_vregs_w);
-	DECLARE_READ8_MEMBER(soundram_read);
+	typedef device_delegate<u8 ()> dma_offs_delegate;
 
+	st0016_cpu_device(const machine_config &mconfig, const char *tag, device_t *owner, u32);
 
-	void draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect);
-	void st0016_save_init();
-	void draw_bgmap(bitmap_ind16 &bitmap,const rectangle &cliprect, int priority);
+	template <typename... T> void set_dma_offs_callback(T &&... args) { m_dma_offs_cb.set(std::forward<T>(args)...); }
 
-	void startup();
-	UINT32 update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
-	void st0016_draw_screen(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void set_game_flag(u32 flag) { m_game_flag = flag; }
 
-	std::unique_ptr<UINT8[]> st0016_spriteram;
-	std::unique_ptr<UINT8[]> st0016_paletteram;
-
-	UINT32 st0016_game;
-
-
-	INT32 st0016_spr_bank,st0016_spr2_bank,st0016_pal_bank,st0016_char_bank;
-	int spr_dx,spr_dy;
-
-	UINT8 st0016_vregs[0xc0];
-	int st0016_ramgfx;
-	std::unique_ptr<UINT8[]> m_charram;
+	void draw_screen(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	u32 update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 
 protected:
 	// device-level overrides
-	virtual machine_config_constructor device_mconfig_additions() const override;
+	virtual void device_add_mconfig(machine_config &config) override;
 	virtual void device_start() override;
 	virtual void device_reset() override;
 
 	const address_space_config m_io_space_config;
 	const address_space_config m_space_config;
+	const address_space_config m_charam_space_config;
 
-
-	const address_space_config *memory_space_config(address_spacenum spacenum) const override
-	{
-		switch (spacenum)
-		{
-			case AS_IO: return &m_io_space_config;
-			case AS_PROGRAM: return &m_space_config;
-			default: return z80_device::memory_space_config(spacenum);
-		}
-	};
-	required_device<screen_device> m_screen;
-	required_device<gfxdecode_device> m_gfxdecode;
-
-public: // speglsht needs to access this for mixing
-	required_device<palette_device> m_palette;
+	virtual space_config_vector memory_space_config() const override;
 
 private:
+	bool ismacs() const { return m_game_flag & 0x80; }
+	bool ismacs1() const { return (m_game_flag & 0x180) == 0x180; }
+	bool ismacs2() const { return (m_game_flag & 0x180) == 0x080; }
 
+	static constexpr unsigned MAX_SPR_BANK   = 0x10;
+	static constexpr unsigned MAX_CHAR_BANK  = 0x10000;
+	static constexpr unsigned MAX_PAL_BANK   = 4;
+
+	static constexpr unsigned SPR_BANK_SIZE  = 0x1000;
+	static constexpr unsigned CHAR_BANK_SIZE = 0x20;
+	static constexpr unsigned PAL_BANK_SIZE  = 0x200;
+
+	static constexpr unsigned UNUSED_PEN = 1024;
+
+	static constexpr unsigned SPR_BANK_MASK  = MAX_SPR_BANK - 1;
+	static constexpr unsigned CHAR_BANK_MASK = MAX_CHAR_BANK - 1;
+	static constexpr unsigned PAL_BANK_MASK  = MAX_PAL_BANK - 1;
+
+	required_memory_region m_rom;
+	memory_share_creator<u8> m_spriteram;
+	memory_share_creator<u8> m_charram;
+	memory_share_creator<u8> m_paletteram;
+
+	u8 m_dma_offset;
+	dma_offs_delegate m_dma_offs_cb;
+	u32 m_game_flag;
+
+	memory_access<21, 0, 0, ENDIANNESS_LITTLE>::specific m_charam_space;
+
+	void sprite_bank_w(u8 data);
+	void palette_bank_w(u8 data);
+	void character_bank_w(offs_t offset, u8 data);
+	u8 sprite_ram_r(offs_t offset);
+	void sprite_ram_w(offs_t offset, u8 data);
+	u8 sprite2_ram_r(offs_t offset);
+	void sprite2_ram_w(offs_t offset, u8 data);
+	u8 palette_ram_r(offs_t offset);
+	void palette_ram_w(offs_t offset, u8 data);
+	u8 charam_bank_r(offs_t offset);
+	void charam_bank_w(offs_t offset, u8 data);
+	u8 character_ram_r(offs_t offset);
+	void character_ram_w(offs_t offset, u8 data);
+	u8 vregs_r(offs_t offset);
+	u8 dma_r();
+	void vregs_w(offs_t offset, u8 data);
+
+	void draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void save_init();
+	void draw_bgmap(bitmap_ind16 &bitmap,const rectangle &cliprect, int priority);
+
+	void startup();
+
+	u32 m_spr_bank, m_spr2_bank, m_pal_bank, m_char_bank;
+	int m_spr_dx, m_spr_dy;
+
+	u8 m_vregs[0xc0];
+	u8 m_ramgfx;
+
+	void cpu_internal_io_map(address_map &map);
+	void cpu_internal_map(address_map &map);
+	void charam_map(address_map &map);
 };
 
 
 // device type definition
-extern const device_type ST0016_CPU;
+DECLARE_DEVICE_TYPE(ST0016_CPU, st0016_cpu_device)
 
 
-#endif /// __ST0016_CPU__
+#endif // MAME_MACHINE_ST0016_H

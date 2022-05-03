@@ -10,8 +10,6 @@
 
 *********************************************************************/
 
-#include <assert.h>
-
 #include "formats/itt3030_dsk.h"
 
 itt3030_format::itt3030_format() : wd177x_format(formats)
@@ -36,12 +34,24 @@ const char *itt3030_format::extensions() const
 // gap info is a total guess
 const itt3030_format::format itt3030_format::formats[] = {
 	{   /*  5,25" DS DD 70 tracks 16 SPT 256 bytes/sector */
+		floppy_image::FF_525,  floppy_image::DSQD, floppy_image::MFM,
+		2000,
+		16, 70, 2,
+		256, {},
+		1, {},
+		32, 22, 31
+	},
+	{/*  5,25" DS DD 35 tracks 16 SPT 256 bytes/sector */
 		floppy_image::FF_525,  floppy_image::DSDD, floppy_image::MFM,
-		2000, 16, 70, 2, 256, {}, 1, {}, 32, 22, 31
+		2000,
+		16, 35, 2,
+		256, {},
+		1, {},
+		32, 22, 31
 	},
 	{}
 };
 
 
 
-const floppy_format_type FLOPPY_ITT3030_FORMAT = &floppy_image_format_creator<itt3030_format>;
+const itt3030_format FLOPPY_ITT3030_FORMAT;

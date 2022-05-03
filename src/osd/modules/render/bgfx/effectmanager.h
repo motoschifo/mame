@@ -29,10 +29,11 @@ public:
 	~effect_manager();
 
 	// Getters
-	bgfx_effect* effect(std::string name);
+	bgfx_effect* get_or_load_effect(osd_options &options, std::string name);
+	static bool validate_effect(osd_options &options, std::string name);
 
 private:
-	bgfx_effect* load_effect(std::string name);
+	bgfx_effect* load_effect(osd_options& options, std::string name);
 
 	shader_manager&                     m_shaders;
 	std::map<std::string, bgfx_effect*> m_effects;

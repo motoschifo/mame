@@ -4,17 +4,19 @@
 
  Electra discrete hardware games
 
- Game Name
- Avenger (1975)                               EG-1020
- Combo 3 (Tennis, Soccer, Hockey) (1975)
- Eliminator IV (1976)
- Flying Fortress (1976)                       EG-1060  (Taito same name?)
- Knockout (1975)
- Pace Car Pro (1975)                          EG-1000
- Pace Race (1974?)
- RTH (1976)
- UFO Chase (1975)                             EG-1010
- Wings / Wings Cocktail (1976)
+
+Game Name                                 Board part number  DATA
+
+Avenger (1975)                            EG-1020            YES
+Combo 3 (Tennis, Soccer, Hockey) (1975)                      UNKNOWN
+Eliminator IV (1976)                                         UNKNOWN
+Flying Fortress (1976) (Taito same name?) EG-1060A + EG1060B YES
+Knockout (1975)                                              UNKNOWN
+Pace Car Pro (1975)                       EG-1000            NO
+Pace Race (1975)                          EG-1000            NO
+RTH (1976)                                                   UNKNOWN
+UFO Chase (1975)                          EG-1010            UNKNOWN
+Wings / Wings Cocktail (1976)             EG-1040            YES
 
 ***************************************************************************/
 
@@ -50,25 +52,23 @@ public:
 	{
 	}
 
-	// devices
-	required_device<netlist_mame_device_t> m_maincpu;
-	required_device<fixedfreq_device> m_video;
+	void electra(machine_config &config);
 
-protected:
+private:
+	// devices
+	required_device<netlist_mame_device> m_maincpu;
+	required_device<fixedfreq_device> m_video;
 
 	// driver_device overrides
 	virtual void machine_start() override;
 	virtual void machine_reset() override;
 
 	virtual void video_start() override;
-
-private:
-
 };
 
 
 static NETLIST_START(electra)
-	SOLVER(Solve, 48000)
+	SOLVER(Solver, 48000)
 //  PARAM(Solver.FREQ, 48000)
 	PARAM(Solver.ACCURACY, 1e-4) // works and is sufficient
 
@@ -94,20 +94,20 @@ void electra_state::video_start()
 {
 }
 
-static MACHINE_CONFIG_START( electra, electra_state )
-
+void electra_state::electra(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_DEVICE_ADD("maincpu", NETLIST_CPU, NETLIST_CLOCK)
-	MCFG_NETLIST_SETUP(electra)
+	NETLIST_CPU(config, m_maincpu, netlist::config::DEFAULT_CLOCK()).set_source(netlist_electra);
 
 	/* video hardware */
-	MCFG_FIXFREQ_ADD("fixfreq", "screen")
-	MCFG_FIXFREQ_MONITOR_CLOCK(MASTER_CLOCK)
-	MCFG_FIXFREQ_HORZ_PARAMS(H_TOTAL-67,H_TOTAL-40,H_TOTAL-8,H_TOTAL)
-	MCFG_FIXFREQ_VERT_PARAMS(V_TOTAL-22,V_TOTAL-19,V_TOTAL-12,V_TOTAL)
-	MCFG_FIXFREQ_FIELDCOUNT(1)
-	MCFG_FIXFREQ_SYNC_THRESHOLD(0.30)
-MACHINE_CONFIG_END
+	SCREEN(config, "screen", SCREEN_TYPE_RASTER);
+	FIXFREQ(config, m_video).set_screen("screen");
+	m_video->set_monitor_clock(MASTER_CLOCK);
+	m_video->set_horz_params(H_TOTAL-67,H_TOTAL-40,H_TOTAL-8,H_TOTAL);
+	m_video->set_vert_params(V_TOTAL-22,V_TOTAL-19,V_TOTAL-12,V_TOTAL);
+	m_video->set_fieldcount(1);
+	m_video->set_threshold(0.30);
+}
 
 
 /***************************************************************************
@@ -120,12 +120,24 @@ MACHINE_CONFIG_END
 ROM_START( avenger )
 	ROM_REGION( 0x10000, "maincpu", ROMREGION_ERASE00 )
 
-	ROM_REGION( 0x0200, "roms", ROMREGION_ERASE00 )
-	ROM_LOAD( "106069-a.l10",     0x0000, 0x0200, CRC(12052a01) SHA1(0674254f73be14b871870c52d7f731209411bcea) )
-	ROM_LOAD( "106072-1.d10",     0x0000, 0x0020, CRC(3c10773b) SHA1(84b6d10d372978e80f358e66713571a26e129eed) )
-	ROM_LOAD( "106072-2.g10",     0x0000, 0x0020, CRC(b2dba75e) SHA1(dc4e205aeb62ebd5617e571d9e7b467da377fff5) )
-	ROM_LOAD( "106072-3.h10",     0x0000, 0x0020, CRC(816a8136) SHA1(2eca1ce7b53dd314ad0b2fdf71b843aaca774721) )
+	ROM_REGION( 0x0260, "roms", ROMREGION_ERASE00 )
+	ROM_LOAD( "106069-a.l10", 0x0000, 0x0200, CRC(12052a01) SHA1(0674254f73be14b871870c52d7f731209411bcea) )
+	ROM_LOAD( "106072-1.d10", 0x0200, 0x0020, CRC(3c10773b) SHA1(84b6d10d372978e80f358e66713571a26e129eed) )
+	ROM_LOAD( "106072-2.g10", 0x0220, 0x0020, CRC(b2dba75e) SHA1(dc4e205aeb62ebd5617e571d9e7b467da377fff5) )
+	ROM_LOAD( "106072-3.h10", 0x0240, 0x0020, CRC(816a8136) SHA1(2eca1ce7b53dd314ad0b2fdf71b843aaca774721) )
 ROM_END
 
 
-GAME( 1975, avenger,  0, electra, 0, driver_device,  0, ROT0, "Electra", "Avenger [TTL]", MACHINE_IS_SKELETON )
+ROM_START( flyingf )
+	ROM_REGION( 0x10000, "maincpu", ROMREGION_ERASE00 )
+
+	ROM_REGION( 0x0320, "roms", ROMREGION_ERASE00 )
+	ROM_LOAD( "b-1.2b",  0x0000, 0x0100, CRC(c88a3dff) SHA1(9b5e568206263087f8f1dd7b94b7ae82aa3bdbaf) )
+	ROM_LOAD( "b-2.1a",  0x0100, 0x0100, CRC(7f6e4af5) SHA1(1a436713ae1639b75e4567de040109714b4ff52b) )
+	ROM_LOAD( "b-3.1i",  0x0200, 0x0100, CRC(5687270b) SHA1(481055801f0ba3c036e42e2254962028c5855bbe) )
+	ROM_LOAD( "prom.1d", 0x0300, 0x0020, CRC(4fabe931) SHA1(ac3c2a59dce080460b4a9230f5d36d2b2627f729) )
+ROM_END
+
+
+GAME( 1975, avenger, 0, electra, 0, electra_state, empty_init, ROT0, "Electra", "Avenger [TTL]",         MACHINE_IS_SKELETON )
+GAME( 1976, flyingf, 0, electra, 0, electra_state, empty_init, ROT0, "Electra", "Flying Fortress [TTL]", MACHINE_IS_SKELETON )

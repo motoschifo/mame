@@ -2,12 +2,28 @@
 // copyright-holders:David Haywood
 /*
 
-Astro Russian Fruit Machines
-
-I *think* these are PC based ...
+Astro Russian Fruit Machines on SVGA "Pallas" hardware (PC based).
 
 Some of the games have HDD/CD/Flash images I think, but they're in a format I don't understand.
 We need to figure this out and convert them to CHDs (I think.. unless they're flash)
+
+Known games
+
+Title            Dumped  Notes
+Fairy Tales          NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=30
+Arabian Night        NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=31
+Black Beard         YES  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=32
+Dragon Slayer       YES  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=33
+Flying Age           NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=34
+Halloween Party      NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=35
+Olympian Games      YES  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=36
+The Circus           NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=37
+Treasure Hunting     NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=38
+World War II         NO  https://www.astrocorp.com.tw/eng/game_1_1.php?gid=39
+Ra's Scepter        YES
+Hawaii              YES
+
+Note: It's "Hawaii" the same game as "Treasure Hunting"?
 
 */
 
@@ -23,21 +39,27 @@ public:
 			m_maincpu(*this, "maincpu")
 	{ }
 
-protected:
+	void astropc(machine_config &config);
+
+	void init_astropc();
+
+private:
+	void astropc_io(address_map &map);
+	void astropc_map(address_map &map);
 
 	// devices
 	required_device<cpu_device> m_maincpu;
-public:
-	DECLARE_DRIVER_INIT(astropc);
 };
 
-static ADDRESS_MAP_START( astropc_map, AS_PROGRAM, 32, astropc_state )
-	AM_RANGE(0x000c0000, 0x000fffff) AM_ROM AM_REGION("bios", 0 )
-	AM_RANGE(0xfffc0000, 0xffffffff) AM_ROM AM_REGION("bios", 0 )
-ADDRESS_MAP_END
+void astropc_state::astropc_map(address_map &map)
+{
+	map(0x000c0000, 0x000fffff).rom().region("bios", 0);
+	map(0xfffc0000, 0xffffffff).rom().region("bios", 0);
+}
 
-static ADDRESS_MAP_START( astropc_io, AS_IO, 32, astropc_state )
-ADDRESS_MAP_END
+void astropc_state::astropc_io(address_map &map)
+{
+}
 
 
 static INPUT_PORTS_START( astropc )
@@ -45,12 +67,13 @@ INPUT_PORTS_END
 
 
 
-static MACHINE_CONFIG_START( astropc, astropc_state )
+void astropc_state::astropc(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", I486, 40000000 ) // ??
-	MCFG_CPU_PROGRAM_MAP(astropc_map)
-	MCFG_CPU_IO_MAP(astropc_io)
-MACHINE_CONFIG_END
+	I486(config, m_maincpu, 40000000 ); // ??
+	m_maincpu->set_addrmap(AS_PROGRAM, &astropc_state::astropc_map);
+	m_maincpu->set_addrmap(AS_IO, &astropc_state::astropc_io);
+}
 
 
 ROM_START( blackbd )
@@ -158,19 +181,19 @@ ROM_START( rasce )
 ROM_END
 
 
-DRIVER_INIT_MEMBER(astropc_state,astropc)
+void astropc_state::init_astropc()
 {
 }
 
-GAME( 2002, blackbd,   0,        astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Black Beard (Russia, set 1)", MACHINE_IS_SKELETON )
-GAME( 2002, blackbda,  blackbd,  astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Black Beard (Russia, set 2)", MACHINE_IS_SKELETON )
-GAME( 2002, blackbdb,  blackbd,  astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Black Beard (Russia, set 3)", MACHINE_IS_SKELETON )
+GAME( 2002, blackbd,  0,       astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Black Beard (Russia, set 1)", MACHINE_IS_SKELETON )
+GAME( 2002, blackbda, blackbd, astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Black Beard (Russia, set 2)", MACHINE_IS_SKELETON )
+GAME( 2002, blackbdb, blackbd, astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Black Beard (Russia, set 3)", MACHINE_IS_SKELETON )
 
-GAME( 2002, dslayrr,   0,        astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Dragon Slayer (Russia, set 1)", MACHINE_IS_SKELETON )
-GAME( 2002, dslayrra,  dslayrr,  astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Dragon Slayer (Russia, set 2)", MACHINE_IS_SKELETON )
+GAME( 2002, dslayrr,  0,       astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Dragon Slayer (Russia, set 1)", MACHINE_IS_SKELETON )
+GAME( 2002, dslayrra, dslayrr, astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Dragon Slayer (Russia, set 2)", MACHINE_IS_SKELETON )
 
-GAME( 2002, hawaii,    0,        astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Hawaii (Russia)", MACHINE_IS_SKELETON )
+GAME( 2002, hawaii,   0,       astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Hawaii (Russia)", MACHINE_IS_SKELETON )
 
-GAME( 2002, oligam,    0,        astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Olympian Games (Russia)", MACHINE_IS_SKELETON )
+GAME( 2002, oligam,   0,       astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Olympian Games (Russia)", MACHINE_IS_SKELETON )
 
-GAME( 2002, rasce,     0,        astropc, astropc, astropc_state, astropc, ROT0, "Astro", "Ra Sceptor (Russia)", MACHINE_IS_SKELETON )
+GAME( 2002, rasce,    0,       astropc, astropc, astropc_state, init_astropc, ROT0, "Astro", "Ra's Scepter (Russia)", MACHINE_IS_SKELETON )

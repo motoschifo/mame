@@ -8,42 +8,48 @@
 
 ***************************************************************************/
 
+#ifndef MAME_LIB_UTIL_HARDDISK_H
+#define MAME_LIB_UTIL_HARDDISK_H
+
 #pragma once
 
-#ifndef __HARDDISK_H__
-#define __HARDDISK_H__
+#include "chd.h"
+#include "utilfwd.h"
 
 #include "osdcore.h"
-#include "chd.h"
 
 
-/***************************************************************************
-    TYPE DEFINITIONS
-***************************************************************************/
+class hard_disk_file {
+public:
+	struct info
+	{
+		uint32_t          cylinders;
+		uint32_t          heads;
+		uint32_t          sectors;
+		uint32_t          sectorbytes;
+	};
 
-struct hard_disk_file;
+	hard_disk_file(chd_file *chd);
+	hard_disk_file(util::random_read_write &corefile, uint32_t skipoffs);
 
-struct hard_disk_info
-{
-	UINT32          cylinders;
-	UINT32          heads;
-	UINT32          sectors;
-	UINT32          sectorbytes;
+	~hard_disk_file();
+
+	const info &get_info() const { return hdinfo; }
+
+	bool set_block_size(uint32_t blocksize);
+
+	bool read(uint32_t lbasector, void *buffer);
+	bool write(uint32_t lbasector, const void *buffer);
+
+	std::error_condition get_inquiry_data(std::vector<uint8_t> &data) const;
+	std::error_condition get_cis_data(std::vector<uint8_t> &data) const;
+	std::error_condition get_disk_key_data(std::vector<uint8_t> &data) const;
+
+private:
+	chd_file *                  chd;        // CHD file
+	util::random_read_write *   fhandle;    // file if not a CHD
+	info                        hdinfo;     // hard disk info
+	uint32_t                    fileoffset; // offset in the file where the HDD image starts.  not valid for CHDs.
 };
 
-
-
-/***************************************************************************
-    FUNCTION PROTOTYPES
-***************************************************************************/
-
-hard_disk_file *hard_disk_open(chd_file *chd);
-void hard_disk_close(hard_disk_file *file);
-
-chd_file *hard_disk_get_chd(hard_disk_file *file);
-hard_disk_info *hard_disk_get_info(hard_disk_file *file);
-
-UINT32 hard_disk_read(hard_disk_file *file, UINT32 lbasector, void *buffer);
-UINT32 hard_disk_write(hard_disk_file *file, UINT32 lbasector, const void *buffer);
-
-#endif  /* __HARDDISK_H__ */
+#endif // MAME_LIB_UTIL_HARDDISK_H

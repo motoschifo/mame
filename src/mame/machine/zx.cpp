@@ -8,9 +8,10 @@
 
 ****************************************************************************/
 
+#include "emu.h"
 #include "includes/zx.h"
 
-DRIVER_INIT_MEMBER(zx_state,zx)
+void zx_state::init_zx()
 {
 	m_program = &m_maincpu->space(AS_PROGRAM);
 	m_tape_input = timer_alloc(TIMER_TAPE_INPUT);
@@ -28,6 +29,7 @@ void zx_state::machine_reset()
 	m_prev_refresh = 0xff;
 
 	m_vsync_active = false;
+	m_hsync_active = false;
 	m_base_vsync_clock = 0;
 	m_ypos = 0;
 
@@ -47,7 +49,7 @@ void zx_state::zx_tape_input()
 void zx_state::drop_sync()
 {
 	if (m_vsync_active) {
-		UINT64 time = m_maincpu->total_cycles();
+		uint64_t time = m_maincpu->total_cycles();
 		m_vsync_active = false;
 		m_cassette->output(-1.0);
 
@@ -69,19 +71,19 @@ void zx_state::drop_sync()
 				xe = 0;
 			}
 			if(ys == ye) {
-				UINT16 *dest = &m_bitmap_render->pix16(ys, xs);
+				uint16_t *dest = &m_bitmap_render->pix(ys, xs);
 				for(int x = xs; x < xe; x++)
 					*dest++ = 1;
 			} else {
-				UINT16 *dest = &m_bitmap_render->pix16(ys, xs);
+				uint16_t *dest = &m_bitmap_render->pix(ys, xs);
 				for(int x = xs; x < 384; x++)
 					*dest++ = 1;
 				for(int y = ys+1; y < ye; y++) {
-					dest = &m_bitmap_render->pix16(y, 0);
+					dest = &m_bitmap_render->pix(y, 0);
 					for(int x = 0; x<384; x++)
 						*dest++ = 1;
 				}
-				dest = &m_bitmap_render->pix16(ye, 0);
+				dest = &m_bitmap_render->pix(ye, 0);
 				for(int x = 0; x < xe; x++)
 					*dest++ = 1;
 			}
@@ -108,31 +110,18 @@ void zx_state::drop_sync()
 	}
 }
 
-READ8_MEMBER( zx_state::zx80_io_r )
+uint8_t zx_state::zx80_io_r(offs_t offset)
 {
 	/* port FE = read keyboard, NTSC/PAL diode, and cass bit; turn off HSYNC-generator/cass-out
 	    The upper 8 bits are used to select a keyboard scan line */
 
-	UINT8 data = 0xff;
+	uint8_t data = 0xff;
 
 	if (!(offset & 0x01))
 	{
-		if ((offset & 0x0100) == 0)
-			data &= m_io_row0->read();
-		if ((offset & 0x0200) == 0)
-			data &= m_io_row1->read();
-		if ((offset & 0x0400) == 0)
-			data &= m_io_row2->read();
-		if ((offset & 0x0800) == 0)
-			data &= m_io_row3->read();
-		if ((offset & 0x1000) == 0)
-			data &= m_io_row4->read();
-		if ((offset & 0x2000) == 0)
-			data &= m_io_row5->read();
-		if ((offset & 0x4000) == 0)
-			data &= m_io_row6->read();
-		if ((offset & 0x8000) == 0)
-			data &= m_io_row7->read();
+		for (int i = 0; i < 8; i++)
+			if (!BIT(offset, i + 8))
+				data &= m_io_row[i]->read();
 
 		if (!m_io_config->read())
 			data &= ~0x40;
@@ -151,32 +140,19 @@ READ8_MEMBER( zx_state::zx80_io_r )
 	return data;
 }
 
-READ8_MEMBER( zx_state::zx81_io_r )
+uint8_t zx_state::zx81_io_r(offs_t offset)
 {
 /* port FB = read printer status, not emulated
     FE = read keyboard, NTSC/PAL diode, and cass bit; turn off HSYNC-generator/cass-out
     The upper 8 bits are used to select a keyboard scan line */
 
-	UINT8 data = 0xff;
+	uint8_t data = 0xff;
 
 	if (!(offset & 0x01))
 	{
-		if ((offset & 0x0100) == 0)
-			data &= m_io_row0->read();
-		if ((offset & 0x0200) == 0)
-			data &= m_io_row1->read();
-		if ((offset & 0x0400) == 0)
-			data &= m_io_row2->read();
-		if ((offset & 0x0800) == 0)
-			data &= m_io_row3->read();
-		if ((offset & 0x1000) == 0)
-			data &= m_io_row4->read();
-		if ((offset & 0x2000) == 0)
-			data &= m_io_row5->read();
-		if ((offset & 0x4000) == 0)
-			data &= m_io_row6->read();
-		if ((offset & 0x8000) == 0)
-			data &= m_io_row7->read();
+		for (int i = 0; i < 8; i++)
+			if (!BIT(offset, i + 8))
+				data &= m_io_row[i]->read();
 
 		if (!m_io_config->read())
 			data &= ~0x40;
@@ -195,7 +171,7 @@ READ8_MEMBER( zx_state::zx81_io_r )
 	return data;
 }
 
-READ8_MEMBER( zx_state::pc8300_io_r )
+uint8_t zx_state::pc8300_io_r(offs_t offset)
 {
 /* port F5 = sound
     F6 = unknown
@@ -204,8 +180,8 @@ READ8_MEMBER( zx_state::pc8300_io_r )
     The upper 8 bits are used to select a keyboard scan line.
     No TV diode */
 
-	UINT8 data = 0xff;
-	UINT8 offs = offset & 0xff;
+	uint8_t data = 0xff;
+	uint8_t offs = offset & 0xff;
 
 	if (offs == 0xf5)
 	{
@@ -215,22 +191,9 @@ READ8_MEMBER( zx_state::pc8300_io_r )
 	else
 	if (offs == 0xfe)
 	{
-		if ((offset & 0x0100) == 0)
-			data &= m_io_row0->read();
-		if ((offset & 0x0200) == 0)
-			data &= m_io_row1->read();
-		if ((offset & 0x0400) == 0)
-			data &= m_io_row2->read();
-		if ((offset & 0x0800) == 0)
-			data &= m_io_row3->read();
-		if ((offset & 0x1000) == 0)
-			data &= m_io_row4->read();
-		if ((offset & 0x2000) == 0)
-			data &= m_io_row5->read();
-		if ((offset & 0x4000) == 0)
-			data &= m_io_row6->read();
-		if ((offset & 0x8000) == 0)
-			data &= m_io_row7->read();
+		for (int i = 0; i < 8; i++)
+			if (!BIT(offset, i + 8))
+				data &= m_io_row[i]->read();
 
 		m_cassette->output(+1.0);
 		if(m_cassette_cur_level <= 0)
@@ -240,7 +203,7 @@ READ8_MEMBER( zx_state::pc8300_io_r )
 	return data;
 }
 
-READ8_MEMBER( zx_state::pow3000_io_r )
+uint8_t zx_state::pow3000_io_r(offs_t offset)
 {
 /* port 7E = read NTSC/PAL diode
     F5 = sound
@@ -249,8 +212,8 @@ READ8_MEMBER( zx_state::pow3000_io_r )
     FE = read keyboard and cass bit; turn off HSYNC-generator/cass-out
     The upper 8 bits are used to select a keyboard scan line */
 
-	UINT8 data = 0xff;
-	UINT8 offs = offset & 0xff;
+	uint8_t data = 0xff;
+	uint8_t offs = offset & 0xff;
 
 	if (offs == 0x7e)
 	{
@@ -265,22 +228,9 @@ READ8_MEMBER( zx_state::pow3000_io_r )
 	else
 	if (offs == 0xfe)
 	{
-		if ((offset & 0x0100) == 0)
-			data &= m_io_row0->read();
-		if ((offset & 0x0200) == 0)
-			data &= m_io_row1->read();
-		if ((offset & 0x0400) == 0)
-			data &= m_io_row2->read();
-		if ((offset & 0x0800) == 0)
-			data &= m_io_row3->read();
-		if ((offset & 0x1000) == 0)
-			data &= m_io_row4->read();
-		if ((offset & 0x2000) == 0)
-			data &= m_io_row5->read();
-		if ((offset & 0x4000) == 0)
-			data &= m_io_row6->read();
-		if ((offset & 0x8000) == 0)
-			data &= m_io_row7->read();
+		for (int i = 0; i < 8; i++)
+			if (!BIT(offset, i + 8))
+				data &= m_io_row[i]->read();
 
 		m_cassette->output(+1.0);
 		if(m_cassette_cur_level <= 0)
@@ -290,17 +240,17 @@ READ8_MEMBER( zx_state::pow3000_io_r )
 	return data;
 }
 
-WRITE8_MEMBER( zx_state::zx80_io_w )
+void zx_state::zx80_io_w(offs_t offset, uint8_t data)
 {
 /* port FF = write HSYNC and cass data */
 
-	UINT8 offs = offset & 0xff;
+	uint8_t offs = offset & 0xff;
 
 	if (offs == 0xff)
 		m_cassette->output(-1.0);
 }
 
-WRITE8_MEMBER( zx_state::zx81_io_w )
+void zx_state::zx81_io_w(offs_t offset, uint8_t data)
 {
 /* port F5 = unknown, pc8300/pow3000/lambda only
     F6 = unknown, pc8300/pow3000/lambda only

@@ -7,15 +7,17 @@
     Hector disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_HECT_DSK_H
+#define MAME_FORMATS_HECT_DSK_H
 
-#ifndef HECT_DSK_H
-#define HECT_DSK_H
+#pragma once
 
-#include "flopimg.h"
+#include "flopimg_legacy.h"
 
 
 /**************************************************************************/
 
 LEGACY_FLOPPY_OPTIONS_EXTERN(hector_disc2);
 LEGACY_FLOPPY_OPTIONS_EXTERN(hector_minidisc);
-#endif /* HECT_DSK_H */
+
+#endif // MAME_FORMATS_HECT_DSK_H

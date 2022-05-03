@@ -8,8 +8,6 @@
 
 *********************************************************************/
 
-#include <assert.h>
-
 #include "formats/naslite_dsk.h"
 
 naslite_format::naslite_format() : upd765_format(formats)
@@ -39,7 +37,7 @@ const naslite_format::format naslite_format::formats[] = {
 	{}
 };
 
-void naslite_format::build_sector_description(const format &f, UINT8 *sectdata, desc_s *sectors, int track, int head) const
+void naslite_format::build_sector_description(const format &f, uint8_t *sectdata, desc_s *sectors, int track, int head) const
 {
 	for(int i=0; i<f.sector_count; i++) {
 		int cur_offset = 0;
@@ -52,4 +50,4 @@ void naslite_format::build_sector_description(const format &f, UINT8 *sectdata, 
 	}
 }
 
-const floppy_format_type FLOPPY_NASLITE_FORMAT = &floppy_image_format_creator<naslite_format>;
+const naslite_format FLOPPY_NASLITE_FORMAT;

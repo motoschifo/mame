@@ -8,17 +8,19 @@
 
 ****************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <assert.h>
 #include "corefile.h"
 #include "corestr.h"
-#include "sha1.h"
+#include "hashing.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cctype>
+#include <cassert>
 
 #define DEFAULT_SPLIT_SIZE      100
 #define MAX_PARTS               1000
+#define SHA1_DIGEST_SIZE        20
 
 
 
@@ -32,24 +34,19 @@
     hash over a buffer and return a string
 -------------------------------------------------*/
 
-static void compute_hash_as_string(std::string &buffer, void *data, UINT32 length)
+static void compute_hash_as_string(std::string &buffer, void *data, uint32_t length)
 {
-	char expanded[SHA1_DIGEST_SIZE * 2];
-	UINT8 sha1digest[SHA1_DIGEST_SIZE];
-	struct sha1_ctx sha1;
-	int ch;
-
 	// compute the SHA1
-	sha1_init(&sha1);
-	sha1_update(&sha1, length, (const UINT8 *)data);
-	sha1_final(&sha1);
-	sha1_digest(&sha1, sizeof(sha1digest), sha1digest);
+	util::sha1_creator sha1;
+	sha1.append(data, length);
+	const util::sha1_t sha1digest = sha1.finish();
 
 	// expand the digest to a string
-	for (ch = 0; ch < SHA1_DIGEST_SIZE; ch++)
+	char expanded[sizeof(sha1digest.m_raw) * 2];
+	for (int ch = 0; ch < sizeof(sha1digest.m_raw); ch++)
 	{
-		expanded[ch * 2 + 0] = "0123456789ABCDEF"[sha1digest[ch] >> 4];
-		expanded[ch * 2 + 1] = "0123456789ABCDEF"[sha1digest[ch] & 15];
+		expanded[ch * 2 + 0] = "0123456789ABCDEF"[sha1digest.m_raw[ch] >> 4];
+		expanded[ch * 2 + 1] = "0123456789ABCDEF"[sha1digest.m_raw[ch] & 15];
 	}
 
 	// copy it to the buffer
@@ -61,15 +58,15 @@ static void compute_hash_as_string(std::string &buffer, void *data, UINT32 lengt
     split_file - split a file into multiple parts
 -------------------------------------------------*/
 
-static int split_file(const char *filename, const char *basename, UINT32 splitsize)
+static int split_file(const char *filename, const char *basename, uint32_t splitsize)
 {
 	std::string outfilename, basefilename, splitfilename;
 	util::core_file::ptr outfile, infile, splitfile;
 	std::string computedhash;
 	void *splitbuffer = nullptr;
 	int index, partnum;
-	UINT64 totallength;
-	file_error filerr;
+	uint64_t totallength;
+	std::error_condition filerr;
 	int error = 1;
 
 	// convert split size to MB
@@ -82,20 +79,24 @@ static int split_file(const char *filename, const char *basename, UINT32 splitsi
 
 	// open the file for read
 	filerr = util::core_file::open(filename, OPEN_FLAG_READ, infile);
-	if (filerr != FILERR_NONE)
+	if (filerr)
 	{
 		fprintf(stderr, "Fatal error: unable to open file '%s'\n", filename);
 		goto cleanup;
 	}
 
 	// get the total length
-	totallength = infile->size();
+	if (infile->length(totallength))
+	{
+		fprintf(stderr, "Fatal error: unable to get length of file\n");
+		goto cleanup;
+	}
 	if (totallength < splitsize)
 	{
 		fprintf(stderr, "Fatal error: file is smaller than the split size\n");
 		goto cleanup;
 	}
-	if ((UINT64)splitsize * MAX_PARTS < totallength)
+	if ((uint64_t(splitsize) * MAX_PARTS) < totallength)
 	{
 		fprintf(stderr, "Fatal error: too many splits (maximum is %d)\n", MAX_PARTS);
 		goto cleanup;
@@ -119,8 +120,8 @@ static int split_file(const char *filename, const char *basename, UINT32 splitsi
 	splitfilename.assign(basename).append(".split");
 
 	// create the split file
-	filerr = util::core_file::open(splitfilename.c_str(), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE | OPEN_FLAG_NO_BOM, splitfile);
-	if (filerr != FILERR_NONE)
+	filerr = util::core_file::open(splitfilename, OPEN_FLAG_WRITE | OPEN_FLAG_CREATE | OPEN_FLAG_NO_BOM, splitfile);
+	if (filerr)
 	{
 		fprintf(stderr, "Fatal error: unable to create split file '%s'\n", splitfilename.c_str());
 		goto cleanup;
@@ -136,12 +137,11 @@ static int split_file(const char *filename, const char *basename, UINT32 splitsi
 	// now iterate until done
 	for (partnum = 0; partnum < 1000; partnum++)
 	{
-		UINT32 actual, length;
-
 		printf("Reading part %d...", partnum);
 
 		// read as much as we can from the file
-		length = infile->read(splitbuffer, splitsize);
+		size_t length;
+		infile->read(splitbuffer, splitsize, length); // FIXME check error return
 		if (length == 0)
 			break;
 
@@ -152,11 +152,11 @@ static int split_file(const char *filename, const char *basename, UINT32 splitsi
 		splitfile->printf("hash=%s file=%s.%03d\n", computedhash.c_str(), basefilename.c_str(), partnum);
 
 		// compute the full filename for this guy
-		outfilename = string_format("%s.%03d", basename, partnum);
+		outfilename = util::string_format("%s.%03d", basename, partnum);
 
 		// create it
-		filerr = util::core_file::open(outfilename.c_str(), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, outfile);
-		if (filerr != FILERR_NONE)
+		filerr = util::core_file::open(outfilename, OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, outfile);
+		if (filerr)
 		{
 			printf("\n");
 			fprintf(stderr, "Fatal error: unable to create output file '%s'\n", outfilename.c_str());
@@ -166,8 +166,9 @@ static int split_file(const char *filename, const char *basename, UINT32 splitsi
 		printf(" writing %s.%03d...", basefilename.c_str(), partnum);
 
 		// write the data
-		actual = outfile->write(splitbuffer, length);
-		if (actual != length)
+		size_t actual;
+		filerr = outfile->write(splitbuffer, length, actual);
+		if (filerr || (actual != length) || outfile->flush())
 		{
 			printf("\n");
 			fprintf(stderr, "Fatal error: Error writing output file (out of space?)\n");
@@ -219,15 +220,15 @@ static int join_file(const char *filename, const char *outname, int write_output
 	std::string basepath;
 	util::core_file::ptr outfile, infile, splitfile;
 	void *splitbuffer = nullptr;
-	file_error filerr;
-	UINT32 splitsize;
+	std::error_condition filerr;
+	uint32_t splitsize;
 	char buffer[256];
 	int error = 1;
 	int index;
 
 	// open the file for read
 	filerr = util::core_file::open(filename, OPEN_FLAG_READ, splitfile);
-	if (filerr != FILERR_NONE)
+	if (filerr)
 	{
 		fprintf(stderr, "Fatal error: unable to open file '%s'\n", filename);
 		goto cleanup;
@@ -239,8 +240,7 @@ static int join_file(const char *filename, const char *outname, int write_output
 		fprintf(stderr, "Fatal error: corrupt or incomplete split file at line:\n%s\n", buffer);
 		goto cleanup;
 	}
-	outfilename.assign(buffer + 10);
-	strtrimspace(outfilename);
+	outfilename.assign(strtrimspace(buffer + 10));
 
 	// compute the base path
 	basepath.assign(filename);
@@ -267,8 +267,8 @@ static int join_file(const char *filename, const char *outname, int write_output
 	if (write_output)
 	{
 		// don't overwrite the original!
-		filerr = util::core_file::open(outfilename.c_str(), OPEN_FLAG_READ, outfile);
-		if (filerr == FILERR_NONE)
+		filerr = util::core_file::open(outfilename, OPEN_FLAG_READ, outfile);
+		if (!filerr)
 		{
 			outfile.reset();
 			fprintf(stderr, "Fatal error: output file '%s' already exists\n", outfilename.c_str());
@@ -276,8 +276,8 @@ static int join_file(const char *filename, const char *outname, int write_output
 		}
 
 		// open the output for write
-		filerr = util::core_file::open(outfilename.c_str(), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, outfile);
-		if (filerr != FILERR_NONE)
+		filerr = util::core_file::open(outfilename, OPEN_FLAG_WRITE | OPEN_FLAG_CREATE, outfile);
+		if (filerr)
 		{
 			fprintf(stderr, "Fatal error: unable to create file '%s'\n", outfilename.c_str());
 			goto cleanup;
@@ -289,8 +289,6 @@ static int join_file(const char *filename, const char *outname, int write_output
 	// now iterate through each file
 	while (splitfile->gets(buffer, sizeof(buffer)))
 	{
-		UINT32 length, actual;
-
 		// make sure the hash and filename are in the right place
 		if (strncmp(buffer, "hash=", 5) != 0 || strncmp(buffer + 5 + SHA1_DIGEST_SIZE * 2, " file=", 6) != 0)
 		{
@@ -298,15 +296,15 @@ static int join_file(const char *filename, const char *outname, int write_output
 			goto cleanup;
 		}
 		expectedhash.assign(buffer + 5, SHA1_DIGEST_SIZE * 2);
-		infilename.assign(buffer + 5 + SHA1_DIGEST_SIZE * 2 + 6);
-		strtrimspace(infilename);
+		infilename.assign(strtrimspace(buffer + 5 + SHA1_DIGEST_SIZE * 2 + 6));
 
 		printf("  Reading file '%s'...", infilename.c_str());
 
 		// read the file's contents
 		infilename.insert(0, basepath);
+		uint32_t length;
 		filerr = util::core_file::load(infilename.c_str(), &splitbuffer, length);
-		if (filerr != FILERR_NONE)
+		if (filerr)
 		{
 			printf("\n");
 			fprintf(stderr, "Fatal error: unable to load file '%s'\n", infilename.c_str());
@@ -329,8 +327,9 @@ static int join_file(const char *filename, const char *outname, int write_output
 		{
 			printf(" writing...");
 
-			actual = outfile->write(splitbuffer, length);
-			if (actual != length)
+			size_t actual;
+			filerr = outfile->write(splitbuffer, length, actual);
+			if (filerr || (actual != length) || outfile->flush())
 			{
 				printf("\n");
 				fprintf(stderr, "Fatal error: Error writing output file (out of space?)\n");
@@ -343,7 +342,7 @@ static int join_file(const char *filename, const char *outname, int write_output
 			printf(" verified\n");
 
 		// release allocated memory
-		osd_free(splitbuffer);
+		free(splitbuffer);
 		splitbuffer = nullptr;
 	}
 	if (write_output)
@@ -366,7 +365,7 @@ cleanup:
 			remove(outfilename.c_str());
 	}
 	if (splitbuffer != nullptr)
-		osd_free(splitbuffer);
+		free(splitbuffer);
 	return error;
 }
 
@@ -396,7 +395,7 @@ int main(int argc, char *argv[])
 	{
 		if (argc != 3 && argc != 4)
 			goto usage;
-		result = join_file(argv[2], (argc >= 4) ? argv[3] : nullptr, TRUE);
+		result = join_file(argv[2], (argc >= 4) ? argv[3] : nullptr, true);
 	}
 
 	/* verify command */
@@ -404,7 +403,7 @@ int main(int argc, char *argv[])
 	{
 		if (argc != 3)
 			goto usage;
-		result = join_file(argv[2], nullptr, FALSE);
+		result = join_file(argv[2], nullptr, false);
 	}
 	else
 		goto usage;

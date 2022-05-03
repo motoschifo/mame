@@ -1,4 +1,4 @@
-// license:GPL-2.0+
+// license:BSD-3-Clause
 // copyright-holders:Dirk Best
 /***************************************************************************
 
@@ -7,11 +7,10 @@
     Disk image format
 
 ***************************************************************************/
+#ifndef MAME_FORMATS_2D_DSK_H
+#define MAME_FORMATS_2D_DSK_H
 
 #pragma once
-
-#ifndef __2D_DSK_H__
-#define __2D_DSK_H__
 
 #include "wd177x_dsk.h"
 
@@ -28,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_2D_FORMAT;
+extern const _2d_format FLOPPY_2D_FORMAT;
 
-#endif // __2D_DSK_H__
+#endif // MAME_FORMATS_2D_DSK_H

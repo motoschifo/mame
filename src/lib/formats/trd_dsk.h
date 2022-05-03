@@ -7,9 +7,10 @@
     TRD disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_TRD_DSK_H
+#define MAME_FORMATS_TRD_DSK_H
 
-#ifndef TRD_DSK_H
-#define TRD_DSK_H
+#pragma once
 
 #include "wd177x_dsk.h"
 
@@ -23,8 +24,9 @@ public:
 
 private:
 	static const format formats[];
+	virtual int find_size(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const override;
 };
 
-extern const floppy_format_type FLOPPY_TRD_FORMAT;
+extern const trd_format FLOPPY_TRD_FORMAT;
 
-#endif /* TRD_DSK_H */
+#endif // MAME_FORMATS_TRD_DSK_H

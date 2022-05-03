@@ -7,9 +7,10 @@
     Telenova Compis disk images
 
 *********************************************************************/
+#ifndef MAME_FORMATS_CPIS_DSK_H
+#define MAME_FORMATS_CPIS_DSK_H
 
-#ifndef CPIS_DSK_H
-#define CPIS_DSK_H
+#pragma once
 
 #include "upd765_dsk.h"
 
@@ -25,6 +26,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_CPIS_FORMAT;
+extern const cpis_format FLOPPY_CPIS_FORMAT;
 
-#endif /* CPIS_DSK_H */
+#endif // MAME_FORMATS_CPIS_DSK_H

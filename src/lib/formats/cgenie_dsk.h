@@ -1,4 +1,4 @@
-// license:GPL-2.0+
+// license:BSD-3-Clause
 // copyright-holders:Dirk Best
 /***************************************************************************
 
@@ -7,11 +7,10 @@
     Disk image format
 
 ***************************************************************************/
+#ifndef MAME_FORMATS_CGENIE_DSK_H
+#define MAME_FORMATS_CGENIE_DSK_H
 
 #pragma once
-
-#ifndef __CGENIE_DSK_H__
-#define __CGENIE_DSK_H__
 
 #include "wd177x_dsk.h"
 
@@ -25,13 +24,13 @@ public:
 	virtual const char *extensions() const override;
 
 protected:
-	virtual int get_track_dam_fm(const format &f, int head, int track) override;
-	virtual int get_track_dam_mfm(const format &f, int head, int track) override;
+	virtual int get_track_dam_fm(const format &f, int head, int track) const override;
+	virtual int get_track_dam_mfm(const format &f, int head, int track) const override;
 
 private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_CGENIE_FORMAT;
+extern const cgenie_format FLOPPY_CGENIE_FORMAT;
 
-#endif // __CGENIE_DSK_H__
+#endif // MAME_FORMATS_CGENIE_DSK_H

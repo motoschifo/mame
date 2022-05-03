@@ -16,11 +16,14 @@
 
 ***************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
 #include "jedparse.h"
+
+#include "ioprocs.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cctype>
 
 
 
@@ -38,8 +41,8 @@
 
 struct jed_parse_info
 {
-	UINT16      checksum;               /* checksum value */
-	UINT32      explicit_numfuses;      /* explicitly specified number of fuses */
+	uint16_t      checksum;               /* checksum value */
+	uint32_t      explicit_numfuses;      /* explicitly specified number of fuses */
 };
 
 
@@ -86,10 +89,10 @@ static int isdelim(char c)
     character stream
 -------------------------------------------------*/
 
-static UINT32 suck_number(const UINT8 **psrc)
+static uint32_t suck_number(const uint8_t **psrc)
 {
-	const UINT8 *src = *psrc;
-	UINT32 value = 0;
+	const uint8_t *src = *psrc;
+	uint32_t value = 0;
 
 	/* skip delimiters */
 	while (isdelim(*src))
@@ -117,7 +120,7 @@ static UINT32 suck_number(const UINT8 **psrc)
     process_field - process a single JEDEC field
 -------------------------------------------------*/
 
-static void process_field(jed_data *data, const UINT8 *cursrc, const UINT8 *srcend, jed_parse_info *pinfo)
+static void process_field(jed_data *data, const uint8_t *cursrc, const uint8_t *srcend, jed_parse_info *pinfo)
 {
 	/* switch off of the field type */
 	switch (*cursrc)
@@ -147,7 +150,7 @@ static void process_field(jed_data *data, const UINT8 *cursrc, const UINT8 *srce
 		/* fuse states */
 		case 'L':
 		{
-			UINT32 curfuse;
+			uint32_t curfuse;
 
 			/* read the fuse number */
 			cursrc++;
@@ -187,52 +190,68 @@ static void process_field(jed_data *data, const UINT8 *cursrc, const UINT8 *srce
     loaded raw into memory
 -------------------------------------------------*/
 
-int jed_parse(const void *data, size_t length, jed_data *result)
+int jed_parse(util::random_read &src, jed_data *result)
 {
-	const UINT8 *cursrc = (const UINT8 *)data;
-	const UINT8 *srcend = cursrc + length;
-	const UINT8 *scan;
 	jed_parse_info pinfo;
-	UINT16 checksum;
 	int i;
+	std::size_t actual;
 
 	/* initialize the output and the intermediate info struct */
 	memset(result, 0, sizeof(*result));
 	memset(&pinfo, 0, sizeof(pinfo));
 
 	/* first scan for the STX character; ignore anything prior */
-	while (cursrc < srcend && *cursrc != 0x02)
-		cursrc++;
-	if (cursrc >= srcend)
-		return JEDERR_INVALID_DATA;
+	uint8_t ch;
+	do
+	{
+		if (src.read(&ch, 1, actual) || actual != 1)
+			return JEDERR_INVALID_DATA;
+	}
+	while (ch != 0x02);
 
 	/* then scan to see if we have an ETX */
-	scan = cursrc;
-	checksum = 0;
-	while (scan < srcend && *scan != 0x03)
-		checksum += *scan++ & 0x7f;
-	if (scan >= srcend)
+	uint64_t startpos = 0;
+	uint16_t checksum = ch;
+	do
+	{
+		if (src.read(&ch, 1, actual) || actual != 1)
+			return JEDERR_INVALID_DATA;
+		checksum += ch & 0x7f;
+
+		/* mark end of comment field */
+		if (ch == '*' && startpos == 0)
+		{
+			if (src.tell(startpos))
+				return JEDERR_INVALID_DATA;
+		}
+	}
+	while (ch != 0x03);
+
+	/* the ETX becomes the real srcend */
+	uint64_t endpos;
+	if (src.tell(endpos))
 		return JEDERR_INVALID_DATA;
+	endpos--;
 
 	/* see if there is a transmission checksum at the end */
-	checksum += *scan;
-	if (scan + 4 < srcend && ishex(scan[1]) && ishex(scan[2]) && ishex(scan[3]) && ishex(scan[4]))
+	uint8_t sumbuf[4];
+	if (!src.read(&sumbuf[0], 4, actual) && actual == 4 && ishex(sumbuf[0]) && ishex(sumbuf[1]) && ishex(sumbuf[2]) && ishex(sumbuf[3]))
 	{
-		UINT16 dessum = (hexval(scan[1]) << 12) | (hexval(scan[2]) << 8) | (hexval(scan[3]) << 4) | hexval(scan[4] << 0);
+		uint16_t dessum = (hexval(sumbuf[0]) << 12) | (hexval(sumbuf[1]) << 8) | (hexval(sumbuf[2]) << 4) | hexval(sumbuf[3] << 0);
 		if (dessum != 0 && dessum != checksum)
 			return JEDERR_BAD_XMIT_SUM;
 	}
 
-	/* the ETX becomes the real srcend */
-	srcend = scan;
-
 	/* blast through the comment field */
-	cursrc++;
-	while (cursrc < srcend && *cursrc != '*')
-		cursrc++;
+	if (startpos == 0 || src.seek(startpos, SEEK_SET))
+		return JEDERR_INVALID_DATA;
+	auto srcdata = std::make_unique<uint8_t[]>(endpos - startpos);
+	if (src.read(&srcdata[0], endpos - startpos, actual) || actual != endpos - startpos)
+		return JEDERR_INVALID_DATA;
+	const uint8_t *cursrc = &srcdata[0];
+	const uint8_t *const srcend = &srcdata[endpos - startpos];
 
 	/* now loop over fields and decide which ones go in the file output */
-	cursrc++;
 	while (cursrc < srcend)
 	{
 		/* skip over delimiters */
@@ -242,7 +261,7 @@ int jed_parse(const void *data, size_t length, jed_data *result)
 			break;
 
 		/* end of field is an asterisk -- find it */
-		scan = cursrc;
+		const uint8_t *scan = cursrc;
 		while (scan < srcend && *scan != '*')
 			scan++;
 		if (scan >= srcend)
@@ -255,11 +274,13 @@ int jed_parse(const void *data, size_t length, jed_data *result)
 		cursrc = scan + 1;
 	}
 
+	srcdata.reset();
+
 	/* if we got an explicit fuse count, override our computed count */
 	if (pinfo.explicit_numfuses != 0)
 		result->numfuses = pinfo.explicit_numfuses;
 
-	/* clear out leftover bits */
+	/* clear out leftover bits g*/
 	if (result->numfuses % 8 != 0)
 		result->fusemap[result->numfuses / 8] &= (1 << (result->numfuses % 8)) - 1;
 	memset(&result->fusemap[(result->numfuses + 7) / 8], 0, sizeof(result->fusemap) - (result->numfuses + 7) / 8);
@@ -283,13 +304,13 @@ int jed_parse(const void *data, size_t length, jed_data *result)
 
 size_t jed_output(const jed_data *data, void *result, size_t length)
 {
-	UINT8 *curdst = (UINT8 *)result;
-	UINT8 *dstend = curdst + length;
+	auto *curdst = (uint8_t *)result;
+	uint8_t *dstend = curdst + length;
 	int i, zeros, ones;
 	char tempbuf[256];
-	UINT16 checksum;
-	UINT8 defbyte;
-	UINT8 *temp;
+	uint16_t checksum;
+	uint8_t defbyte;
+	uint8_t *temp;
 
 	/* always start the DST with a standard header and an STX */
 	tempbuf[0] = 0x02;
@@ -355,7 +376,7 @@ size_t jed_output(const jed_data *data, void *result, size_t length)
 
 	/* now compute the transmission checksum */
 	checksum = 0;
-	for (temp = (UINT8 *)result; temp < curdst && temp < dstend; temp++)
+	for (temp = (uint8_t *)result; temp < curdst && temp < dstend; temp++)
 		checksum += *temp & 0x7f;
 	checksum += 0x03;
 
@@ -367,7 +388,7 @@ size_t jed_output(const jed_data *data, void *result, size_t length)
 	curdst += strlen(tempbuf);
 
 	/* return the final size */
-	return curdst - (UINT8 *)result;
+	return curdst - (uint8_t *)result;
 }
 
 
@@ -377,29 +398,26 @@ size_t jed_output(const jed_data *data, void *result, size_t length)
     has been loaded raw into memory
 -------------------------------------------------*/
 
-int jedbin_parse(const void *data, size_t length, jed_data *result)
+int jedbin_parse(util::read_stream &src, jed_data *result)
 {
-	const UINT8 *cursrc = (const UINT8 *)data;
-
 	/* initialize the output */
 	memset(result, 0, sizeof(*result));
 
 	/* need at least 4 bytes */
-	if (length < 4)
+	uint8_t buf[4];
+	std::size_t actual;
+	if (src.read(&buf[0], 4, actual) || actual != 4)
 		return JEDERR_INVALID_DATA;
 
 	/* first unpack the number of fuses */
-	result->numfuses = (cursrc[0] << 24) | (cursrc[1] << 16) | (cursrc[2] << 8) | cursrc[3];
-	cursrc += 4;
+	result->numfuses = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
 	if (result->numfuses == 0 || result->numfuses > JED_MAX_FUSES)
 		return JEDERR_INVALID_DATA;
 
 	/* now make sure we have enough data in the source */
-	if (length < 4 + (result->numfuses + 7) / 8)
-		return JEDERR_INVALID_DATA;
-
 	/* copy in the data */
-	memcpy(result->fusemap, cursrc, (result->numfuses + 7) / 8);
+	if (src.read(result->fusemap, (result->numfuses + 7) / 8, actual) || actual != (result->numfuses + 7) / 8)
+		return JEDERR_INVALID_DATA;
 	return JEDERR_NONE;
 }
 
@@ -424,7 +442,7 @@ int jedbin_parse(const void *data, size_t length, jed_data *result)
 
 size_t jedbin_output(const jed_data *data, void *result, size_t length)
 {
-	UINT8 *curdst = (UINT8 *)result;
+	auto *curdst = (uint8_t *)result;
 
 	/* ensure we have enough room */
 	if (length >= 4 + (data->numfuses + 7) / 8)

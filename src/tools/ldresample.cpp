@@ -8,16 +8,17 @@
 
 ****************************************************************************/
 
-#include <stdio.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <math.h>
-#include <new>
-#include <assert.h>
+#include "avhuff.h"
 #include "bitmap.h"
 #include "chd.h"
-#include "avhuff.h"
 #include "vbiparse.h"
+
+#include <cassert>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <new>
 
 
 
@@ -27,16 +28,16 @@
 
 // size of window where we scan ahead to find maximum; this should be large enough to
 // catch peaks of even slow waves
-const UINT32 MAXIMUM_WINDOW_SIZE = 40;
+const uint32_t MAXIMUM_WINDOW_SIZE = 40;
 
 // number of standard deviations away from silence that we consider a real signal
-const UINT32 SIGNAL_DEVIATIONS = 100;
+const uint32_t SIGNAL_DEVIATIONS = 100;
 
 // number of standard deviations away from silence that we consider the start of a signal
-const UINT32 SIGNAL_START_DEVIATIONS = 5;
+const uint32_t SIGNAL_START_DEVIATIONS = 5;
 
 // number of consecutive entries of signal before we consider that we found it
-const UINT32 MINIMUM_SIGNAL_COUNT = 20;
+const uint32_t MINIMUM_SIGNAL_COUNT = 20;
 
 
 
@@ -55,9 +56,9 @@ struct movie_info
 	int             channels;
 	int             interlaced;
 	bitmap_yuy16    bitmap;
-	std::vector<INT16>   lsound;
-	std::vector<INT16>   rsound;
-	UINT32          samples;
+	std::vector<int16_t>   lsound;
+	std::vector<int16_t>   rsound;
+	uint32_t          samples;
 };
 
 
@@ -67,23 +68,23 @@ class chd_resample_compressor : public chd_file_compressor
 {
 public:
 	// construction/destruction
-	chd_resample_compressor(chd_file &source, movie_info &info, INT64 ioffset, INT64 islope)
+	chd_resample_compressor(chd_file &source, movie_info &info, int64_t ioffset, int64_t islope)
 		: m_source(source),
 			m_info(info),
 			m_ioffset(ioffset),
 			m_islope(islope) { }
 
 	// read interface
-	virtual UINT32 read_data(void *_dest, UINT64 offset, UINT32 length)
+	virtual uint32_t read_data(void *_dest, uint64_t offset, uint32_t length)
 	{
 		assert(offset % m_source.hunk_bytes() == 0);
 		assert(length % m_source.hunk_bytes() == 0);
 
-		UINT32 startfield = offset / m_source.hunk_bytes();
-		UINT32 endfield = startfield + length / m_source.hunk_bytes();
-		UINT8 *dest = reinterpret_cast<UINT8 *>(_dest);
+		uint32_t startfield = offset / m_source.hunk_bytes();
+		uint32_t endfield = startfield + length / m_source.hunk_bytes();
+		uint8_t *dest = reinterpret_cast<uint8_t *>(_dest);
 
-		for (UINT32 fieldnum = startfield; fieldnum < endfield; fieldnum++)
+		for (uint32_t fieldnum = startfield; fieldnum < endfield; fieldnum++)
 		{
 			generate_one_frame(dest, m_source.hunk_bytes(), fieldnum);
 			dest += m_source.hunk_bytes();
@@ -93,13 +94,13 @@ public:
 
 private:
 	// internal helpers
-	void generate_one_frame(UINT8 *dest, UINT32 datasize, UINT32 fieldnum);
+	void generate_one_frame(uint8_t *dest, uint32_t datasize, uint32_t fieldnum);
 
 	// internal state
 	chd_file &                  m_source;
 	movie_info &                m_info;
-	INT64                       m_ioffset;
-	INT64                       m_islope;
+	int64_t                       m_ioffset;
+	int64_t                       m_islope;
 };
 
 
@@ -114,9 +115,9 @@ private:
 //  first sample of that field
 //-------------------------------------------------
 
-inline UINT32 field_to_sample_number(const movie_info &info, UINT32 field)
+inline uint32_t field_to_sample_number(const movie_info &info, uint32_t field)
 {
-	return (UINT64(info.samplerate) * UINT64(field) * UINT64(1000000) + info.iframerate - 1) / UINT64(info.iframerate);
+	return (uint64_t(info.samplerate) * uint64_t(field) * uint64_t(1000000) + info.iframerate - 1) / uint64_t(info.iframerate);
 }
 
 
@@ -126,13 +127,13 @@ inline UINT32 field_to_sample_number(const movie_info &info, UINT32 field)
 //  the offset within the field
 //-------------------------------------------------
 
-inline UINT32 sample_number_to_field(const movie_info &info, UINT32 samplenum, UINT32 &offset)
+inline uint32_t sample_number_to_field(const movie_info &info, uint32_t samplenum, uint32_t &offset)
 {
-	UINT32 guess = (UINT64(samplenum) * UINT64(info.iframerate) + (UINT64(info.samplerate) * UINT64(1000000) - 1)) / (UINT64(info.samplerate) * UINT64(1000000));
+	uint32_t guess = (uint64_t(samplenum) * uint64_t(info.iframerate) + (uint64_t(info.samplerate) * uint64_t(1000000) - 1)) / (uint64_t(info.samplerate) * uint64_t(1000000));
 	while (1)
 	{
-		UINT32 fieldstart = field_to_sample_number(info, guess);
-		UINT32 fieldend = field_to_sample_number(info, guess + 1);
+		uint32_t fieldstart = field_to_sample_number(info, guess);
+		uint32_t fieldend = field_to_sample_number(info, guess + 1);
 		if (samplenum >= fieldstart && samplenum < fieldend)
 		{
 			offset = samplenum - fieldstart;
@@ -156,22 +157,22 @@ inline UINT32 sample_number_to_field(const movie_info &info, UINT32 samplenum, U
 //  information about it
 //-------------------------------------------------
 
-static chd_error open_chd(chd_file &file, const char *filename, movie_info &info)
+static std::error_condition open_chd(chd_file &file, const char *filename, movie_info &info)
 {
 	// open the file
-	chd_error chderr = file.open(filename);
-	if (chderr != CHDERR_NONE)
+	std::error_condition chderr = file.open(filename);
+	if (chderr)
 	{
-		fprintf(stderr, "Error opening CHD file: %s\n", chd_file::error_string(chderr));
+		fprintf(stderr, "Error opening CHD file: %s\n", chderr.message().c_str());
 		return chderr;
 	}
 
 	// get the metadata
 	std::string metadata;
 	chderr = file.read_metadata(AV_METADATA_TAG, 0, metadata);
-	if (chderr != CHDERR_NONE)
+	if (chderr)
 	{
-		fprintf(stderr, "Error getting A/V metadata: %s\n", chd_file::error_string(chderr));
+		fprintf(stderr, "Error getting A/V metadata: %s\n", chderr.message().c_str());
 		return chderr;
 	}
 
@@ -180,7 +181,7 @@ static chd_error open_chd(chd_file &file, const char *filename, movie_info &info
 	if (sscanf(metadata.c_str(), AV_METADATA_FORMAT, &fps, &fpsfrac, &width, &height, &interlaced, &channels, &rate) != 7)
 	{
 		fprintf(stderr, "Improperly formatted metadata\n");
-		return CHDERR_INVALID_DATA;
+		return chd_file::error::INVALID_METADATA;
 	}
 
 	// extract movie info
@@ -197,7 +198,7 @@ static chd_error open_chd(chd_file &file, const char *filename, movie_info &info
 	info.bitmap.resize(info.width, info.height);
 	info.lsound.resize(info.samplerate);
 	info.rsound.resize(info.samplerate);
-	return CHDERR_NONE;
+	return std::error_condition();
 }
 
 
@@ -205,28 +206,28 @@ static chd_error open_chd(chd_file &file, const char *filename, movie_info &info
 //  create_chd - create a new CHD file
 //-------------------------------------------------
 
-static chd_error create_chd(chd_file_compressor &file, const char *filename, chd_file &source, const movie_info &info)
+static std::error_condition create_chd(chd_file_compressor &file, const char *filename, chd_file &source, const movie_info &info)
 {
 	// create the file
 	chd_codec_type compression[4] = { CHD_CODEC_AVHUFF };
-	chd_error chderr = file.create(filename, source.logical_bytes(), source.hunk_bytes(), source.unit_bytes(), compression);
-	if (chderr != CHDERR_NONE)
+	std::error_condition chderr = file.create(filename, source.logical_bytes(), source.hunk_bytes(), source.unit_bytes(), compression);
+	if (chderr)
 	{
-		fprintf(stderr, "Error creating new CHD file: %s\n", chd_file::error_string(chderr));
+		fprintf(stderr, "Error creating new CHD file: %s\n", chderr.message().c_str());
 		return chderr;
 	}
 
 	// clone the metadata
 	chderr = file.clone_all_metadata(source);
-	if (chderr != CHDERR_NONE)
+	if (chderr)
 	{
-		fprintf(stderr, "Error cloning metadata: %s\n", chd_file::error_string(chderr));
+		fprintf(stderr, "Error cloning metadata: %s\n", chderr.message().c_str());
 		return chderr;
 	}
 
 	// begin compressing
 	file.compress_begin();
-	return CHDERR_NONE;
+	return std::error_condition();
 }
 
 
@@ -234,11 +235,11 @@ static chd_error create_chd(chd_file_compressor &file, const char *filename, chd
 //  read_chd - read a field from a CHD file
 //-------------------------------------------------
 
-static bool read_chd(chd_file &file, UINT32 field, movie_info &info, UINT32 soundoffs)
+static bool read_chd(chd_file &file, uint32_t field, movie_info &info, uint32_t soundoffs)
 {
 	// configure the codec
-	avhuff_decompress_config avconfig;
-	avconfig.video.wrap(info.bitmap, info.bitmap.cliprect());
+	avhuff_decoder::config avconfig;
+	avconfig.video = &info.bitmap;
 	avconfig.maxsamples = info.lsound.size();
 	avconfig.actsamples = &info.samples;
 	avconfig.audio[0] = &info.lsound[soundoffs];
@@ -248,8 +249,8 @@ static bool read_chd(chd_file &file, UINT32 field, movie_info &info, UINT32 soun
 	file.codec_configure(CHD_CODEC_AVHUFF, AVHUFF_CODEC_DECOMPRESS_CONFIG, &avconfig);
 
 	// read the field
-	chd_error chderr = file.read_hunk(field, nullptr);
-	return (chderr == CHDERR_NONE);
+	std::error_condition chderr = file.read_hunk(field, nullptr);
+	return !chderr;
 }
 
 
@@ -264,7 +265,7 @@ static bool read_chd(chd_file &file, UINT32 field, movie_info &info, UINT32 soun
 //  an audio edge
 //-------------------------------------------------
 
-static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info &info, bool report_best_field, INT32 &delta)
+static bool find_edge_near_field(chd_file &srcfile, uint32_t fieldnum, movie_info &info, bool report_best_field, int32_t &delta)
 {
 	// clear the sound buffers
 	memset(&info.lsound[0], 0, info.lsound.size() * 2);
@@ -272,12 +273,12 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 
 	// read 1 second around the target area
 	int fields_to_read = info.iframerate / 1000000;
-	INT32 firstfield = fieldnum - (fields_to_read / 2);
-	UINT32 targetsoundstart = 0;
-	UINT32 firstfieldend = 0;
-	UINT32 fieldstart[100];
-	UINT32 soundend = 0;
-	for (INT32 curfield = 0; curfield < fields_to_read; curfield++)
+	int32_t firstfield = fieldnum - (fields_to_read / 2);
+	uint32_t targetsoundstart = 0;
+	uint32_t firstfieldend = 0;
+	uint32_t fieldstart[100];
+	uint32_t soundend = 0;
+	for (int32_t curfield = 0; curfield < fields_to_read; curfield++)
 	{
 		// remember the start of each field
 		fieldstart[curfield] = soundend;
@@ -299,7 +300,7 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 	}
 
 	// compute absolute deltas across the samples
-	for (UINT32 sampnum = 0; sampnum < soundend; sampnum++)
+	for (uint32_t sampnum = 0; sampnum < soundend; sampnum++)
 	{
 		info.lsound[sampnum] = labs(info.lsound[sampnum + 1] - info.lsound[sampnum]);
 		info.rsound[sampnum] = labs(info.rsound[sampnum + 1] - info.rsound[sampnum]);
@@ -307,11 +308,11 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 
 	// for each sample in the collection, find the highest deltas over the
 	// next few samples, and take the nth highest value (to remove outliers)
-	for (UINT32 sampnum = 0; sampnum < soundend - MAXIMUM_WINDOW_SIZE; sampnum++)
+	for (uint32_t sampnum = 0; sampnum < soundend - MAXIMUM_WINDOW_SIZE; sampnum++)
 	{
 		// scan forward over the maximum window
-		UINT32 lmax = 0, rmax = 0;
-		for (UINT32 scannum = 0; scannum < MAXIMUM_WINDOW_SIZE; scannum++)
+		uint32_t lmax = 0, rmax = 0;
+		for (uint32_t scannum = 0; scannum < MAXIMUM_WINDOW_SIZE; scannum++)
 		{
 			if (info.lsound[sampnum + scannum] > lmax)
 				lmax = info.lsound[sampnum + scannum];
@@ -325,9 +326,9 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 	}
 
 	// now compute the average over the first field, which is assumed to be silence
-	UINT32 firstlavg = 0;
-	UINT32 firstravg = 0;
-	for (UINT32 sampnum = 0; sampnum < firstfieldend; sampnum++)
+	uint32_t firstlavg = 0;
+	uint32_t firstravg = 0;
+	for (uint32_t sampnum = 0; sampnum < firstfieldend; sampnum++)
 	{
 		firstlavg += info.lsound[sampnum];
 		firstravg += info.rsound[sampnum];
@@ -336,9 +337,9 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 	firstravg /= firstfieldend;
 
 	// then compute the standard deviation over the first field
-	UINT32 firstldev = 0;
-	UINT32 firstrdev = 0;
-	for (UINT32 sampnum = 0; sampnum < firstfieldend; sampnum++)
+	uint32_t firstldev = 0;
+	uint32_t firstrdev = 0;
+	for (uint32_t sampnum = 0; sampnum < firstfieldend; sampnum++)
 	{
 		firstldev += (info.lsound[sampnum] - firstlavg) * (info.lsound[sampnum] - firstlavg);
 		firstrdev += (info.rsound[sampnum] - firstravg) * (info.rsound[sampnum] - firstravg);
@@ -348,9 +349,9 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 
 	// scan forward through the samples, counting consecutive samples more than
 	// SIGNAL_DEVIATIONS standard deviations away from silence
-	UINT32 lcount = 0;
-	UINT32 rcount = 0;
-	UINT32 sampnum = 0;
+	uint32_t lcount = 0;
+	uint32_t rcount = 0;
+	uint32_t sampnum = 0;
 	for (sampnum = 0; sampnum < soundend; sampnum++)
 	{
 		// left speaker
@@ -387,7 +388,7 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 	// if we're to report the best field, figure out which field we are in
 	if (report_best_field)
 	{
-		INT32 curfield;
+		int32_t curfield;
 		for (curfield = 0; curfield < fields_to_read - 1; curfield++)
 			if (sampnum < fieldstart[curfield + 1])
 				break;
@@ -409,13 +410,13 @@ static bool find_edge_near_field(chd_file &srcfile, UINT32 fieldnum, movie_info 
 //  resampled frame
 //-------------------------------------------------
 
-void chd_resample_compressor::generate_one_frame(UINT8 *dest, UINT32 datasize, UINT32 fieldnum)
+void chd_resample_compressor::generate_one_frame(uint8_t *dest, uint32_t datasize, uint32_t fieldnum)
 {
 	// determine the first field needed to cover this range of samples
-	UINT32 srcbegin = field_to_sample_number(m_info, fieldnum);
-	INT64 dstbegin = (INT64(srcbegin) << 24) + m_ioffset + m_islope * fieldnum;
-	UINT32 dstbeginoffset;
-	INT32 dstbeginfield;
+	uint32_t srcbegin = field_to_sample_number(m_info, fieldnum);
+	int64_t dstbegin = (int64_t(srcbegin) << 24) + m_ioffset + m_islope * fieldnum;
+	uint32_t dstbeginoffset;
+	int32_t dstbeginfield;
 	if (dstbegin >= 0)
 		dstbeginfield = sample_number_to_field(m_info, dstbegin >> 24, dstbeginoffset);
 	else
@@ -425,10 +426,10 @@ void chd_resample_compressor::generate_one_frame(UINT8 *dest, UINT32 datasize, U
 	}
 
 	// determine the last field needed to cover this range of samples
-	UINT32 srcend = field_to_sample_number(m_info, fieldnum + 1);
-	INT64 dstend = (INT64(srcend) << 24) + m_ioffset + m_islope * (fieldnum + 1);
-	UINT32 dstendoffset;
-	INT32 dstendfield;
+	uint32_t srcend = field_to_sample_number(m_info, fieldnum + 1);
+	int64_t dstend = (int64_t(srcend) << 24) + m_ioffset + m_islope * (fieldnum + 1);
+	uint32_t dstendoffset;
+	int32_t dstendfield;
 	if (dstend >= 0)
 		dstendfield = sample_number_to_field(m_info, dstend >> 24, dstendoffset);
 	else
@@ -439,12 +440,12 @@ void chd_resample_compressor::generate_one_frame(UINT8 *dest, UINT32 datasize, U
 /*
 printf("%5d: start=%10d (%5d.%03d) end=%10d (%5d.%03d)\n",
         fieldnum,
-        (INT32)(dstbegin >> 24), dstbeginfield, dstbeginoffset,
-        (INT32)(dstend >> 24), dstendfield, dstendoffset);
+        (int32_t)(dstbegin >> 24), dstbeginfield, dstbeginoffset,
+        (int32_t)(dstend >> 24), dstendfield, dstendoffset);
 */
 	// read all samples required into the end of the sound buffers
-	UINT32 dstoffset = srcend - srcbegin;
-	for (INT32 dstfield = dstbeginfield; dstfield <= dstendfield; dstfield++)
+	uint32_t dstoffset = srcend - srcbegin;
+	for (int32_t dstfield = dstbeginfield; dstfield <= dstendfield; dstfield++)
 	{
 		if (dstfield >= 0)
 			read_chd(m_source, dstfield, m_info, dstoffset);
@@ -459,9 +460,9 @@ printf("%5d: start=%10d (%5d.%03d) end=%10d (%5d.%03d)\n",
 
 	// resample the destination samples to the source
 	dstoffset = srcend - srcbegin;
-	INT64 dstpos = dstbegin;
-	INT64 dststep = (dstend - dstbegin) / INT64(srcend - srcbegin);
-	for (UINT32 srcoffset = 0; srcoffset < srcend - srcbegin; srcoffset++)
+	int64_t dstpos = dstbegin;
+	int64_t dststep = (dstend - dstbegin) / int64_t(srcend - srcbegin);
+	for (uint32_t srcoffset = 0; srcoffset < srcend - srcbegin; srcoffset++)
 	{
 		m_info.lsound[srcoffset] = m_info.lsound[(int)(dstoffset + dstbeginoffset + (dstpos >> 24) - (dstbegin >> 24))];
 		m_info.rsound[srcoffset] = m_info.rsound[(int)(dstoffset + dstbeginoffset + (dstpos >> 24) - (dstbegin >> 24))];
@@ -472,10 +473,10 @@ printf("%5d: start=%10d (%5d.%03d) end=%10d (%5d.%03d)\n",
 	read_chd(m_source, fieldnum, m_info, srcend - srcbegin);
 
 	// assemble the final frame
-	dynamic_buffer buffer;
-	INT16 *sampledata[2] = { &m_info.lsound[0], &m_info.rsound[0] };
+	std::vector<uint8_t> buffer;
+	int16_t *sampledata[2] = { &m_info.lsound[0], &m_info.rsound[0] };
 	avhuff_encoder::assemble_data(buffer, m_info.bitmap, m_info.channels, m_info.samples, sampledata);
-	memcpy(dest, &buffer[0], MIN(buffer.size(), datasize));
+	memcpy(dest, &buffer[0], std::min(buffer.size(), size_t(datasize)));
 	if (buffer.size() < datasize)
 		memset(&dest[buffer.size()], 0, datasize - buffer.size());
 }
@@ -524,8 +525,8 @@ int main(int argc, char *argv[])
 	// open the source file
 	chd_file srcfile;
 	movie_info info;
-	chd_error err = open_chd(srcfile, srcfilename, info);
-	if (err != CHDERR_NONE)
+	std::error_condition err = open_chd(srcfile, srcfilename, info);
+	if (err)
 	{
 		fprintf(stderr, "Unable to open file '%s'\n", srcfilename);
 		return 1;
@@ -540,10 +541,10 @@ int main(int argc, char *argv[])
 	// if we don't have a destination file, scan for edges
 	if (dstfilename == nullptr)
 	{
-		for (UINT32 fieldnum = 60; fieldnum < info.numfields - 60; fieldnum += 30)
+		for (uint32_t fieldnum = 60; fieldnum < info.numfields - 60; fieldnum += 30)
 		{
 			fprintf(stderr, "Field %5d\r", fieldnum);
-			INT32 delta;
+			int32_t delta;
 			find_edge_near_field(srcfile, fieldnum, info, true, delta);
 		}
 	}
@@ -552,7 +553,7 @@ int main(int argc, char *argv[])
 	else
 	{
 		// open the destination file
-		chd_resample_compressor dstfile(srcfile, info, INT64(offset * 65536.0 * 256.0), INT64(slope * 65536.0 * 256.0));
+		chd_resample_compressor dstfile(srcfile, info, int64_t(offset * 65536.0 * 256.0), int64_t(slope * 65536.0 * 256.0));
 		err = create_chd(dstfile, dstfilename, srcfile, info);
 		if (!dstfile.opened())
 		{
@@ -563,7 +564,7 @@ int main(int argc, char *argv[])
 		// loop over all the fields in the source file
 		double progress, ratio;
 		osd_ticks_t last_update = 0;
-		while (dstfile.compress_continue(progress, ratio) == CHDERR_COMPRESSING)
+		while (dstfile.compress_continue(progress, ratio) == chd_file::error::COMPRESSING)
 			if (osd_ticks() - last_update > osd_ticks_per_second() / 4)
 			{
 				last_update = osd_ticks();

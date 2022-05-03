@@ -1,5 +1,5 @@
 --
--- Copyright 2010-2015 Branimir Karadzic. All rights reserved.
+-- Copyright 2010-2021 Branimir Karadzic. All rights reserved.
 -- License: https://github.com/bkaradzic/bx#license-bsd-2-clause
 --
 
@@ -16,27 +16,23 @@ newoption {
 	description = "Choose GCC flavor",
 	allowed = {
 		{ "android-arm",   "Android - ARM"          },
-		{ "android-arm64", "Android - ARM64"          },
-		{ "android-mips",  "Android - MIPS"         },
-		{ "android-mips64","Android - MIPS64"       },
+		{ "android-arm64", "Android - ARM64"        },
 		{ "android-x86",   "Android - x86"          },
 		{ "android-x64",   "Android - x64"          },
 		{ "asmjs",         "Emscripten/asm.js"      },
 		{ "freebsd",       "FreeBSD"                },
+		{ "freebsd-clang", "FreeBSD (clang compiler)"},
 		{ "linux-gcc",     "Linux (GCC compiler)"   },
 		{ "linux-clang",   "Linux (Clang compiler)" },
-		{ "ios-arm",       "iOS - ARM"              },
-		{ "ios-simulator", "iOS - Simulator"        },
 		{ "mingw32-gcc",   "MinGW32"                },
 		{ "mingw64-gcc",   "MinGW64"                },
 		{ "mingw-clang",   "MinGW (clang compiler)" },
 		{ "netbsd",        "NetBSD"                },
+		{ "netbsd-clang",  "NetBSD (clang compiler)"},
+		{ "openbsd",       "OpenBSD"                },
 		{ "osx",           "OSX (GCC compiler)"     },
 		{ "osx-clang",     "OSX (Clang compiler)"   },
-		{ "pnacl",         "Native Client - PNaCl"  },
-		{ "rpi",           "RaspberryPi"            },
-		{ "solaris", 	   "Solaris"                },
-		{ "steamlink", 	   "Steam Link"             },
+		{ "solaris",       "Solaris"                },
 	},
 }
 
@@ -45,139 +41,68 @@ newoption {
 	value = "toolset",
 	description = "Choose VS toolset",
 	allowed = {
-		{ "intel-14",	   "Intel C++ Compiler XE 14.0" },
-		{ "intel-15",	   "Intel C++ Compiler XE 15.0" },
-		{ "vs2013-clang",  "Clang 3.6"         },
-		{ "vs2015-clang",  "Clang 3.6"         },
-		{ "vs2013-xp", 	   "Visual Studio 2013 targeting XP" },
-		{ "vs2015-xp", 	   "Visual Studio 2015 targeting XP" },
-		{ "winphone8",     "Windows Phone 8.0" },
-		{ "winphone81",    "Windows Phone 8.1" },
-		{ "winstore81",    "Windows Store 8.1" },
-		{ "winstore82",    "Universal Windows App" }
+		{ "intel-15",      "Intel C++ Compiler XE 15.0" },
+		{ "clangcl",       "Visual Studio 2019 using Clang/LLVM" },
 	},
-}
-
-newoption {
-	trigger = "xcode",
-	value = "xcode_target",
-	description = "Choose XCode target",
-	allowed = {
-		{ "osx", "OSX" },
-		{ "ios", "iOS" },
-	}
 }
 
 newoption {
 	trigger = "with-android",
 	value   = "#",
-	description = "Set Android platform version (default: android-14).",
-}
-
-newoption {
-	trigger = "with-ios",
-	value   = "#",
-	description = "Set iOS target version (default: 8.0).",
+	description = "Set Android platform version (default: android-21).",
 }
 
 function toolchain(_buildDir, _subDir)
 
 	location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION)
 
-	local androidPlatform = "android-14"
+	local androidPlatform = "android-24"
 	if _OPTIONS["with-android"] then
 		androidPlatform = "android-" .. _OPTIONS["with-android"]
+	elseif _OPTIONS["PLATFORM"]:find("64", -2) then
+		androidPlatform = "android-24"
 	end
 
-	local iosPlatform = ""
-	if _OPTIONS["with-ios"] then
-		iosPlatform = _OPTIONS["with-ios"]
-	end
-
-	if _ACTION == "gmake" then
+	if _ACTION == "gmake" or _ACTION == "ninja" then
 
 		if nil == _OPTIONS["gcc"] or nil == _OPTIONS["gcc_version"] then
 			print("GCC flavor and version must be specified!")
 			os.exit(1)
 		end
 
-		if "android-arm" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_ARM") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_ARM and ANDROID_NDK_ROOT envrionment variables.")
+		if string.find(_OPTIONS["gcc"], "android") then
+			-- 64-bit android platform requires >= 21
+			if _OPTIONS["PLATFORM"]:find("64", -2) and tonumber(androidPlatform:sub(9)) < 21 then
+				error("64-bit android requires platform 21 or higher")
+			end
+			if not os.getenv("ANDROID_NDK_ROOT") then
+				print("Set ANDROID_NDK_ROOT environment variable.")
+			end
+			if not os.getenv("ANDROID_NDK_LLVM") then
+				print("Set ANDROID_NDK_LLVM envrionment variable.")
+			end
+			platform_ndk_env = "ANDROID_NDK_" .. _OPTIONS["PLATFORM"]:upper()
+			if not os.getenv(platform_ndk_env) then
+				print("Set " .. platform_ndk_env .. " environment variable.")
 			end
 
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_ARM)/bin/arm-linux-androideabi-ar"
+			local platformToolchainMap = {
+				['arm']    = "arm-linux-androideabi",
+				['arm64']  = "aarch64-linux-android",
+				['x86']    = "i686-linux-android",
+				['x64']    = "x86_64-linux-android",
+			}
+
+			toolchainPrefix = os.getenv(platform_ndk_env) .. "/bin/" .. platformToolchainMap[_OPTIONS["PLATFORM"]] .. "-"
+
+			premake.gcc.cc  = "$(ANDROID_NDK_LLVM)/bin/clang"
+			premake.gcc.cxx = "$(ANDROID_NDK_LLVM)/bin/clang++"
+			premake.gcc.ar  = toolchainPrefix .. "ar"
 			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-arm")
+
+			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-" .. _OPTIONS["PLATFORM"])
 		end
 
-		if "android-arm64" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_ARM64") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_ARM64 and ANDROID_NDK_ROOT envrionment variables.")
-			end
-
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_ARM64)/bin/aarch64-linux-android-ar.exe"
-			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-arm64")
-		end
-		
-		if "android-mips" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_MIPS") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_MIPS and ANDROID_NDK_ROOT envrionment variables.")
-			end
-
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_MIPS)/bin/mipsel-linux-android-ar"
-			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-mips")
-		end
-		
-		if "android-mips64" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_MIPS64") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_MIPS64 and ANDROID_NDK_ROOT envrionment variables.")
-			end
-
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_MIPS64)/bin/mips64el-linux-android-ar.exe"
-			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-mips64")
-		end
-		
-		if "android-x86" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_X86") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_X86 and ANDROID_NDK_ROOT envrionment variables.")
-			end
-
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_X86)/bin/i686-linux-android-ar"
-			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-x86")
-		end
-		
-		if "android-x64" == _OPTIONS["gcc"] then
-
-			if not os.getenv("ANDROID_NDK_X64") or not os.getenv("ANDROID_NDK_ROOT") then
-				print("Set ANDROID_NDK_X64 and ANDROID_NDK_ROOT envrionment variables.")
-			end
-
-			premake.gcc.cc  = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"			
-			premake.gcc.cxx = "$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe"
-			premake.gcc.ar  = "$(ANDROID_NDK_X64)/bin/x86_64-linux-android-ar.exe"
-			premake.gcc.llvm = true
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-android-x64")
-		end
 		if "asmjs" == _OPTIONS["gcc"] then
 
 			if not os.getenv("EMSCRIPTEN") then
@@ -195,22 +120,20 @@ function toolchain(_buildDir, _subDir)
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-freebsd")
 		end
 
+		if "freebsd-clang" == _OPTIONS["gcc"] then
+			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-freebsd-clang")
+		end
+
 		if "netbsd" == _OPTIONS["gcc"] then
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-netbsd")
 		end
 
-		if "ios-arm" == _OPTIONS["gcc"] then
-			premake.gcc.cc  = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
-			premake.gcc.cxx = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++"
-			premake.gcc.ar  = "ar"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-ios-arm")
+		if "netbsd-clang" == _OPTIONS["gcc"] then
+			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-netbsd-clang")
 		end
 
-		if "ios-simulator" == _OPTIONS["gcc"] then
-			premake.gcc.cc  = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
-			premake.gcc.cxx = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++"
-			premake.gcc.ar  = "ar"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-ios-simulator")
+		if "openbsd" == _OPTIONS["gcc"] then
+			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-openbsd")
 		end
 
 		if "linux-gcc" == _OPTIONS["gcc"] then
@@ -235,33 +158,16 @@ function toolchain(_buildDir, _subDir)
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-linux-clang")
 		end
 
-		if "steamlink" == _OPTIONS["gcc"] then
-			if not os.getenv("MARVELL_SDK_PATH") then
-				print("Set MARVELL_SDK_PATH envrionment variable.")
-			end
-			premake.gcc.cc  = "$(MARVELL_SDK_PATH)/toolchain/bin/armv7a-cros-linux-gnueabi-gcc"
-			premake.gcc.cxx = "$(MARVELL_SDK_PATH)/toolchain/bin/armv7a-cros-linux-gnueabi-g++"
-			premake.gcc.ar  = "$(MARVELL_SDK_PATH)/toolchain/bin/armv7a-cros-linux-gnueabi-ar"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-steamlink")
-		end
-
 		if "mingw32-gcc" == _OPTIONS["gcc"] then
 			if not os.getenv("MINGW32") then
 				print("Set MINGW32 envrionment variable.")
 			end
-			if not toolchainPrefix then
+			if toolchainPrefix == nil or toolchainPrefix == "" then
 				toolchainPrefix = "$(MINGW32)/bin/i686-w64-mingw32-"
 			end
 			premake.gcc.cc  = toolchainPrefix .. "gcc"
 			premake.gcc.cxx = toolchainPrefix .. "g++"
--- work around GCC 4.9.2 not having proper linker for LTO=1 usage
-			local version_4_ar = str_to_version(_OPTIONS["gcc_version"])
-			if (version_4_ar < 50000) then
-				premake.gcc.ar  = toolchainPrefix .. "ar"
-			end
-			if (version_4_ar >= 50000) then
-				premake.gcc.ar  = toolchainPrefix .. "gcc-ar"
-			end
+			premake.gcc.ar  = toolchainPrefix .. "gcc-ar"
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-mingw32-gcc")
 		end
 
@@ -269,19 +175,12 @@ function toolchain(_buildDir, _subDir)
 			if not os.getenv("MINGW64") then
 				print("Set MINGW64 envrionment variable.")
 			end
-			if not toolchainPrefix then
+			if toolchainPrefix == nil or toolchainPrefix == "" then
 				toolchainPrefix = "$(MINGW64)/bin/x86_64-w64-mingw32-"
 			end
 			premake.gcc.cc  = toolchainPrefix .. "gcc"
 			premake.gcc.cxx = toolchainPrefix .. "g++"
--- work around GCC 4.9.2 not having proper linker for LTO=1 usage
-			local version_4_ar = str_to_version(_OPTIONS["gcc_version"])
-			if (version_4_ar < 50000) then
-				premake.gcc.ar  = toolchainPrefix .. "ar"
-			end
-			if (version_4_ar >= 50000) then
-				premake.gcc.ar  = toolchainPrefix .. "gcc-ar"
-			end
+			premake.gcc.ar  = toolchainPrefix .. "gcc-ar"
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-mingw64-gcc")
 		end
 
@@ -308,90 +207,16 @@ function toolchain(_buildDir, _subDir)
 			premake.gcc.ar  = toolchainPrefix .. "ar"
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-osx-clang")
 		end
+	elseif _ACTION == "vs2019" then
 
-		if "pnacl" == _OPTIONS["gcc"] then
-
-			if not os.getenv("NACL_SDK_ROOT") then
-				print("Set NACL_SDK_ROOT enviroment variables.")
-			end
-
-			naclToolchain = "$(NACL_SDK_ROOT)/toolchain/win_pnacl/bin/pnacl-"
-			if os.is("macosx") then
-				naclToolchain = "$(NACL_SDK_ROOT)/toolchain/mac_pnacl/bin/pnacl-"
-			elseif os.is("linux") then
-				naclToolchain = "$(NACL_SDK_ROOT)/toolchain/linux_pnacl/bin/pnacl-"
-			end
-
-			premake.gcc.cc  = naclToolchain .. "clang"
-			premake.gcc.cxx = naclToolchain .. "clang++"
-			premake.gcc.ar  = naclToolchain .. "ar"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-pnacl")
-		end
-
-		if "rpi" == _OPTIONS["gcc"] then
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-rpi")
-		end
-
-	elseif _ACTION == "vs2013" or _ACTION == "vs2015" then
-
-		if (_ACTION .. "-clang") == _OPTIONS["vs"] then
-			premake.vstudio.toolset = ("LLVM-" .. _ACTION)
+		if "clangcl" == _OPTIONS["vs"] then
+			premake.vstudio.toolset = ("ClangCL")
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-clang")
-		end
-
-		if "winphone8" == _OPTIONS["vs"] then
-			premake.vstudio.toolset = "v110_wp80"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-winphone8")
-		end
-
-		if "winphone81" == _OPTIONS["vs"] then
-			premake.vstudio.toolset = "v120_wp81"
-			platforms { "ARM" }
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-winphone81")
-		end
-
-		if "winstore81" == _OPTIONS["vs"] then
-			premake.vstudio.toolset = "v120"
-			premake.vstudio.storeapp = "8.1"
-			platforms { "ARM" }
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-winstore81")
-		end
-
-		if "winstore82" == _OPTIONS["vs"] then
-			premake.vstudio.toolset = "v140"
-			premake.vstudio.storeapp = "8.2"
-			platforms { "ARM" }
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-winstore82")
-		end
-
-		if "intel-14" == _OPTIONS["vs"] then
-			premake.vstudio.toolset = "Intel C++ Compiler XE 14.0"
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-intel")
 		end
 
 		if "intel-15" == _OPTIONS["vs"] then
 			premake.vstudio.toolset = "Intel C++ Compiler XE 15.0"
 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-intel")
-		end
-
-		if ("vs2013-xp") == _OPTIONS["vs"] then
-			premake.vstudio.toolset = ("v120_xp")
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-xp")
-		end
-		
-		if ("vs2015-xp") == _OPTIONS["vs"] then
-			premake.vstudio.toolset = ("v140_xp")
-			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-xp")
-		end
-	elseif _ACTION == "xcode4" then
-
-		if "osx" == _OPTIONS["xcode"] then
-			premake.xcode.toolset = "macosx"
-			location (path.join(_buildDir, "projects", _ACTION .. "-osx"))
-
-		elseif "ios" == _OPTIONS["xcode"] then
-			premake.xcode.toolset = "iphoneos"
-			location (path.join(_buildDir, "projects", _ACTION .. "-ios"))
 		end
 	end
 
@@ -403,6 +228,9 @@ function toolchain(_buildDir, _subDir)
 	end
 	if (_OPTIONS["LD"] ~= nil) then
 		premake.gcc.ld  = _OPTIONS["LD"]
+	end
+	if (_OPTIONS["AR"] ~= nil) then
+		premake.gcc.ar  = _OPTIONS["AR"]
 	end
 
 	configuration {} -- reset configuration
@@ -427,16 +255,6 @@ function toolchain(_buildDir, _subDir)
 	configuration { "x64", "vs*", "Debug" }
 		targetdir (_buildDir .. _ACTION .. "/bin/x64/Debug")
 
-	configuration { "ARM", "vs*" }
-		targetdir (_buildDir .. _ACTION .. "/bin/ARM")
-		objdir (_buildDir .. _ACTION .. "/obj")
-
-	configuration { "ARM", "vs*", "Release" }
-		targetdir (_buildDir .. _ACTION .. "/bin/ARM/Release")
-
-	configuration { "ARM", "vs*", "Debug" }
-		targetdir (_buildDir .. _ACTION .. "/bin/ARM/Debug")
-
 	configuration { "x32", "vs*-clang" }
 		objdir (_buildDir .. _ACTION .. "-clang/obj")
 
@@ -458,12 +276,6 @@ function toolchain(_buildDir, _subDir)
 	configuration { "vs*-clang" }
 		buildoptions {
 			"-Qunused-arguments",
-		}
-
-	configuration { "winphone8* or winstore8*" }
-		removeflags {
-			"StaticRuntime",
-			"NoExceptions",
 		}
 
 	configuration { "mingw*" }
@@ -489,29 +301,10 @@ function toolchain(_buildDir, _subDir)
 	configuration { "x64", "mingw64-gcc", "Debug" }
 		targetdir (_buildDir .. "mingw-gcc" .. "/bin/x64/Debug")
 
-	configuration { "steamlink" }
-		objdir ( _buildDir .. "steamlink/obj")
-		defines {
-			"__STEAMLINK__=1", -- There is no special prefedined compiler symbol to detect SteamLink, faking it.
-		}
-		buildoptions {
-			"-marm",
-			"-mfloat-abi=hard",
-			"--sysroot=$(MARVELL_SDK_PATH)/rootfs",
-		}
-		linkoptions {
-			"-static-libgcc",
-			"-static-libstdc++",
-			"--sysroot=$(MARVELL_SDK_PATH)/rootfs",
-		}
-
-	configuration { "steamlink", "Release" }
-		targetdir (_buildDir .. "steamlink/bin/Release")
-
-	configuration { "steamlink", "Debug" }
-		targetdir (_buildDir .. "steamlink/bin/Debug")
-
 	configuration { "mingw-clang" }
+		buildoptions {
+			"-femulated-tls",
+		}
 		linkoptions {
 			"-Wl,--allow-multiple-definition",
 		}
@@ -653,10 +446,41 @@ function toolchain(_buildDir, _subDir)
 	configuration { "netbsd", "x64", "Debug" }
 		targetdir (_buildDir .. "netbsd" .. "/bin/x64/Debug")
 
+	configuration { "openbsd", "x32" }
+		objdir (_buildDir .. "openbsd" .. "/obj")
+		buildoptions {
+			"-m32",
+		}
+	configuration { "openbsd", "x32", "Release" }
+		targetdir (_buildDir .. "openbsd" .. "/bin/x32/Release")
+
+	configuration { "openbsd", "x32", "Debug" }
+		targetdir (_buildDir .. "openbsd" .. "/bin/x32/Debug")
+
+	configuration { "openbsd", "x64" }
+		objdir (_buildDir .. "openbsd" .. "/obj")
+		buildoptions {
+			"-m64",
+		}
+	configuration { "openbsd", "x64", "Release" }
+		targetdir (_buildDir .. "openbsd" .. "/bin/x64/Release")
+
+	configuration { "openbsd", "x64", "Debug" }
+		targetdir (_buildDir .. "openbsd" .. "/bin/x64/Debug")
+
+	configuration { "android-*", "Release" }
+		targetdir (_buildDir .. "android/bin/" .. _OPTIONS["PLATFORM"] .. "/Release")
+
+	configuration { "android-*", "Debug" }
+		targetdir (_buildDir .. "android/bin/" .. _OPTIONS["PLATFORM"] .. "/Debug")
+
 	configuration { "android-*" }
+		objdir (_buildDir .. "android/obj/" .. _OPTIONS["PLATFORM"])
 		includedirs {
 			MAME_DIR .. "3rdparty/bgfx/3rdparty/khronos",
 			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libcxx/include",
+			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/include",
+			"$(ANDROID_NDK_ROOT)/sysroot/usr/include",
 			"$(ANDROID_NDK_ROOT)/sources/android/support/include",
 			"$(ANDROID_NDK_ROOT)/sources/android/native_app_glue",
 		}
@@ -673,7 +497,12 @@ function toolchain(_buildDir, _subDir)
 			"android",
 			"log",
 			"c++_static",
+			"c++abi",
+			"stdc++",
 			"gcc",
+		}
+		buildoptions_c {
+			"-Wno-strict-prototypes",
 		}
 		buildoptions {
 			"-fpic",
@@ -687,6 +516,8 @@ function toolchain(_buildDir, _subDir)
 			"-Wno-cast-align",
 			"-Wno-unknown-attributes",
 			"-Wno-macro-redefined",
+			"-DASIO_HAS_STD_STRING_VIEW",
+			"-Wno-unused-function",
 		}
 		linkoptions {
 			"-no-canonical-prefixes",
@@ -698,14 +529,12 @@ function toolchain(_buildDir, _subDir)
 
 
 	configuration { "android-arm" }
-		targetdir (_buildDir .. "android-arm" .. "/bin")
-		objdir (_buildDir .. "android-arm" .. "/obj")
 			libdirs {
 				"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a",
 				"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-arm/usr/lib",
 			}
 			includedirs {
-				"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-arm/usr/include",
+				"$(ANDROID_NDK_ROOT)/sysroot/usr/include/arm-linux-androideabi",
 			}
 			buildoptions {
 				"-gcc-toolchain $(ANDROID_NDK_ARM)",
@@ -714,6 +543,9 @@ function toolchain(_buildDir, _subDir)
 				"-mfloat-abi=softfp",
 				"-mfpu=vfpv3-d16",
 				"-mthumb",
+			}
+			links {
+				"unwind",
 			}
 			linkoptions {
 				"-gcc-toolchain $(ANDROID_NDK_ARM)",
@@ -726,15 +558,12 @@ function toolchain(_buildDir, _subDir)
 			}
 
 	configuration { "android-arm64" }
-		androidPlatform = "android-21" -- supported from API 21
-		targetdir (_buildDir .. "android-arm64" .. "/bin")
-		objdir (_buildDir .. "android-arm64" .. "/obj")
 			libdirs {
 				"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/arm64-v8a",
 				"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-arm64/usr/lib64",
 			}
 			includedirs {
-				"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-arm64/usr/include",
+				"$(ANDROID_NDK_ROOT)/sysroot/usr/include/aarch64-linux-android",
 			}
 			buildoptions {
 				"-gcc-toolchain $(ANDROID_NDK_ARM64)",
@@ -747,61 +576,14 @@ function toolchain(_buildDir, _subDir)
 				"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-arm64/usr/lib/crtend_so.o",
 				"-target aarch64-none-linux-android",
 			}
-			
-	configuration { "android-mips" }
-		targetdir (_buildDir .. "android-mips" .. "/bin")
-		objdir (_buildDir .. "android-mips" .. "/obj")
-		libdirs {
-			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/mips",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips/usr/lib/",
-		}
-		includedirs {
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips/usr/include",
-		}
-		buildoptions {
-			"-gcc-toolchain $(ANDROID_NDK_MIPS)",
-			"-target mipsel-none-linux-android",
-		}
-		linkoptions {
-			"-gcc-toolchain $(ANDROID_NDK_MIPS)",
-			"-target mipsel-none-linux-android",
-			"--sysroot=$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips/usr/lib/crtbegin_so.o",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips/usr/lib/crtend_so.o",
-		}
-		
-	configuration { "android-mips64" }
-		androidPlatform = "android-21" -- supported from API 21
-		targetdir (_buildDir .. "android-mips64" .. "/bin")
-		objdir (_buildDir .. "android-mips64" .. "/obj")
-		libdirs {
-			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/mips64",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips64/usr/lib64/",
-		}
-		includedirs {
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips64/usr/include",
-		}
-		buildoptions {
-			"-gcc-toolchain $(ANDROID_NDK_MIPS64)",
-			"-target mips64el-none-linux-android",
-		}
-		linkoptions {
-			"-gcc-toolchain $(ANDROID_NDK_MIPS64)",
-			"-target mips64el-none-linux-android",
-			"--sysroot=$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips64",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips64/usr/lib64/crtbegin_so.o",
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-mips64/usr/lib64/crtend_so.o",
-		}
 
 	configuration { "android-x86" }
-		targetdir (_buildDir .. "android-x86" .. "/bin")
-		objdir (_buildDir .. "android-x86" .. "/obj")
 		libdirs {
 			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/x86",
 			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86/usr/lib",
 		}
 		includedirs {
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86/usr/include",
+			"$(ANDROID_NDK_ROOT)/sysroot/usr/include/i686-linux-android",
 		}
 		buildoptions {
 			"-gcc-toolchain $(ANDROID_NDK_X86)",
@@ -818,15 +600,12 @@ function toolchain(_buildDir, _subDir)
 		}
 
 	configuration { "android-x64" }
-		androidPlatform = "android-21" -- supported from API 21
-		targetdir (_buildDir .. "android-x64" .. "/bin")
-		objdir (_buildDir .. "android-x64" .. "/obj")
 		libdirs {
 			"$(ANDROID_NDK_ROOT)/sources/cxx-stl/llvm-libc++/libs/x86_64",
 			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86_64/usr/lib64",
 		}
 		includedirs {
-			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86_64/usr/include",
+			"$(ANDROID_NDK_ROOT)/sysroot/usr/include/x86_64-linux-android",
 		}
 		buildoptions {
 			"-gcc-toolchain $(ANDROID_NDK_X64)",
@@ -839,16 +618,10 @@ function toolchain(_buildDir, _subDir)
 			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86_64/usr/lib64/crtbegin_so.o",
 			"$(ANDROID_NDK_ROOT)/platforms/" .. androidPlatform .. "/arch-x86_64/usr/lib64/crtend_so.o",
 		}
-	
+
 	configuration { "asmjs" }
 		targetdir (_buildDir .. "asmjs" .. "/bin")
 		objdir (_buildDir .. "asmjs" .. "/obj")
-		includedirs {
-			"$(EMSCRIPTEN)/system/include",
-			"$(EMSCRIPTEN)/system/include/compat",
-			"$(EMSCRIPTEN)/system/include/libc",
-			"$(EMSCRIPTEN)/system/lib/libcxxabi/include",
-		}
 		buildoptions {
 			"-Wno-cast-align",
 			"-Wno-tautological-compare",
@@ -861,70 +634,40 @@ function toolchain(_buildDir, _subDir)
 			"-Wno-extern-c-compat",
 		}
 
-	configuration { "pnacl" }
-		buildoptions {
-			"-U__STRICT_ANSI__", -- strcasecmp, setenv, unsetenv,...
-			"-fno-stack-protector",
-			"-fdiagnostics-show-option",
-			"-fdata-sections",
-			"-ffunction-sections",
-			"-Wunused-value",
-		}
-	
-	configuration { "pnacl" }
-		buildoptions {
-			"-Wno-tautological-undefined-compare",
-			"-Wno-cast-align",
-		}
-		includedirs {
-			"$(NACL_SDK_ROOT)/include",
-			"$(NACL_SDK_ROOT)/include/pnacl",
-		}
-
-	configuration { "pnacl" }
-		targetdir (_buildDir .. "pnacl" .. "/bin")
-		objdir (_buildDir .. "pnacl" .. "/obj")
-
-	configuration { "pnacl", "Debug" }
-		libdirs { "$(NACL_SDK_ROOT)/lib/pnacl/Debug" }
-
-	configuration { "pnacl", "Release" }
-		libdirs { "$(NACL_SDK_ROOT)/lib/pnacl/Release" }
-
-	configuration { "osx*", "x32" }
+	configuration { "osx*", "x32", "not arm64" }
 		objdir (_buildDir .. "osx_clang" .. "/obj")
 		buildoptions {
 			"-m32",
 		}
-	configuration { "osx*", "x32", "Release" }
+	configuration { "osx*", "x32", "not arm64", "Release" }
 		targetdir (_buildDir .. "osx_clang" .. "/bin/x32/Release")
 
-	configuration { "osx*", "x32", "Debug" }
+	configuration { "osx*", "x32", "not arm64", "Debug" }
 		targetdir (_buildDir .. "osx_clang" .. "/bin/x32/Debug")
 
-	configuration { "osx*", "x64" }
+	configuration { "osx*", "x64", "not arm64" }
 		objdir (_buildDir .. "osx_clang" .. "/obj")
 		buildoptions {
-			"-m64",
+			"-m64", "-DHAVE_IMMINTRIN_H=1",
 		}
 
-	configuration { "osx*", "x64", "Release" }
+	configuration { "osx*", "x64", "not arm64", "Release" }
 		targetdir (_buildDir .. "osx_clang" .. "/bin/x64/Release")
 
-	configuration { "osx*", "x64", "Debug" }
+	configuration { "osx*", "x64", "not arm64", "Debug" }
 		targetdir (_buildDir .. "osx_clang" .. "/bin/x64/Debug")
 
-	configuration { "ios-arm" }
-		targetdir (_buildDir .. "ios-arm" .. "/bin")
-		objdir (_buildDir .. "ios-arm" .. "/obj")
+	configuration { "osx*", "arm64" }
+		objdir (_buildDir .. "osx_clang" .. "/obj")
+		buildoptions {
+			"-m64", "-DHAVE_IMMINTRIN_H=0", "-DSDL_DISABLE_IMMINTRIN_H=1", "-DHAVE_SSE=0"
+		}
 
-	configuration { "ios-simulator" }
-		targetdir (_buildDir .. "ios-simulator" .. "/bin")
-		objdir (_buildDir .. "ios-simulator" .. "/obj")
+	configuration { "osx*", "arm64", "Release" }
+		targetdir (_buildDir .. "osx_clang" .. "/bin/x64/Release")
 
-	configuration { "rpi" }
-		targetdir (_buildDir .. "rpi" .. "/bin")
-		objdir (_buildDir .. "rpi" .. "/obj")
+	configuration { "osx*", "arm64", "Debug" }
+		targetdir (_buildDir .. "osx_clang" .. "/bin/x64/Debug")
 
 	configuration {} -- reset configuration
 
@@ -936,51 +679,33 @@ function strip()
 		return true
 	end
 
-	configuration { "osx-*", "Release" }
+	configuration { "osx-*" }
 		postbuildcommands {
 			"$(SILENT) echo Stripping symbols.",
 			"$(SILENT) " .. (_OPTIONS['TOOLCHAIN'] and toolchainPrefix) .. "strip \"$(TARGET)\"",
 		}
 
-	configuration { "android-arm", "Release" }
+	configuration { "android-*" }
 		postbuildcommands {
 			"$(SILENT) echo Stripping symbols.",
-			"$(SILENT) $(ANDROID_NDK_ARM)/bin/arm-linux-androideabi-strip -s \"$(TARGET)\""
+			"$(SILENT) " .. toolchainPrefix .. "strip -s \"$(TARGET)\""
 		}
 
-	configuration { "android-mips", "Release" }
-		postbuildcommands {
-			"$(SILENT) echo Stripping symbols.",
-			"$(SILENT) $(ANDROID_NDK_MIPS)/bin/mipsel-linux-android-strip -s \"$(TARGET)\""
-		}
-
-	configuration { "android-x86", "Release" }
-		postbuildcommands {
-			"$(SILENT) echo Stripping symbols.",
-			"$(SILENT) $(ANDROID_NDK_X86)/bin/i686-linux-android-strip -s \"$(TARGET)\""
-		}
-
-	configuration { "linux-* or rpi", "Release" }
+	configuration { "linux-*" }
 		postbuildcommands {
 			"$(SILENT) echo Stripping symbols.",
 			"$(SILENT) strip -s \"$(TARGET)\""
 		}
 
-	configuration { "mingw*", "x64", "Release" }
+	configuration { "mingw*", "x64" }
 		postbuildcommands {
 			"$(SILENT) echo Stripping symbols.",
-			"$(SILENT) " .. (_OPTIONS['TOOLCHAIN'] and toolchainPrefix or "$(MINGW64)/bin/") .. "strip -s \"$(TARGET)\"",
+			"$(SILENT) " .. (_OPTIONS['TOOLCHAIN'] or "$(MINGW64)/bin/") .. "strip -s \"$(TARGET)\"",
 		}
-	configuration { "mingw*", "x32", "Release" }
+	configuration { "mingw*", "x32" }
 		postbuildcommands {
 			"$(SILENT) echo Stripping symbols.",
-			"$(SILENT) " .. (_OPTIONS['TOOLCHAIN'] and toolchainPrefix or "$(MINGW32)/bin/") .. "strip -s \"$(TARGET)\"",
-		}
-
-	configuration { "pnacl" }
-		postbuildcommands {
-			"$(SILENT) echo Running pnacl-finalize.",
-			"$(SILENT) " .. naclToolchain .. "finalize \"$(TARGET)\""
+			"$(SILENT) " .. (_OPTIONS['TOOLCHAIN'] or "$(MINGW32)/bin/") .. "strip -s \"$(TARGET)\"",
 		}
 
 	configuration { "asmjs" }

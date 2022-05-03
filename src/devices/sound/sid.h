@@ -1,9 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Peter Trauner
-#pragma once
+#ifndef MAME_SOUND_SID_H
+#define MAME_SOUND_SID_H
 
-#ifndef __SID_H__
-#define __SID_H__
+#pragma once
 
 /*
   approximation of the sid6581 chip
@@ -15,52 +15,58 @@
 /* private area */
 struct SID6581_t
 {
-	device_t *device;
-	sound_stream *mixer_channel; // mame stream/ mixer channel
+	static constexpr uint8_t max_voices = 3;
 
-	int type;
-	UINT32 clock;
+	device_t *device = nullptr;
+	sound_stream *mixer_channel = nullptr; // mame stream/ mixer channel
 
-	UINT16 PCMfreq; // samplerate of the current systems soundcard/DAC
-	UINT32 PCMsid, PCMsidNoise;
+	int type = 0;
+	uint32_t clock = 0;
+
+	uint16_t PCMfreq = 0; // samplerate of the current systems soundcard/DAC
+	uint32_t PCMsid = 0, PCMsidNoise = 0;
 
 #if 0
 	/* following depends on type */
-	ptr2sidVoidFunc ModeNormalTable[16];
-	ptr2sidVoidFunc ModeRingTable[16];
+	ptr2sidVoidFunc ModeNormalTable[16]{ nullptr };
+	ptr2sidVoidFunc ModeRingTable[16]{ nullptr };
 	// for speed reason it could be better to make them global!
-	UINT8* waveform30;
-	UINT8* waveform50;
-	UINT8* waveform60;
-	UINT8* waveform70;
+	uint8_t *waveform30 = nullptr;
+	uint8_t *waveform50 = nullptr;
+	uint8_t *waveform60 = nullptr;
+	uint8_t *waveform70 = nullptr;
 #endif
-	int reg[0x20];
+	int reg[0x20]{ 0 };
 
-//  bool sidKeysOn[0x20], sidKeysOff[0x20];
+//  bool sidKeysOn[0x20]{ false }, sidKeysOff[0x20]{ false };
 
-	UINT8 masterVolume;
-	UINT16 masterVolumeAmplIndex;
-
+	uint8_t masterVolume = 0;
+	uint16_t masterVolumeAmplIndex = 0;
 
 	struct
 	{
-		int Enabled;
-		UINT8 Type, CurType;
-		float Dy, ResDy;
-		UINT16 Value;
+		int Enabled = 0;
+		uint8_t Type = 0, CurType = 0;
+		float Dy = 0.0, ResDy = 0.0;
+		uint16_t Value = 0;
 	} filter;
 
-	sidOperator optr1, optr2, optr3;
-	int optr3_outputmask;
+	sidOperator optr[max_voices];
+	int optr3_outputmask = 0;
+
+	void init();
+
+	bool reset();
+
+	void postload();
+
+	int port_r(running_machine &machine, int offset);
+	void port_w(int offset, int data);
+
+	void fill_buffer(write_stream_view &buffer);
+
+private:
+	void syncEm();
 };
 
-void sid6581_init (SID6581_t *This);
-
-int sidEmuReset(SID6581_t *This);
-
-int sid6581_port_r (running_machine &machine, SID6581_t *This, int offset);
-void sid6581_port_w (SID6581_t *This, int offset, int data);
-
-void sidEmuFillBuffer(SID6581_t *This, stream_sample_t *buffer, UINT32 bufferLen );
-
-#endif /* __SID_H__ */
+#endif // MAME_SOUND_SID_H

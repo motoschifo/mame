@@ -22,7 +22,7 @@
 //**************************************************************************
 
 // device type definition
-const device_type UPD4992 = &device_creator<upd4992_device>;
+DEFINE_DEVICE_TYPE(UPD4992, upd4992_device, "upd4992", "uPD4992 RTC")
 
 
 //**************************************************************************
@@ -33,10 +33,12 @@ const device_type UPD4992 = &device_creator<upd4992_device>;
 //  upd4992_device - constructor
 //-------------------------------------------------
 
-upd4992_device::upd4992_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, UPD4992, "uPD4992 RTC", tag, owner, clock, "upd4992", __FILE__),
-		device_rtc_interface(mconfig, *this), m_timer_clock(nullptr)
+upd4992_device::upd4992_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: device_t(mconfig, UPD4992, tag, owner, clock)
+	, device_rtc_interface(mconfig, *this)
+	, m_timer_clock(nullptr)
 {
+	std::fill(std::begin(m_rtc_regs), std::end(m_rtc_regs), 0);
 }
 
 
@@ -61,17 +63,7 @@ void upd4992_device::device_start()
 }
 
 
-//-------------------------------------------------
-//  device_reset - device-specific reset
-//-------------------------------------------------
-
-void upd4992_device::device_reset()
-{
-	set_current_time(machine());
-}
-
-
-void upd4992_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void upd4992_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch (id)
 	{
@@ -123,12 +115,12 @@ xxxx ---- Mode register
 //  READ/WRITE HANDLERS
 //**************************************************************************
 
-READ8_MEMBER( upd4992_device::read )
+u8 upd4992_device::read(offs_t offset)
 {
 	return m_rtc_regs[offset];
 }
 
-WRITE8_MEMBER( upd4992_device::write )
+void upd4992_device::write(offs_t offset, u8 data)
 {
 	if(offset == 7)
 	{

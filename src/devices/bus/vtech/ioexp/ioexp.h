@@ -1,5 +1,5 @@
-// license:GPL-2.0+
-// copyright-holders:Dirk Best
+// license: GPL-2.0+
+// copyright-holders: Dirk Best
 /***************************************************************************
 
     VTech Laser/VZ I/O Expansion Slot
@@ -24,64 +24,88 @@
 
 ***************************************************************************/
 
+#ifndef MAME_BUS_VTECH_IOEXP_IOEXP_H
+#define MAME_BUS_VTECH_IOEXP_IOEXP_H
+
 #pragma once
 
-#ifndef __VTECH_IOEXP_H__
-#define __VTECH_IOEXP_H__
+#include "machine/bankdev.h"
 
-#include "emu.h"
-
-
-//**************************************************************************
-//  INTERFACE CONFIGURATION MACROS
-//**************************************************************************
-
-#define MCFG_IOEXP_SLOT_ADD(_tag) \
-	MCFG_DEVICE_ADD(_tag, IOEXP_SLOT, 0) \
-	MCFG_DEVICE_SLOT_INTERFACE(ioexp_slot_carts, NULL, false)
+// include here so drivers don't need to
+#include "carts.h"
 
 
 //**************************************************************************
 //  TYPE DEFINITIONS
 //**************************************************************************
 
-class device_ioexp_interface;
+class device_vtech_ioexp_interface;
 
-class ioexp_slot_device : public device_t, public device_slot_interface
+class vtech_ioexp_slot_device : public device_t, public device_single_card_slot_interface<device_vtech_ioexp_interface>
 {
+	friend class device_vtech_ioexp_interface;
 public:
 	// construction/destruction
-	ioexp_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
-	virtual ~ioexp_slot_device();
+	vtech_ioexp_slot_device(machine_config const &mconfig, char const *tag, device_t *owner)
+		: vtech_ioexp_slot_device(mconfig, tag, owner, (uint32_t)0)
+	{
+		option_reset();
+		vtech_ioexp_slot_carts(*this);
+		set_default_option(nullptr);
+		set_fixed(false);
+	}
+	vtech_ioexp_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+	virtual ~vtech_ioexp_slot_device();
 
-	void set_io_space(address_space *io);
-
-	address_space *m_io;
+	template <typename T> void set_iospace(T &&tag, int spacenum) { m_iospace.set_tag(std::forward<T>(tag), spacenum); }
 
 protected:
 	// device-level overrides
 	virtual void device_start() override;
-	virtual void device_reset() override;
 
-	device_ioexp_interface *m_cart;
+private:
+	required_address_space m_iospace;
+
+	device_vtech_ioexp_interface *m_module;
 };
 
 // class representing interface-specific live ioexp device
-class device_ioexp_interface : public device_slot_card_interface
+class device_vtech_ioexp_interface : public device_interface
 {
 public:
 	// construction/destruction
-	device_ioexp_interface(const machine_config &mconfig, device_t &device);
-	virtual ~device_ioexp_interface();
+	virtual ~device_vtech_ioexp_interface();
+
+	virtual uint8_t iorq_r(offs_t offset) { return 0xff; }
+	virtual void iorq_w(offs_t offset, uint8_t data) { }
 
 protected:
-	ioexp_slot_device *m_slot;
+	device_vtech_ioexp_interface(const machine_config &mconfig, device_t &device);
+
+	vtech_ioexp_slot_device *m_slot;
+};
+
+// base io expansion device
+class vtech_ioexp_device : public device_t, public device_vtech_ioexp_interface
+{
+public:
+	// construction/destruction
+	vtech_ioexp_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
+
+	// from host
+	virtual uint8_t iorq_r(offs_t offset) override;
+	virtual void iorq_w(offs_t offset, uint8_t data) override;
+
+protected:
+	virtual void device_add_mconfig(machine_config &config) override;
+	virtual void device_start() override;
+
+	virtual void io_map(address_map &map) { }
+
+	required_device<address_map_bank_device> m_io;
 };
 
 // device type definition
-extern const device_type IOEXP_SLOT;
+DECLARE_DEVICE_TYPE(VTECH_IOEXP_SLOT, vtech_ioexp_slot_device)
 
-// include here so drivers don't need to
-#include "carts.h"
-
-#endif // __VTECH_IOEXP_H__
+#endif // MAME_BUS_VTECH_IOEXP_IOEXP_H

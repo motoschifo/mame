@@ -7,7 +7,6 @@
 
  ***********************************************************************************************************/
 
-
 #include "emu.h"
 #include "slot.h"
 
@@ -15,7 +14,7 @@
 //  GLOBAL VARIABLES
 //**************************************************************************
 
-const device_type M5_CART_SLOT = &device_creator<m5_cart_slot_device>;
+DEFINE_DEVICE_TYPE(M5_CART_SLOT, m5_cart_slot_device, "m5_cart_slot", "M5 Cartridge Slot")
 
 //**************************************************************************
 //    M5 Cartridges Interface
@@ -25,10 +24,10 @@ const device_type M5_CART_SLOT = &device_creator<m5_cart_slot_device>;
 //  device_m5_cart_interface - constructor
 //-------------------------------------------------
 
-device_m5_cart_interface::device_m5_cart_interface(const machine_config &mconfig, device_t &device)
-	: device_slot_card_interface(mconfig, device),
-		m_rom(NULL),
-		m_rom_size(0)
+device_m5_cart_interface::device_m5_cart_interface(const machine_config &mconfig, device_t &device) :
+	device_interface(device, "m5cart"),
+	m_rom(nullptr),
+	m_rom_size(0)
 {
 }
 
@@ -45,9 +44,9 @@ device_m5_cart_interface::~device_m5_cart_interface()
 //  rom_alloc - alloc the space for the cart
 //-------------------------------------------------
 
-void device_m5_cart_interface::rom_alloc(UINT32 size, const char *tag)
+void device_m5_cart_interface::rom_alloc(uint32_t size, const char *tag)
 {
-	if (m_rom == NULL)
+	if (m_rom == nullptr)
 	{
 		m_rom = device().machine().memory().region_alloc(std::string(tag).append(M5SLOT_ROM_REGION_TAG).c_str(), size, 1, ENDIANNESS_LITTLE)->base();
 		m_rom_size = size;
@@ -59,7 +58,7 @@ void device_m5_cart_interface::rom_alloc(UINT32 size, const char *tag)
 //  ram_alloc - alloc the space for the ram
 //-------------------------------------------------
 
-void device_m5_cart_interface::ram_alloc(UINT32 size)
+void device_m5_cart_interface::ram_alloc(uint32_t size)
 {
 	m_ram.resize(size);
 }
@@ -72,11 +71,12 @@ void device_m5_cart_interface::ram_alloc(UINT32 size)
 //-------------------------------------------------
 //  m5_cart_slot_device - constructor
 //-------------------------------------------------
-m5_cart_slot_device::m5_cart_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-						device_t(mconfig, M5_CART_SLOT, "M5 Cartridge Slot", tag, owner, clock, "m5_cart_slot", __FILE__),
-						device_image_interface(mconfig, *this),
-						device_slot_interface(mconfig, *this),
-						m_type(M5_STD), m_cart(nullptr)
+m5_cart_slot_device::m5_cart_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, M5_CART_SLOT, tag, owner, clock),
+	device_cartrom_image_interface(mconfig, *this),
+	device_single_card_slot_interface(mconfig, *this),
+	m_type(M5_STD),
+	m_cart(nullptr)
 {
 }
 
@@ -95,19 +95,7 @@ m5_cart_slot_device::~m5_cart_slot_device()
 
 void m5_cart_slot_device::device_start()
 {
-	m_cart = dynamic_cast<device_m5_cart_interface *>(get_card_device());
-}
-
-//-------------------------------------------------
-//  device_config_complete - perform any
-//  operations now that the configuration is
-//  complete
-//-------------------------------------------------
-
-void m5_cart_slot_device::device_config_complete()
-{
-	// set brief and instance name
-	update_names();
+	m_cart = get_card_device();
 }
 
 
@@ -132,9 +120,9 @@ static const m5_slot slot_list[] =
 
 static int m5_get_pcb_id(const char *slot)
 {
-	for (int i = 0; i < ARRAY_LENGTH(slot_list); i++)
+	for (int i = 0; i < std::size(slot_list); i++)
 	{
-		if (!core_stricmp(slot_list[i].slot_option, slot))
+		if (!strcmp(slot_list[i].slot_option, slot))
 			return slot_list[i].pcb_id;
 	}
 
@@ -143,7 +131,7 @@ static int m5_get_pcb_id(const char *slot)
 
 static const char *m5_get_slot(int type)
 {
-	for (int i = 0; i < ARRAY_LENGTH(slot_list); i++)
+	for (int i = 0; i < std::size(slot_list); i++)
 	{
 		if (slot_list[i].pcb_id == type)
 			return slot_list[i].slot_option;
@@ -157,35 +145,34 @@ static const char *m5_get_slot(int type)
  call load
  -------------------------------------------------*/
 
-bool m5_cart_slot_device::call_load()
+image_init_result m5_cart_slot_device::call_load()
 {
 	if (m_cart)
 	{
 		m_type=M5_STD;
 
-		if (software_entry() != NULL)
+		if (loaded_through_softlist())
 		{
 			const char *pcb_name = get_feature("slot");
-			//software_info *name=m_software_info_ptr;
 			if (pcb_name) //is it ram cart?
-				m_type = m5_get_pcb_id(m_full_software_name.c_str());
+				m_type = m5_get_pcb_id(full_software_name().c_str());
 			else
 				m_type=M5_STD; //standard cart(no feature line in xml)
 		}
 
 		if (m_type == M5_STD || m_type>2) //carts with roms
 		{
-			UINT32 size = (software_entry() == NULL) ? length() : get_software_region_length("rom");
+			uint32_t size = !loaded_through_softlist() ? length() : get_software_region_length("rom");
 
 			if (size > 0x5000 && m_type == M5_STD)
 			{
-				seterror(IMAGE_ERROR_UNSPECIFIED, "Image extends beyond the expected size for an M5 cart");
-				return IMAGE_INIT_FAIL;
+				seterror(image_error::INVALIDIMAGE, "Image extends beyond the expected size for an M5 cart");
+				return image_init_result::FAIL;
 			}
 
 			m_cart->rom_alloc(size, tag());
 
-			if (software_entry() == NULL)
+			if (!loaded_through_softlist())
 				fread(m_cart->get_rom_base(), size);
 			else
 				memcpy(m_cart->get_rom_base(), get_software_region("rom"), size);
@@ -199,18 +186,7 @@ bool m5_cart_slot_device::call_load()
 		//printf("Type: %s\n", m5_get_slot(m_type));
 	}
 
-	return IMAGE_INIT_PASS;
-}
-
-
-/*-------------------------------------------------
- call softlist load
- -------------------------------------------------*/
-
-bool m5_cart_slot_device::call_softlist_load(software_list_device &swlist, const char *swname, const rom_entry *start_entry)
-{
-	machine().rom_load().load_software_part_region(*this, swlist, swname, start_entry);
-	return TRUE;
+	return image_init_result::PASS;
 }
 
 
@@ -218,20 +194,19 @@ bool m5_cart_slot_device::call_softlist_load(software_list_device &swlist, const
  get default card software
  -------------------------------------------------*/
 
-std::string m5_cart_slot_device::get_default_card_software()
+std::string m5_cart_slot_device::get_default_card_software(get_default_card_software_hook &hook) const
 {
 	std::string result;
-	if (open_image_file(mconfig().options()))
+	if (hook.image_file())
 	{
 		const char *slot_string = "std";
-		//UINT32 size = core_fsize(m_file);
+		//uint32_t size = core_fsize(m_file);
 		int type = M5_STD;
 
 
 		slot_string = m5_get_slot(type);
 
 		//printf("type: %s\n", slot_string);
-		clear();
 
 		result.assign(slot_string);
 		return result;
@@ -244,10 +219,10 @@ std::string m5_cart_slot_device::get_default_card_software()
  read
  -------------------------------------------------*/
 
-READ8_MEMBER(m5_cart_slot_device::read_rom)
+uint8_t m5_cart_slot_device::read_rom(offs_t offset)
 {
 	if (m_cart)
-		return m_cart->read_rom(space, offset);
+		return m_cart->read_rom(offset);
 	else
 		return 0xff;
 }
@@ -256,10 +231,10 @@ READ8_MEMBER(m5_cart_slot_device::read_rom)
  read
  -------------------------------------------------*/
 
-READ8_MEMBER(m5_cart_slot_device::read_ram)
+uint8_t m5_cart_slot_device::read_ram(offs_t offset)
 {
 	if (m_cart)
-		return m_cart->read_ram(space, offset);
+		return m_cart->read_ram(offset);
 	else
 		return 0xff;
 }
@@ -268,8 +243,8 @@ READ8_MEMBER(m5_cart_slot_device::read_ram)
  write
  -------------------------------------------------*/
 
-WRITE8_MEMBER(m5_cart_slot_device::write_ram)
+void m5_cart_slot_device::write_ram(offs_t offset, uint8_t data)
 {
 	if (m_cart)
-		m_cart->write_ram(space, offset, data);
+		m_cart->write_ram(offset, data);
 }

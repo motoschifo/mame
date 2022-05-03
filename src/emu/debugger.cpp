@@ -2,9 +2,10 @@
 // copyright-holders:Nicola Salmoria, Aaron Giles
 /*********************************************************************
 
-    debugger.c
+    debugger.cpp
 
     Front-end debugger interfaces.
+
 *********************************************************************/
 
 #include "emu.h"
@@ -14,14 +15,40 @@
 #include "debug/debugcmd.h"
 #include "debug/debugcon.h"
 #include "debug/debugvw.h"
-#include <ctype.h>
+#include <cctype>
 
 /***************************************************************************
     GLOBAL VARIABLES
 ***************************************************************************/
 
 static running_machine *g_machine = nullptr;
-static int g_atexit_registered = FALSE;
+static bool g_atexit_registered = false;
+
+
+/*-------------------------------------------------
+    debug_break - stop in the debugger at the next
+    opportunity
+-------------------------------------------------*/
+
+void debugger_manager::debug_break()
+{
+	m_console->get_visible_cpu()->debug()->halt_on_next_instruction("Internal breakpoint\n");
+}
+
+
+/*-------------------------------------------------
+    within_instruction_hook - call this to
+    determine if the debugger is currently halted
+    within the instruction hook
+-------------------------------------------------*/
+
+bool debugger_manager::within_instruction_hook()
+{
+	if ((m_machine.debug_flags & DEBUG_FLAG_ENABLED) != 0)
+		return m_cpu->within_instruction_hook();
+	return false;
+}
+
 
 //**************************************************************************
 //  DEBUGGER MANAGER
@@ -35,18 +62,16 @@ debugger_manager::debugger_manager(running_machine &machine)
 	: m_machine(machine)
 {
 	/* initialize the submodules */
-	debug_cpu_init(machine);
-	debug_command_init(machine);
+	m_cpu = std::make_unique<debugger_cpu>(machine);
+	m_console = std::make_unique<debugger_console>(machine);
+	m_commands = std::make_unique<debugger_commands>(machine, cpu(), console());
 
 	g_machine = &machine;
 
 	/* register an atexit handler if we haven't yet */
 	if (!g_atexit_registered)
 		atexit(debugger_flush_all_traces_on_abnormal_exit);
-	g_atexit_registered = TRUE;
-
-	/* listen in on the errorlog */
-	machine.add_logerror_callback(debug_errorlog_write_line);
+	g_atexit_registered = true;
 
 	/* initialize osd debugger features */
 	machine.osd().init_debugger();
@@ -59,15 +84,6 @@ debugger_manager::debugger_manager(running_machine &machine)
 debugger_manager::~debugger_manager()
 {
 	g_machine = nullptr;
-}
-
-void debugger_manager::initialize()
-{
-	/* only if debugging is enabled */
-	if (machine().debug_flags & DEBUG_FLAG_ENABLED)
-	{
-		debug_console_init(machine());
-	}
 }
 
 /*-------------------------------------------------
@@ -87,10 +103,10 @@ void debugger_manager::refresh_display()
     execution
 -------------------------------------------------*/
 
-void debugger_flush_all_traces_on_abnormal_exit(void)
+void debugger_flush_all_traces_on_abnormal_exit()
 {
-	if(g_machine!=nullptr)
+	if(g_machine != nullptr)
 	{
-		debug_cpu_flush_traces(*g_machine);
+		g_machine->debugger().cpu().flush_traces();
 	}
 }

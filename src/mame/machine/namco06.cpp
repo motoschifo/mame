@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:Aaron Giles
+// copyright-holders:Mike Harris, Aaron Giles
 /***************************************************************************
 
     Namco 06XX
@@ -7,6 +7,13 @@
     This chip is used as an interface to up to 4 other custom chips.
     It signals IRQs to the custom MCUs when writes happen, and generates
     NMIs to the controlling CPU to drive reads based on a clock.
+
+    It uses a clock divider that's used to pulse the NMI and custom chip select
+    lines.
+
+    The control register controls chip as such: the low 4 bits are chip selects
+    (active high), the 5th bit is read/!write, and the upper 3 bits are the
+    clock divide.
 
     SD0-SD7 are data I/O lines connecting to the controlling CPU
     SEL selects either control (1) or data (0), usually connected to
@@ -35,6 +42,10 @@
 
     [1] on polepos, galaga, xevious, and bosco: connected to K3 of the 51xx
         on bosco and xevious, connected to R8 of the 50xx
+
+    Note that Xevious has a potential race condition at 0xE9. It checks if
+    the control register is 0x10 (chip disabled), then 4 instructions later
+    acts on that check. If an NMI occurs between, it can crash.
 
 
     06XX interface:
@@ -85,113 +96,163 @@
 #include "machine/namco06.h"
 
 #define VERBOSE 0
-#define LOG(x) do { if (VERBOSE) logerror x; } while (0)
+#include "logmacro.h"
 
 
 TIMER_CALLBACK_MEMBER( namco_06xx_device::nmi_generate )
 {
-	if (!m_nmicpu->suspended(SUSPEND_REASON_HALT | SUSPEND_REASON_RESET | SUSPEND_REASON_DISABLE))
+	// This timer runs at twice the clock, since we do work on both the
+	// rising and falling edge.
+	//
+	// During reads, the first NMI pulse is supressed to give the chip a
+	// cycle to write.
+
+	if (m_next_timer_state)
 	{
-		LOG(("NMI cpu '%s'\n",m_nmicpu->tag()));
-		m_nmicpu->set_input_line(INPUT_LINE_NMI, PULSE_LINE);
+		m_rw[0](0, BIT(m_control, 4));
+		m_rw[1](0, BIT(m_control, 4));
+		m_rw[2](0, BIT(m_control, 4));
+		m_rw[3](0, BIT(m_control, 4));
+	}
+
+	if (m_next_timer_state && !m_read_stretch)
+	{
+		set_nmi(ASSERT_LINE);
 	}
 	else
-		LOG(("NMI not generated because cpu '%s' is suspended\n",m_nmicpu->tag()));
+	{
+		set_nmi(CLEAR_LINE);
+	}
+	m_read_stretch = false;
+
+	m_chipsel[0](0, BIT(m_control, 0) && m_next_timer_state);
+	m_chipsel[1](0, BIT(m_control, 1) && m_next_timer_state);
+	m_chipsel[2](0, BIT(m_control, 2) && m_next_timer_state);
+	m_chipsel[3](0, BIT(m_control, 3) && m_next_timer_state);
+
+	m_next_timer_state = !m_next_timer_state;
 }
 
-
-READ8_MEMBER( namco_06xx_device::data_r )
+uint8_t namco_06xx_device::data_r(offs_t offset)
 {
-	UINT8 result = 0xff;
+	uint8_t result = 0xff;
 
-	LOG(("%s: 06XX '%s' read offset %d\n",machine().describe_context(),tag(),offset));
-
-	if (!(m_control & 0x10))
+	if (!BIT(m_control, 4))
 	{
 		logerror("%s: 06XX '%s' read in write mode %02x\n",machine().describe_context(),tag(),m_control);
 		return 0;
 	}
 
-	if ((m_control & (1 << 0)) && !m_read_0.isnull()) result &= m_read_0(space, 0);
-	if ((m_control & (1 << 1)) && !m_read_1.isnull()) result &= m_read_1(space, 0);
-	if ((m_control & (1 << 2)) && !m_read_2.isnull()) result &= m_read_2(space, 0);
-	if ((m_control & (1 << 3)) && !m_read_3.isnull()) result &= m_read_3(space, 0);
+	if (BIT(m_control, 0)) result &= m_read[0](0);
+	if (BIT(m_control, 1)) result &= m_read[1](0);
+	if (BIT(m_control, 2)) result &= m_read[2](0);
+	if (BIT(m_control, 3)) result &= m_read[3](0);
 
 	return result;
 }
 
 
-WRITE8_MEMBER( namco_06xx_device::data_w )
+void namco_06xx_device::data_w(offs_t offset, uint8_t data)
 {
-	LOG(("%s: 06XX '%s' write offset %d = %02x\n",machine().describe_context(),tag(),offset,data));
+	machine().scheduler().synchronize(timer_expired_delegate(FUNC(namco_06xx_device::write_sync),this), data);
+}
 
-	if (m_control & 0x10)
+TIMER_CALLBACK_MEMBER( namco_06xx_device::write_sync )
+{
+	if (BIT(m_control, 4))
 	{
 		logerror("%s: 06XX '%s' write in read mode %02x\n",machine().describe_context(),tag(),m_control);
 		return;
 	}
-	if ((m_control & (1 << 0)) && !m_write_0.isnull()) m_write_0(space, 0, data);
-	if ((m_control & (1 << 1)) && !m_write_1.isnull()) m_write_1(space, 0, data);
-	if ((m_control & (1 << 2)) && !m_write_2.isnull()) m_write_2(space, 0, data);
-	if ((m_control & (1 << 3)) && !m_write_3.isnull()) m_write_3(space, 0, data);
+	if (BIT(m_control, 0)) m_write[0](0, param);
+	if (BIT(m_control, 1)) m_write[1](0, param);
+	if (BIT(m_control, 2)) m_write[2](0, param);
+	if (BIT(m_control, 3)) m_write[3](0, param);
 }
 
 
-READ8_MEMBER( namco_06xx_device::ctrl_r )
+uint8_t namco_06xx_device::ctrl_r()
 {
-	LOG(("%s: 06XX '%s' ctrl_r\n",machine().describe_context(),tag()));
 	return m_control;
 }
 
-WRITE8_MEMBER( namco_06xx_device::ctrl_w )
+void namco_06xx_device::ctrl_w(uint8_t data)
 {
-	LOG(("%s: 06XX '%s' control %02x\n",space.machine().describe_context(),tag(),data));
+	machine().scheduler().synchronize(timer_expired_delegate(FUNC(namco_06xx_device::ctrl_w_sync),this), data);
+}
 
-	m_control = data;
+TIMER_CALLBACK_MEMBER( namco_06xx_device::ctrl_w_sync )
+{
+	m_control = param;
 
-	if ((m_control & 0x0f) == 0)
+	// The upper 3 control bits are the clock divider.
+	if ((m_control & 0xe0) == 0)
 	{
-		LOG(("disabling nmi generate timer\n"));
 		m_nmi_timer->adjust(attotime::never);
+		m_next_timer_state = true;
+		set_nmi(CLEAR_LINE);
+		m_chipsel[0](0, CLEAR_LINE);
+		m_chipsel[1](0, CLEAR_LINE);
+		m_chipsel[2](0, CLEAR_LINE);
+		m_chipsel[3](0, CLEAR_LINE);
+		// RW is left as-is
 	}
 	else
 	{
-		LOG(("setting nmi generate timer to 200us\n"));
+		// NMI is cleared immediately if this is a read
+		// It will be supressed the next clock cycle.
+		if (BIT(m_control, 4))
+		{
+			set_nmi(CLEAR_LINE);
+			m_read_stretch = true;
+		} else {
+			m_read_stretch = false;
+		}
 
-		// this timing is critical. Due to a bug, Bosconian will stop responding to
-		// inputs if a transfer terminates at the wrong time.
-		// On the other hand, the time cannot be too short otherwise the 54XX will
-		// not have enough time to process the incoming controls.
-		m_nmi_timer->adjust(attotime::from_usec(200), 0, attotime::from_usec(200));
 
-		if (m_control & 0x10) {
-			if ((m_control & (1 << 0)) && !m_readreq_0.isnull()) m_readreq_0(space, 0);
-			if ((m_control & (1 << 1)) && !m_readreq_1.isnull()) m_readreq_1(space, 0);
-			if ((m_control & (1 << 2)) && !m_readreq_2.isnull()) m_readreq_2(space, 0);
-			if ((m_control & (1 << 3)) && !m_readreq_3.isnull()) m_readreq_3(space, 0);
+		uint8_t num_shifts = (m_control & 0xe0) >> 5;
+		uint8_t divisor = 1 << num_shifts;
+		attotime period = attotime::from_hz(clock() / divisor) / 2;
+		// This delay should be the next falling clock.
+		// That's complicated to get, as it's derived from the master
+		// clock. The CPU uses this same clock, so writes will come at
+		// a specific pace.
+		// Instead, just approximate a quarter cycle.
+		// Xevious is very sensitive to this. It will bootloop if it
+		// isn't correct.
+		attotime delay = attotime::from_hz(clock()) / 4; // average of one clock
+		if (!m_next_timer_state)
+		{
+			// NMI is asserted, wait one additional clock to start
+			m_nmi_timer->adjust(delay + attotime::from_hz(clock() / divisor), 0, period);
+		} else {
+			m_nmi_timer->adjust(delay, 0, period);
 		}
 	}
 }
 
 
-const device_type NAMCO_06XX = &device_creator<namco_06xx_device>;
+void namco_06xx_device::set_nmi(int state)
+{
+	if (!m_nmicpu->suspended(SUSPEND_REASON_HALT | SUSPEND_REASON_RESET | SUSPEND_REASON_DISABLE))
+	{
+		m_nmicpu->set_input_line(INPUT_LINE_NMI, state);
+	}
+}
 
-namco_06xx_device::namco_06xx_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, NAMCO_06XX, "Namco 06xx", tag, owner, clock, "namco06xx", __FILE__),
-	m_control(0),
-	m_nmicpu(*this),
-	m_read_0(*this),
-	m_read_1(*this),
-	m_read_2(*this),
-	m_read_3(*this),
-	m_readreq_0(*this),
-	m_readreq_1(*this),
-	m_readreq_2(*this),
-	m_readreq_3(*this),
-	m_write_0(*this),
-	m_write_1(*this),
-	m_write_2(*this),
-	m_write_3(*this)
+
+DEFINE_DEVICE_TYPE(NAMCO_06XX, namco_06xx_device, "namco06", "Namco 06xx")
+
+namco_06xx_device::namco_06xx_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, NAMCO_06XX, tag, owner, clock)
+	, m_control(0)
+	, m_next_timer_state(false)
+	, m_read_stretch(false)
+	, m_nmicpu(*this, finder_base::DUMMY_TAG)
+	, m_chipsel(*this)
+	, m_rw(*this)
+	, m_read(*this)
+	, m_write(*this)
 {
 }
 
@@ -201,22 +262,17 @@ namco_06xx_device::namco_06xx_device(const machine_config &mconfig, const char *
 
 void namco_06xx_device::device_start()
 {
-	m_read_0.resolve();
-	m_read_1.resolve();
-	m_read_2.resolve();
-	m_read_3.resolve();
-	m_readreq_0.resolve();
-	m_readreq_1.resolve();
-	m_readreq_2.resolve();
-	m_readreq_3.resolve();
-	m_write_0.resolve();
-	m_write_1.resolve();
-	m_write_2.resolve();
-	m_write_3.resolve();
+	m_chipsel.resolve_all_safe();
+	m_rw.resolve_all_safe();
+	m_read.resolve_all_safe(0xff);
+	m_write.resolve_all_safe();
+
 	/* allocate a timer */
 	m_nmi_timer = machine().scheduler().timer_alloc(timer_expired_delegate(FUNC(namco_06xx_device::nmi_generate),this));
 
 	save_item(NAME(m_control));
+	save_item(NAME(m_next_timer_state));
+	save_item(NAME(m_read_stretch));
 }
 
 //-------------------------------------------------

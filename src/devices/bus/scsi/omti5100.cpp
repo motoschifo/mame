@@ -1,5 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:smf
+#include "emu.h"
 #include "omti5100.h"
 
 #define OMTI_STATUS_SEEK_FAIL 0x02
@@ -9,24 +10,24 @@
 #define OMTI_READ_DATA_BUFFER 0xec
 #define OMTI_ASSIGN_DISK_PARAM 0xc2
 
-const device_type OMTI5100 = &device_creator<omti5100_device>;
+DEFINE_DEVICE_TYPE(OMTI5100, omti5100_device, "omti5100", "OMTI 5100")
 
 #if 0
 ROM_START( omti5100 )
 	ROM_REGION(0x1000, "mcu", 0) // Hitachi Z8
-	ROM_LOAD("100240-N.7a", 0x0000, 0x1000, CRC(d227d6cb) SHA1(3d6140764d3d043428c941826370ebf1597c63bd))
+	ROM_LOAD("100240-n.7a", 0x0000, 0x1000, CRC(d227d6cb) SHA1(3d6140764d3d043428c941826370ebf1597c63bd))
 ROM_END
 
-const rom_entry *omti5100_device::device_rom_region() const
+const tiny_rom_entry *omti5100_device::device_rom_region() const
 {
 	return ROM_NAME( omti5100 );
 }
 #endif
 
-omti5100_device::omti5100_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: scsihd_device(mconfig, OMTI5100, "OMTI 5100", tag, owner, clock, "omti5100", __FILE__),
-		m_image0(*this, "image0"),
-		m_image1(*this, "image1")
+omti5100_device::omti5100_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: scsihd_device(mconfig, OMTI5100, tag, owner, clock)
+	, m_image0(*this, "image0")
+	, m_image1(*this, "image1")
 {
 }
 
@@ -53,7 +54,7 @@ void omti5100_device::ExecCommand()
 		m_transfer_length = 0;
 		return;
 	}
-	hard_disk_info *info = hard_disk_get_info(image);
+	const auto &info = image->get_info();
 	switch(command[0])
 	{
 		case OMTI_READ_DATA_BUFFER:
@@ -76,7 +77,7 @@ void omti5100_device::ExecCommand()
 		{
 			int track = ((command[1]&0x1f)<<16 | command[2]<<8 | command[3]) / (m_param[drive].sectors ? m_param[drive].sectors : 1);
 			int heads = m_param[drive].heads ? m_param[drive].heads : 1;
-			if(((track % heads) > info->heads) || (track >= (info->cylinders * heads)))
+			if(((track % heads) > info.heads) || (track >= (info.cylinders * heads)))
 			{
 				m_phase = SCSI_PHASE_STATUS;
 				m_status_code = SCSI_STATUS_CODE_CHECK_CONDITION;
@@ -93,15 +94,15 @@ void omti5100_device::ExecCommand()
 		case OMTI_FORMAT_TRACK:
 		{
 			int track = ((command[1]&0x1f)<<16 | command[2]<<8 | command[3]) / m_param[drive].sectors;
-			if(((track % m_param[drive].heads) <= info->heads) && (track < (info->cylinders * m_param[drive].heads)))
+			if(((track % m_param[drive].heads) <= info.heads) && (track < (info.cylinders * m_param[drive].heads)))
 			{
-				dynamic_buffer sector(info->sectorbytes);
-				memset(&sector[0], 0xe5, info->sectorbytes);
+				std::vector<uint8_t> sector(info.sectorbytes);
+				memset(&sector[0], 0xe5, info.sectorbytes);
 				m_phase = SCSI_PHASE_STATUS;
 				m_status_code = SCSI_STATUS_CODE_GOOD;
 				m_transfer_length = 0;
-				for(int i = 0; i < info->sectors; i++)
-					hard_disk_write(image, track * info->sectors + i, &sector[0]);
+				for(int i = 0; i < info.sectors; i++)
+					image->write(track * info.sectors + i, &sector[0]);
 			}
 			else
 			{
@@ -119,7 +120,7 @@ void omti5100_device::ExecCommand()
 	}
 }
 
-void omti5100_device::ReadData( UINT8 *data, int dataLength )
+void omti5100_device::ReadData( uint8_t *data, int dataLength )
 {
 	switch( command[ 0 ] )
 	{
@@ -136,7 +137,7 @@ void omti5100_device::ReadData( UINT8 *data, int dataLength )
 	}
 }
 
-void omti5100_device::WriteData( UINT8 *data, int dataLength )
+void omti5100_device::WriteData( uint8_t *data, int dataLength )
 {
 	switch( command[ 0 ] )
 	{
@@ -148,7 +149,7 @@ void omti5100_device::WriteData( UINT8 *data, int dataLength )
 			m_param[drive].cylinders = ((data[4] << 8) | data[5]) + 1;
 			if(!data[8] && image)
 			{
-				switch(hard_disk_get_info(image)->sectorbytes)
+				switch(image->get_info().sectorbytes)
 				{
 					case 128:
 						m_param[drive].sectors = 53;
@@ -175,13 +176,8 @@ void omti5100_device::WriteData( UINT8 *data, int dataLength )
 	}
 }
 
-static MACHINE_CONFIG_FRAGMENT( omti5100 )
-	MCFG_HARDDISK_ADD("image0")
-	MCFG_HARDDISK_ADD("image1")
-MACHINE_CONFIG_END
-
-
-machine_config_constructor omti5100_device::device_mconfig_additions() const
+void omti5100_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( omti5100 );
+	HARDDISK(config, m_image0);
+	HARDDISK(config, m_image1);
 }

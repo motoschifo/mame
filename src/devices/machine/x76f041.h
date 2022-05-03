@@ -7,22 +7,18 @@
  *
  */
 
+#ifndef MAME_MACHINE_X76F041_H
+#define MAME_MACHINE_X76F041_H
+
 #pragma once
 
-#ifndef __X76F041_H__
-#define __X76F041_H__
-
-#include "emu.h"
-
-#define MCFG_X76F041_ADD( _tag ) \
-	MCFG_DEVICE_ADD( _tag, X76F041, 0 )
 
 class x76f041_device : public device_t,
 	public device_nvram_interface
 {
 public:
 	// construction/destruction
-	x76f041_device( const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock );
+	x76f041_device( const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 
 	DECLARE_WRITE_LINE_MEMBER( write_cs );
 	DECLARE_WRITE_LINE_MEMBER( write_rst );
@@ -33,26 +29,40 @@ public:
 protected:
 	// device-level overrides
 	virtual void device_start() override;
+	virtual void device_reset() override;
 
 	// device_nvram_interface overrides
 	virtual void nvram_default() override;
-	virtual void nvram_read( emu_file &file ) override;
-	virtual void nvram_write( emu_file &file ) override;
+	virtual bool nvram_read( util::read_stream &file ) override;
+	virtual bool nvram_write( util::write_stream &file ) override;
 
 private:
 	inline void ATTR_PRINTF( 3, 4 ) verboselog( int n_level, const char *s_fmt, ... );
-	UINT8 *password();
+	uint8_t *password();
 	void password_ok();
 	void load_address();
 	int data_offset();
 
 	enum configuration_register_t
 	{
-		CONFIG_BCR1 = 0,
-		CONFIG_BCR2 = 1,
-		CONFIG_CR = 2,
-		CONFIG_RR = 3,
-		CONFIG_RC = 4
+		// If set to 1, retry counter is incremented when an invalid password is provided
+		CR_RETRY_COUNTER_ENABLE_BIT = 0x04,
+
+		// If set to 1, retry counter will be reset when a correct password is provided
+		CR_RETRY_COUNTER_RESET_BIT = 0x08,
+
+		// 10 = If retry counter is enabled, deny all commands when retry register equals retry counter
+		// 00, 01, 11 = If retry counter is enabled, allow only configuration commands when retry register equals retry counter
+		CR_UNAUTHORIZED_ACCESS_BITS = 0xc0,
+	};
+
+	enum configuration_registers_t
+	{
+		CONFIG_BCR1 = 0, // Array Control Register
+		CONFIG_BCR2 = 1, // Array Control Register 2
+		CONFIG_CR   = 2, // Configuration Register
+		CONFIG_RR   = 3, // Retry Register
+		CONFIG_RC   = 4  // Reset Counter
 	};
 
 	enum bcr_t
@@ -95,9 +105,21 @@ private:
 		STATE_VERIFY_PASSWORD,
 		STATE_READ_DATA,
 		STATE_WRITE_DATA,
+		STATE_CONFIGURATION_WRITE_DATA,
 		STATE_READ_CONFIGURATION_REGISTERS,
-		STATE_WRITE_CONFIGURATION_REGISTERS
+		STATE_WRITE_CONFIGURATION_REGISTERS,
+
+		STATE_PROGRAM_WRITE_PASSWORD,
+		STATE_PROGRAM_READ_PASSWORD,
+		STATE_PROGRAM_CONFIGURATION_PASSWORD,
+
+		STATE_RESET_WRITE_PASSWORD,
+		STATE_RESET_READ_PASSWORD,
+		STATE_MASS_PROGRAM,
+		STATE_MASS_ERASE
 	};
+
+	optional_memory_region m_region;
 
 	// internal state
 	int m_cs;
@@ -111,17 +133,19 @@ private:
 	int m_byte;
 	int m_command;
 	int m_address;
-	UINT8 m_write_buffer[ 8 ];
-	UINT8 m_response_to_reset[ 4 ];
-	UINT8 m_write_password[ 8 ];
-	UINT8 m_read_password[ 8 ];
-	UINT8 m_configuration_password[ 8 ];
-	UINT8 m_configuration_registers[ 8 ];
-	UINT8 m_data[ 512 ];
+	bool m_is_password_accepted;
+	uint8_t m_write_buffer[ 8 ];
+	uint8_t m_response_to_reset[ 4 ];
+	uint8_t m_write_password[ 8 ];
+	uint8_t m_read_password[ 8 ];
+	uint8_t m_configuration_password[ 8 ];
+	uint8_t m_configuration_registers[ 8 ];
+	uint8_t m_data[ 512 ];
+	uint8_t m_password_temp[ 16 ];
 };
 
 
 // device type definition
-extern const device_type X76F041;
+DECLARE_DEVICE_TYPE(X76F041, x76f041_device)
 
-#endif
+#endif // MAME_MACHINE_X76F041_H

@@ -77,9 +77,14 @@
 
  *********************************************************************/
 
-	#include <assert.h>
-
 #include "nfd_dsk.h"
+
+#include "ioprocs.h"
+
+#include "osdcomm.h" // little_endianize_int*
+
+#include <cstring>
+
 
 nfd_format::nfd_format()
 {
@@ -100,36 +105,40 @@ const char *nfd_format::extensions() const
 	return "nfd";
 }
 
-int nfd_format::identify(io_generic *io, UINT32 form_factor)
+int nfd_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
-	UINT8 h[16];
-	io_generic_read(io, h, 0, 16);
+	uint8_t h[16];
+	size_t actual;
+	io.read_at(0, h, 16, actual);
 
 	if (strncmp((const char *)h, "T98FDDIMAGE.R0", 14) == 0 || strncmp((const char *)h, "T98FDDIMAGE.R1", 14) == 0)
-		return 100;
+		return FIFID_SIGN;
 
 	return 0;
 }
 
-bool nfd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool nfd_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
-	UINT64 size = io_generic_size(io);
-	UINT8 h[0x120], hsec[0x10];
-	io_generic_read(io, h, 0, 0x120);
+	size_t actual;
+	uint64_t size;
+	if (io.length(size))
+		return false;
+	uint8_t h[0x120], hsec[0x10];
+	io.read_at(0, h, 0x120, actual);
 	int format_version = !strncmp((const char *)h, "T98FDDIMAGE.R0", 14) ? 0 : 1;
 
 	// sector map (the 164th entry is only used by rev.1 format, loops with track < 163 are correct for rev.0)
-	UINT8 disk_type = 0;
-	UINT8 num_secs[164];
-	UINT8 num_specials[164];
-	UINT32 track_sizes[164];
-	UINT8 tracks[164 * 26];
-	UINT8 heads[164 * 26];
-	UINT8 secs[164 * 26];
-	UINT8 mfm[164 * 26];
-	UINT8 sec_sizes[164 * 26];
+	uint8_t disk_type = 0;
+	uint8_t num_secs[164];
+	uint8_t num_specials[164];
+	uint32_t track_sizes[164];
+	uint8_t tracks[164 * 26];
+	uint8_t heads[164 * 26];
+	uint8_t secs[164 * 26];
+	uint8_t mfm[164 * 26];
+	uint8_t sec_sizes[164 * 26];
 
-	UINT32 hsize = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(h+0x110));
+	uint32_t hsize = little_endianize_int32(*(uint32_t *)(h+0x110));
 
 	int pos = 0x120;
 
@@ -140,23 +149,23 @@ bool nfd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 		{
 			int curr_track_size = 0;
 			// read sector map absolute location
-			io_generic_read(io, hsec, pos, 4);
+			io.read_at(pos, hsec, 4, actual);
 			pos += 4;
-			UINT32 secmap_addr = LITTLE_ENDIANIZE_INT32(*(UINT32 *)(hsec));
+			uint32_t secmap_addr = little_endianize_int32(*(uint32_t *)(hsec));
 
 			if (secmap_addr)
 			{
 				// read actual sector map for the sectors of this track
 				// for rev.1 format the first 0x10 are a track summary:
 				// first WORD is # of sectors, second WORD is # of special data sectors
-				io_generic_read(io, hsec, secmap_addr, 0x10);
+				io.read_at(secmap_addr, hsec, 0x10, actual);
 				secmap_addr += 0x10;
-				num_secs[track] = LITTLE_ENDIANIZE_INT16(*(UINT16 *)(hsec));
-				num_specials[track] = LITTLE_ENDIANIZE_INT16(*(UINT16 *)(hsec + 0x2));
+				num_secs[track] = little_endianize_int16(*(uint16_t *)(hsec));
+				num_specials[track] = little_endianize_int16(*(uint16_t *)(hsec + 0x2));
 
 				for (int sect = 0; sect < num_secs[track]; sect++)
 				{
-					io_generic_read(io, hsec, secmap_addr, 0x10);
+					io.read_at(secmap_addr, hsec, 0x10, actual);
 
 					if (track == 0 && sect == 0)
 						disk_type = hsec[0xb];  // can this change across the disk? I don't think so...
@@ -175,9 +184,9 @@ bool nfd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 				{
 					for (int sect = 0; sect < num_specials[track]; sect++)
 					{
-						io_generic_read(io, hsec, secmap_addr, 0x10);
+						io.read_at(secmap_addr, hsec, 0x10, actual);
 						secmap_addr += 0x10;
-						curr_track_size += (hsec[9] + 1) * LITTLE_ENDIANIZE_INT32(*(UINT32 *)(hsec + 0x0a));
+						curr_track_size += (hsec[9] + 1) * little_endianize_int32(*(uint32_t *)(hsec + 0x0a));
 					}
 				}
 			}
@@ -198,7 +207,7 @@ bool nfd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 			{
 				// read sector map for this sector
 				// for rev.0 format each sector uses 0x10 bytes
-				io_generic_read(io, hsec, pos, 0x10);
+				io.read_at(pos, hsec, 0x10, actual);
 
 				if (track == 0 && sect == 0)
 					disk_type = hsec[0xa];  // can this change across the disk? I don't think so...
@@ -239,13 +248,13 @@ bool nfd_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	}
 
 	desc_pc_sector sects[256];
-	UINT8 sect_data[65536];
+	uint8_t sect_data[65536];
 	int cur_sec_map = 0, sector_size;
 	pos = hsize;
 
 	for (int track = 0; track < 163 && pos < size; track++)
 	{
-		io_generic_read(io, sect_data, pos, track_sizes[track]);
+		io.read_at(pos, sect_data, track_sizes[track], actual);
 
 		for (int i = 0; i < num_secs[track]; i++)
 		{
@@ -279,4 +288,4 @@ bool nfd_format::supports_save() const
 	return false;
 }
 
-const floppy_format_type FLOPPY_NFD_FORMAT = &floppy_image_format_creator<nfd_format>;
+const nfd_format FLOPPY_NFD_FORMAT;

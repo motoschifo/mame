@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 Branimir Karadzic. All rights reserved.
+ * Copyright 2011-2021 Branimir Karadzic. All rights reserved.
  * License: https://github.com/bkaradzic/bgfx#license-bsd-2-clause
  */
 
@@ -15,7 +15,8 @@ namespace bgfx { namespace gl
 	struct GlContext
 	{
 		GlContext()
-			: m_context(0)
+			: m_context(NULL)
+			, m_view(NULL)
 		{
 		}
 
@@ -33,11 +34,11 @@ namespace bgfx { namespace gl
 
 		bool isValid() const
 		{
-			return 0 != m_context;
+			return NULL != m_context;
 		}
 
-		void* m_view;
 		void* m_context;
+		void* m_view;
 	};
 } /* namespace gl */ } // namespace bgfx
 

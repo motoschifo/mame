@@ -11,62 +11,100 @@
 
 *********************************************************************/
 
+#include "emu.h"
 #include "a2applicard.h"
-#include "includes/apple2.h"
 #include "cpu/z80/z80.h"
 #include "machine/z80ctc.h"
+
+
+namespace {
 
 /***************************************************************************
     PARAMETERS
 ***************************************************************************/
 
-//**************************************************************************
-//  GLOBAL VARIABLES
-//**************************************************************************
-
-const device_type A2BUS_APPLICARD = &device_creator<a2bus_applicard_device>;
-
 #define Z80_TAG         "z80"
 #define Z80_ROM_REGION  "z80_rom"
-
-static ADDRESS_MAP_START( z80_mem, AS_PROGRAM, 8, a2bus_applicard_device )
-	AM_RANGE(0x0000, 0xffff) AM_READWRITE(dma_r, dma_w)
-ADDRESS_MAP_END
-
-static ADDRESS_MAP_START( z80_io, AS_IO, 8, a2bus_applicard_device )
-	AM_RANGE(0x00, 0x60) AM_MIRROR(0xff00) AM_READWRITE(z80_io_r, z80_io_w)
-ADDRESS_MAP_END
-
-MACHINE_CONFIG_FRAGMENT( a2applicard )
-	MCFG_CPU_ADD(Z80_TAG, Z80, 6000000) // Z80 runs at 6 MHz
-	MCFG_CPU_PROGRAM_MAP(z80_mem)
-	MCFG_CPU_IO_MAP(z80_io)
-MACHINE_CONFIG_END
 
 ROM_START( a2applicard )
 	ROM_REGION(0x800, Z80_ROM_REGION, 0)
 	ROM_LOAD( "applicard-v9.bin", 0x000000, 0x000800, CRC(1d461000) SHA1(71d633be864b6084362e85108a4e600cbe6e44fe) )
 ROM_END
 
+//**************************************************************************
+//  TYPE DEFINITIONS
+//**************************************************************************
+
+class a2bus_applicard_device:
+	public device_t,
+	public device_a2bus_card_interface
+{
+public:
+	// construction/destruction
+	a2bus_applicard_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+
+	uint8_t z80_io_r(offs_t offset);
+	void z80_io_w(offs_t offset, uint8_t data);
+
+protected:
+	a2bus_applicard_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
+
+	virtual void device_start() override;
+	virtual void device_reset() override;
+	virtual const tiny_rom_entry *device_rom_region() const override;
+	virtual void device_add_mconfig(machine_config &config) override;
+
+	// overrides of standard a2bus slot functions
+	virtual uint8_t read_c0nx(uint8_t offset) override;
+	virtual void write_c0nx(uint8_t offset, uint8_t data) override;
+	virtual bool take_c800() override { return false; }
+
+private:
+	required_device<cpu_device> m_z80;
+	required_region_ptr<uint8_t> m_z80rom;
+
+	bool m_bROMAtZ80Zero;
+	bool m_z80stat, m_6502stat;
+	uint8_t m_toz80, m_to6502;
+	uint8_t m_z80ram[64*1024];
+
+	uint8_t dma_r(offs_t offset);
+	void dma_w(offs_t offset, uint8_t data);
+
+	void z80_io(address_map &map);
+	void z80_mem(address_map &map);
+};
+
 /***************************************************************************
     FUNCTION PROTOTYPES
 ***************************************************************************/
 
+void a2bus_applicard_device::z80_mem(address_map &map)
+{
+	map(0x0000, 0xffff).rw(FUNC(a2bus_applicard_device::dma_r), FUNC(a2bus_applicard_device::dma_w));
+}
+
+void a2bus_applicard_device::z80_io(address_map &map)
+{
+	map(0x00, 0x60).mirror(0xff00).rw(FUNC(a2bus_applicard_device::z80_io_r), FUNC(a2bus_applicard_device::z80_io_w));
+}
+
 //-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-machine_config_constructor a2bus_applicard_device::device_mconfig_additions() const
+void a2bus_applicard_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( a2applicard );
+	Z80(config, m_z80, 6000000); // Z80 runs at 6 MHz
+	m_z80->set_addrmap(AS_PROGRAM, &a2bus_applicard_device::z80_mem);
+	m_z80->set_addrmap(AS_IO, &a2bus_applicard_device::z80_io);
 }
 
 //-------------------------------------------------
 //  device_rom_region - device-specific ROMs
 //-------------------------------------------------
 
-const rom_entry *a2bus_applicard_device::device_rom_region() const
+const tiny_rom_entry *a2bus_applicard_device::device_rom_region() const
 {
 	return ROM_NAME( a2applicard );
 }
@@ -75,17 +113,17 @@ const rom_entry *a2bus_applicard_device::device_rom_region() const
 //  LIVE DEVICE
 //**************************************************************************
 
-a2bus_applicard_device::a2bus_applicard_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source) :
-	device_t(mconfig, type, name, tag, owner, clock, shortname, source),
+a2bus_applicard_device::a2bus_applicard_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, type, tag, owner, clock),
 	device_a2bus_card_interface(mconfig, *this),
-	m_z80(*this, Z80_TAG), m_bROMAtZ80Zero(false), m_z80stat(false), m_6502stat(false), m_toz80(0), m_to6502(0), m_z80rom(nullptr)
+	m_z80(*this, Z80_TAG),
+	m_z80rom(*this, Z80_ROM_REGION),
+	m_bROMAtZ80Zero(false), m_z80stat(false), m_6502stat(false), m_toz80(0), m_to6502(0)
 {
 }
 
-a2bus_applicard_device::a2bus_applicard_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	device_t(mconfig, A2BUS_APPLICARD, "PCPI Applicard", tag, owner, clock, "a2aplcrd", __FILE__),
-	device_a2bus_card_interface(mconfig, *this),
-	m_z80(*this, Z80_TAG), m_bROMAtZ80Zero(false), m_z80stat(false), m_6502stat(false), m_toz80(0), m_to6502(0), m_z80rom(nullptr)
+a2bus_applicard_device::a2bus_applicard_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	a2bus_applicard_device(mconfig, A2BUS_APPLICARD, tag, owner, clock)
 {
 }
 
@@ -95,12 +133,6 @@ a2bus_applicard_device::a2bus_applicard_device(const machine_config &mconfig, co
 
 void a2bus_applicard_device::device_start()
 {
-	// set_a2bus_device makes m_slot valid
-	set_a2bus_device();
-
-	// locate Z80 ROM
-	m_z80rom = device().machine().root_device().memregion(this->subtag(Z80_ROM_REGION).c_str())->base();
-
 	save_item(NAME(m_bROMAtZ80Zero));
 	save_item(NAME(m_z80stat));
 	save_item(NAME(m_6502stat));
@@ -117,7 +149,7 @@ void a2bus_applicard_device::device_reset()
 	m_z80stat = false;
 }
 
-UINT8 a2bus_applicard_device::read_c0nx(address_space &space, UINT8 offset)
+uint8_t a2bus_applicard_device::read_c0nx(uint8_t offset)
 {
 	switch (offset & 0xf)
 	{
@@ -153,14 +185,14 @@ UINT8 a2bus_applicard_device::read_c0nx(address_space &space, UINT8 offset)
 			fatalerror("Applicard: Z80 IRQ not supported yet\n");
 
 		case 7: // NMI on Z80 (direct)
-			m_z80->set_input_line(INPUT_LINE_NMI, PULSE_LINE);
+			m_z80->pulse_input_line(INPUT_LINE_NMI, attotime::zero);
 			break;
 
 	}
 	return 0xff;
 }
 
-void a2bus_applicard_device::write_c0nx(address_space &space, UINT8 offset, UINT8 data)
+void a2bus_applicard_device::write_c0nx(uint8_t offset, uint8_t data)
 {
 	switch (offset & 0xf)
 	{
@@ -177,14 +209,14 @@ void a2bus_applicard_device::write_c0nx(address_space &space, UINT8 offset, UINT
 		case 5:
 		case 6:
 		case 7:
-			read_c0nx(space, offset);   // let the read handler take care of these
+			read_c0nx(offset);   // let the read handler take care of these
 			break;
 	}
 }
 
-READ8_MEMBER( a2bus_applicard_device::z80_io_r )
+uint8_t a2bus_applicard_device::z80_io_r(offs_t offset)
 {
-	UINT8 tmp = 0;
+	uint8_t tmp = 0;
 
 	switch (offset)
 	{
@@ -212,7 +244,7 @@ READ8_MEMBER( a2bus_applicard_device::z80_io_r )
 	return 0xff;
 }
 
-WRITE8_MEMBER( a2bus_applicard_device::z80_io_w )
+void a2bus_applicard_device::z80_io_w(offs_t offset, uint8_t data)
 {
 	switch (offset)
 	{
@@ -238,7 +270,7 @@ WRITE8_MEMBER( a2bus_applicard_device::z80_io_w )
 //  dma_r -
 //-------------------------------------------------
 
-READ8_MEMBER( a2bus_applicard_device::dma_r )
+uint8_t a2bus_applicard_device::dma_r(offs_t offset)
 {
 	if (offset < 0x8000)
 	{
@@ -264,7 +296,7 @@ READ8_MEMBER( a2bus_applicard_device::dma_r )
 //  dma_w -
 //-------------------------------------------------
 
-WRITE8_MEMBER( a2bus_applicard_device::dma_w )
+void a2bus_applicard_device::dma_w(offs_t offset, uint8_t data)
 {
 	if (offset < 0x8000)
 	{
@@ -280,7 +312,11 @@ WRITE8_MEMBER( a2bus_applicard_device::dma_w )
 	}
 }
 
-bool a2bus_applicard_device::take_c800()
-{
-	return false;
-}
+} // anonymous namespace
+
+
+//**************************************************************************
+//  GLOBAL VARIABLES
+//**************************************************************************
+
+DEFINE_DEVICE_TYPE_PRIVATE(A2BUS_APPLICARD, device_a2bus_card_interface, a2bus_applicard_device, "a2aplcrd", "PCPI Applicard")

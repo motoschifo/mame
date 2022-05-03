@@ -46,22 +46,21 @@
 
 /*****************************************************************************/
 
-void m92_state::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void m92_state::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch (id)
 	{
 	case TIMER_SPRITEBUFFER:
 		m_sprite_buffer_busy = 1;
-		if (m_game_kludge!=2) /* Major Title 2 doesn't like this interrupt!? */
-			m92_sprite_interrupt();
+		m_upd71059c->ir1_w(1);
 		break;
 	default:
-		assert_always(FALSE, "Unknown id in m92_state::device_timer");
+		throw emu_fatalerror("Unknown id in m92_state::device_timer");
 	}
 }
 
 
-WRITE16_MEMBER(m92_state::m92_spritecontrol_w)
+void m92_state::spritecontrol_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
 	COMBINE_DATA(&m_spritecontrol[offset]);
 	// offset0: sprite list size (negative)
@@ -88,15 +87,16 @@ WRITE16_MEMBER(m92_state::m92_spritecontrol_w)
 		/* this implementation is not accurate: still some delayed sprites in gunforc2 (might be another issue?) */
 		m_spriteram->copy();
 		m_sprite_buffer_busy = 0;
+		m_upd71059c->ir1_w(0);
 
 		/* Pixel clock is 26.6666MHz (some boards 27MHz??), we have 0x800 bytes, or 0x400 words to copy from
 		spriteram to the buffer.  It seems safe to assume 1 word can be copied per clock. */
-		timer_set(attotime::from_hz(XTAL_26_66666MHz) * 0x400, TIMER_SPRITEBUFFER);
+		m_spritebuffer_timer->adjust(attotime::from_hz(XTAL(26'666'666)) * 0x400);
 	}
-//  logerror("%04x: m92_spritecontrol_w %08x %08x\n",space.device().safe_pc(),offset,data);
+//  logerror("%s: spritecontrol_w %08x %08x\n",m_maincpu->pc(),offset,data);
 }
 
-WRITE16_MEMBER(m92_state::m92_videocontrol_w)
+void m92_state::videocontrol_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
 	COMBINE_DATA(&m_videocontrol);
 	/*
@@ -111,6 +111,17 @@ WRITE16_MEMBER(m92_state::m92_videocontrol_w)
 	    enabled.  This was one of the earlier games and could actually
 	    be a different motherboard revision (most games use M92-A-B top
 	    pcb, a M92-A-A revision could exist...).
+
+	    There is a further test case with R-Type Leo. The flickering
+	    invulnerability effect when you spawn does not work correctly
+	    with the palette bank hooked up, and also causes a 2nd player
+	    spawning in to have the incorrect palette at first.
+
+	    It appears that the only games requiring the palette bank logic
+	    are Major Title 2, Ninja Baseball Bat Man, Dream Soccer '94
+	    and Gun Force 2.  These are also the games with the extended
+	    ROM banking, suggesting a difference on those boards is a more
+	    likely explanation.
 	*/
 
 	/*
@@ -128,19 +139,20 @@ WRITE16_MEMBER(m92_state::m92_videocontrol_w)
 	*/
 
 	/* Access to upper palette bank */
-	m_palette_bank = (m_videocontrol >> 1) & 1;
+	if (m_palette->entries() == 2048)
+		m_palette_bank = (m_videocontrol >> 1) & 1;
 
-//  logerror("%04x: m92_videocontrol_w %d = %02x\n",space.device().safe_pc(),offset,data);
+//  logerror("%s: videocontrol_w %d = %02x\n",m_maincpu->pc(),offset,data);
 }
 
-READ16_MEMBER(m92_state::m92_paletteram_r)
+uint16_t m92_state::paletteram_r(offs_t offset)
 {
-	return m_paletteram[offset + 0x400 * m_palette_bank];
+	return m_paletteram[offset | (m_palette_bank << 10)];
 }
 
-WRITE16_MEMBER(m92_state::m92_paletteram_w)
+void m92_state::paletteram_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	m_palette->write(space, offset + 0x400 * m_palette_bank, data, mem_mask);
+	m_palette->write16(offset | (m_palette_bank << 10), data, mem_mask);
 }
 
 /*****************************************************************************/
@@ -154,9 +166,9 @@ TILE_GET_INFO_MEMBER(m92_state::get_pf_tile_info)
 	attrib = m_vram_data[tile_index + 1];
 	tile = m_vram_data[tile_index] + ((attrib & 0x8000) << 1);
 
-	SET_TILE_INFO_MEMBER(0,
+	tileinfo.set(0,
 			tile,
-			attrib & 0x7f,
+			(m_palette->entries() == 2048) ? (attrib & 0x7f) : (attrib & 0x3f),
 			TILE_FLIPYX(attrib >> 9));
 	if (attrib & 0x100) tileinfo.group = 2;
 	else if (attrib & 0x80) tileinfo.group = 1;
@@ -165,13 +177,11 @@ TILE_GET_INFO_MEMBER(m92_state::get_pf_tile_info)
 
 /*****************************************************************************/
 
-WRITE16_MEMBER(m92_state::m92_vram_w)
+void m92_state::vram_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	int laynum;
-
 	COMBINE_DATA(&m_vram_data[offset]);
 
-	for (laynum = 0; laynum < 3; laynum++)
+	for (int laynum = 0; laynum < 3; laynum++)
 	{
 		if ((offset & 0x6000) == m_pf_layer[laynum].vram_base)
 		{
@@ -185,24 +195,9 @@ WRITE16_MEMBER(m92_state::m92_vram_w)
 
 /*****************************************************************************/
 
-WRITE16_MEMBER(m92_state::m92_pf1_control_w)
+void m92_state::master_control_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	COMBINE_DATA(&m_pf_layer[0].control[offset]);
-}
-
-WRITE16_MEMBER(m92_state::m92_pf2_control_w)
-{
-	COMBINE_DATA(&m_pf_layer[1].control[offset]);
-}
-
-WRITE16_MEMBER(m92_state::m92_pf3_control_w)
-{
-	COMBINE_DATA(&m_pf_layer[2].control[offset]);
-}
-
-WRITE16_MEMBER(m92_state::m92_master_control_w)
-{
-	UINT16 old = m_pf_master_control[offset];
+	uint16_t old = m_pf_master_control[offset];
 	M92_pf_layer_info *layer;
 
 	COMBINE_DATA(&m_pf_master_control[offset]);
@@ -220,13 +215,13 @@ WRITE16_MEMBER(m92_state::m92_master_control_w)
 			/* update size (bit 2) */
 			if (m_pf_master_control[offset] & 0x04)
 			{
-				layer->tmap->enable(FALSE);
+				layer->tmap->enable(false);
 				layer->wide_tmap->enable((~m_pf_master_control[offset] >> 4) & 1);
 			}
 			else
 			{
 				layer->tmap->enable((~m_pf_master_control[offset] >> 4) & 1);
-				layer->wide_tmap->enable(FALSE);
+				layer->wide_tmap->enable(false);
 			}
 
 			/* mark everything dirty of the VRAM base or size changes */
@@ -239,6 +234,7 @@ WRITE16_MEMBER(m92_state::m92_master_control_w)
 
 		case 3:
 			m_raster_irq_position = m_pf_master_control[3] - 128;
+			m_upd71059c->ir2_w(0);
 			break;
 	}
 }
@@ -247,16 +243,23 @@ WRITE16_MEMBER(m92_state::m92_master_control_w)
 
 VIDEO_START_MEMBER(m92_state,m92)
 {
-	int laynum;
+	m_spritebuffer_timer = timer_alloc(TIMER_SPRITEBUFFER);
+
+	memset(m_pf_master_control, 0, sizeof(m_pf_master_control));
+	m_videocontrol = 0;
+	m_sprite_list = 0;
+	m_raster_irq_position = 0;
+	m_sprite_buffer_busy = 0;
+	m_palette_bank = 0;
 
 	memset(&m_pf_layer, 0, sizeof(m_pf_layer));
-	for (laynum = 0; laynum < 3; laynum++)
+	for (int laynum = 0; laynum < 3; laynum++)
 	{
 		M92_pf_layer_info *layer = &m_pf_layer[laynum];
 
 		/* allocate two tilemaps per layer, one normal, one wide */
-		layer->tmap = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(m92_state::get_pf_tile_info),this), TILEMAP_SCAN_ROWS,  8,8, 64,64);
-		layer->wide_tmap = &machine().tilemap().create(m_gfxdecode, tilemap_get_info_delegate(FUNC(m92_state::get_pf_tile_info),this), TILEMAP_SCAN_ROWS,  8,8, 128,64);
+		layer->tmap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(m92_state::get_pf_tile_info)), TILEMAP_SCAN_ROWS,  8,8, 64,64);
+		layer->wide_tmap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(m92_state::get_pf_tile_info)), TILEMAP_SCAN_ROWS,  8,8, 128,64);
 
 		/* set the user data for each one to point to the layer */
 		layer->tmap->set_user_data(&m_pf_layer[laynum]);
@@ -301,11 +304,9 @@ VIDEO_START_MEMBER(m92_state,m92)
 
 VIDEO_START_MEMBER(m92_state,ppan)
 {
-	int laynum;
-
 	VIDEO_START_CALL_MEMBER(m92);
 
-	for (laynum = 0; laynum < 3; laynum++)
+	for (int laynum = 0; laynum < 3; laynum++)
 	{
 		M92_pf_layer_info *layer = &m_pf_layer[laynum];
 
@@ -321,24 +322,23 @@ VIDEO_START_MEMBER(m92_state,ppan)
 
 void m92_state::draw_sprites(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
-	UINT16 *source = m_spriteram->buffer();
-	int offs, layer;
+	uint16_t *source = m_spriteram->buffer();
 
-	for (layer = 0; layer < 8; layer++)
+	for (int layer = 0; layer < 8; layer++)
 	{
-		for (offs = 0; offs < m_sprite_list; )
+		for (int offs = 0; offs < m_sprite_list; )
 		{
 			int x = source[offs+3] & 0x1ff;
 			int y = source[offs+0] & 0x1ff;
 			int code = source[offs+1];
-			int color = source[offs+2] & 0x007f;
+			int color = source[offs+2];
+			color &= (m_palette->entries() == 2048) ? 0x7f : 0x3f;
 			int pri = (~source[offs+2] >> 6) & 2;
 			int curlayer = (source[offs+0] >> 13) & 7;
 			int flipx = (source[offs+2] >> 8) & 1;
 			int flipy = (source[offs+2] >> 9) & 1;
 			int numcols = 1 << ((source[offs+0] >> 11) & 3);
 			int numrows = 1 << ((source[offs+0] >> 9) & 3);
-			int row, col, s_ptr;
 
 			offs += 4 * numcols;
 			if (layer != curlayer) continue;
@@ -348,12 +348,12 @@ void m92_state::draw_sprites(screen_device &screen, bitmap_ind16 &bitmap, const 
 
 			if (flipx) x += 16 * (numcols - 1);
 
-			for (col = 0; col < numcols; col++)
+			for (int col = 0; col < numcols; col++)
 			{
-				s_ptr = 8 * col;
+				int s_ptr = 8 * col;
 				if (!flipy) s_ptr += numrows - 1;
 
-				for (row = 0; row < numrows; row++)
+				for (int row = 0; row < numrows; row++)
 				{
 					if (flip_screen())
 					{
@@ -394,7 +394,7 @@ void m92_state::draw_sprites(screen_device &screen, bitmap_ind16 &bitmap, const 
 // This needs a lot of work...
 void m92_state::ppan_draw_sprites(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
-	UINT16 *source = m_spriteram->live(); // sprite buffer control is never triggered
+	uint16_t *source = m_spriteram->live(); // sprite buffer control is never triggered
 	int offs, layer;
 
 	for (layer = 0; layer < 8; layer++)
@@ -489,7 +489,7 @@ void m92_state::m92_update_scroll_positions()
 
 		if (m_pf_master_control[laynum] & 0x40)
 		{
-			const UINT16 *scrolldata = m_vram_data + (0xf400 + 0x400 * laynum) / 2;
+			const uint16_t *scrolldata = m_vram_data + (0xf400 + 0x400 * laynum) / 2;
 
 			layer->tmap->set_scroll_rows(512);
 			layer->wide_tmap->set_scroll_rows(512);
@@ -536,7 +536,7 @@ void m92_state::m92_draw_tiles(screen_device &screen, bitmap_ind16 &bitmap,const
 }
 
 
-UINT32 m92_state::screen_update_m92(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t m92_state::screen_update_m92(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	screen.priority().fill(0, cliprect);
 	bitmap.fill(0, cliprect);
@@ -546,14 +546,14 @@ UINT32 m92_state::screen_update_m92(screen_device &screen, bitmap_ind16 &bitmap,
 	draw_sprites(screen, bitmap, cliprect);
 
 	/* Flipscreen appears hardwired to the dipswitch - strange */
-	if (ioport("DSW")->read() & 0x100)
+	if (m_dsw->read() & 0x100)
 		flip_screen_set(0);
 	else
 		flip_screen_set(1);
 	return 0;
 }
 
-UINT32 m92_state::screen_update_ppan(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t m92_state::screen_update_ppan(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	screen.priority().fill(0, cliprect);
 	bitmap.fill(0, cliprect);
@@ -563,7 +563,7 @@ UINT32 m92_state::screen_update_ppan(screen_device &screen, bitmap_ind16 &bitmap
 	ppan_draw_sprites(screen, bitmap, cliprect);
 
 	/* Flipscreen appears hardwired to the dipswitch - strange */
-	if (ioport("DSW")->read() & 0x100)
+	if (m_dsw->read() & 0x100)
 		flip_screen_set(0);
 	else
 		flip_screen_set(1);

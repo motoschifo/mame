@@ -79,26 +79,267 @@ Notes:
 ***************************************************************************/
 
 #include "emu.h"
-#include "cpu/z80/z80.h"
-#include "sound/okim6295.h"
-#include "sound/k051649.h"
+
 #include "includes/konamipt.h"
-#include "includes/hexion.h"
+
+#include "cpu/z80/z80.h"
+#include "machine/k053252.h"
+#include "machine/timer.h"
+#include "machine/watchdog.h"
+#include "sound/k051649.h"
+#include "sound/okim6295.h"
+
+#include "emupal.h"
+#include "speaker.h"
+#include "tilemap.h"
 
 
-WRITE8_MEMBER(hexion_state::coincntr_w)
+// configurable logging
+#define LOG_UNKWRITE     (1U <<  1)
+#define LOG_BANKEDRAM    (1U <<  2)
+#define LOG_CCU          (1U <<  3)
+
+//#define VERBOSE (LOG_GENERAL | LOG_UNKWRITE | LOG_BANKEDRAM | LOG_CCU)
+
+#include "logmacro.h"
+
+#define LOGUNKWRITE(...)     LOGMASKED(LOG_UNKWRITE,     __VA_ARGS__)
+#define LOGBANKEDRAM(...)    LOGMASKED(LOG_BANKEDRAM,    __VA_ARGS__)
+#define LOGCCU(...)          LOGMASKED(LOG_CCU,          __VA_ARGS__)
+
+
+namespace {
+
+class hexion_state : public driver_device
 {
-//logerror("%04x: coincntr_w %02x\n",space.device().safe_pc(),data);
+public:
+	hexion_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
+		m_maincpu(*this, "maincpu"),
+		m_k053252(*this, "k053252"),
+		m_gfxdecode(*this, "gfxdecode"),
+		m_palette(*this, "palette"),
+		m_vram(*this, "vram%u", 0U, 0x2000U, ENDIANNESS_LITTLE),
+		m_unkram(*this, "unkram", 0x800, ENDIANNESS_LITTLE),
+		m_rombank(*this, "rombank"),
+		m_tilesrom(*this, "tiles")
+	{ }
 
-	/* bits 0/1 = coin counters */
-	machine().bookkeeping().coin_counter_w(0,data & 0x01);
-	machine().bookkeeping().coin_counter_w(1,data & 0x02);
+	void hexion(machine_config &config);
+	void hexionb(machine_config &config);
 
-	/* bit 5 = flip screen */
+protected:
+	virtual void video_start() override;
+
+private:
+	required_device<cpu_device> m_maincpu;
+	required_device<k053252_device> m_k053252;
+	required_device<gfxdecode_device> m_gfxdecode;
+	required_device<palette_device> m_palette;
+
+	memory_share_array_creator<uint8_t, 2> m_vram;
+	memory_share_creator<uint8_t> m_unkram;
+	required_memory_bank m_rombank;
+	required_region_ptr<uint8_t> m_tilesrom;
+
+	uint8_t m_bankctrl = 0;
+	uint8_t m_rambank = 0;
+	uint8_t m_pmcbank = 0;
+	uint8_t m_gfxrom_select = 0;
+	uint8_t m_ccu_int_time = 0;
+	int16_t m_ccu_int_time_count = 0;
+	tilemap_t *m_bg_tilemap[2]{};
+
+	void coincntr_w(uint8_t data);
+	void bankswitch_w(uint8_t data);
+	uint8_t bankedram_r(offs_t offset);
+	void bankedram_w(offs_t offset, uint8_t data);
+	void bankctrl_w(uint8_t data);
+	void gfxrom_select_w(uint8_t data);
+	DECLARE_WRITE_LINE_MEMBER(irq_ack_w);
+	DECLARE_WRITE_LINE_MEMBER(nmi_ack_w);
+	void ccu_int_time_w(uint8_t data);
+
+	template <uint8_t Which> TILE_GET_INFO_MEMBER(get_tile_info);
+
+	TIMER_DEVICE_CALLBACK_MEMBER(scanline);
+
+	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void base_map(address_map &map);
+	void hexion_map(address_map &map);
+	void hexionb_map(address_map &map);
+};
+
+
+// video
+
+
+/***************************************************************************
+
+  Callbacks for the TileMap code
+
+***************************************************************************/
+
+template <uint8_t Which>
+TILE_GET_INFO_MEMBER(hexion_state::get_tile_info)
+{
+	tile_index *= 4;
+	tileinfo.set(0,
+			m_vram[Which][tile_index] + ((m_vram[Which][tile_index + 1] & 0x3f) << 8),
+			m_vram[Which][tile_index + 2] & 0x0f,
+			0);
+}
+
+
+/***************************************************************************
+
+  Start the video hardware emulation.
+
+***************************************************************************/
+
+void hexion_state::video_start()
+{
+	m_bg_tilemap[0] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(hexion_state::get_tile_info<0>)), TILEMAP_SCAN_ROWS, 8, 8, 64, 32);
+	m_bg_tilemap[1] = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(hexion_state::get_tile_info<1>)), TILEMAP_SCAN_ROWS, 8, 8, 64, 32);
+
+	m_bg_tilemap[0]->set_transparent_pen(0);
+	m_bg_tilemap[1]->set_scrollx(0, -4);
+	m_bg_tilemap[1]->set_scrolly(0, 4);
+
+	m_rombank->configure_entries(0, 16, memregion("maincpu")->base(), 0x2000);
+
+	m_gfxrom_select = 0;
+
+	save_item(NAME(m_bankctrl));
+	save_item(NAME(m_rambank));
+	save_item(NAME(m_pmcbank));
+	save_item(NAME(m_gfxrom_select));
+	save_item(NAME(m_ccu_int_time));
+	save_item(NAME(m_ccu_int_time_count));
+}
+
+
+
+/***************************************************************************
+
+  Memory handlers
+
+***************************************************************************/
+
+void hexion_state::bankswitch_w(uint8_t data)
+{
+	// bits 0-3 select ROM bank
+	m_rombank->set_entry(data & 0x0f);
+
+	// does bit 6 trigger the 052591?
+	if (data & 0x40)
+	{
+		int bank = m_unkram[0] & 1;
+		memset(m_vram[bank], m_unkram[1], 0x2000);
+		m_bg_tilemap[bank]->mark_all_dirty();
+	}
+	// bit 7 = PMC-BK
+	m_pmcbank = (data & 0x80) >> 7;
+
+	// other bits unknown
+	if (data & 0x30)
+		LOGUNKWRITE("bankswitch %02x", data & 0xf0);
+}
+
+uint8_t hexion_state::bankedram_r(offs_t offset)
+{
+	if (m_gfxrom_select && offset < 0x1000)
+	{
+		return m_tilesrom[((m_gfxrom_select & 0x7f) << 12) + offset];
+	}
+	else if (m_bankctrl == 0)
+	{
+		return m_vram[m_rambank][offset];
+	}
+	else if (m_bankctrl == 2 && offset < 0x800)
+	{
+		return m_unkram[offset];
+	}
+	else
+	{
+		LOGBANKEDRAM("%s: bankedram_r offset %04x, bankctrl = %02x\n", m_maincpu->pc(), offset, m_bankctrl);
+		return 0;
+	}
+}
+
+void hexion_state::bankedram_w(offs_t offset, uint8_t data)
+{
+	if (m_bankctrl == 3 && offset == 0 && (data & 0xfe) == 0)
+	{
+		LOGBANKEDRAM("%s: bankedram_w offset %04x, data %02x, bankctrl = %02x\n", m_maincpu->pc(), offset, data, m_bankctrl);
+		m_rambank = data & 1;
+	}
+	else if (m_bankctrl == 0)
+	{
+		if (m_pmcbank)
+		{
+			LOGBANKEDRAM("%s: bankedram_w offset %04x, data %02x, bankctrl = %02x\n", m_maincpu->pc(), offset, data, m_bankctrl);
+			m_vram[m_rambank][offset] = data;
+			m_bg_tilemap[m_rambank]->mark_tile_dirty(offset/4);
+		}
+		else
+			LOGBANKEDRAM("%04x pmc internal ram %04x = %02x\n", m_maincpu->pc(), offset, data);
+	}
+	else if (m_bankctrl == 2 && offset < 0x800)
+	{
+		if (m_pmcbank)
+		{
+			LOGBANKEDRAM("%s: unkram_w offset %04x, data %02x, bankctrl = %02x\n", m_maincpu->pc(), offset, data, m_bankctrl);
+			m_unkram[offset] = data;
+		}
+		else
+			LOGBANKEDRAM("%04x pmc internal ram %04x = %02x\n", m_maincpu->pc(), offset, data);
+	}
+	else
+		LOGBANKEDRAM("%s: bankedram_w offset %04x, data %02x, bankctrl = %02x\n", m_maincpu->pc(), offset, data, m_bankctrl);
+}
+
+void hexion_state::bankctrl_w(uint8_t data)
+{
+	LOGBANKEDRAM("%s: bankctrl_w %02x\n", m_maincpu->pc(), data);
+	m_bankctrl = data;
+}
+
+void hexion_state::gfxrom_select_w(uint8_t data)
+{
+	LOGBANKEDRAM("%s: gfxrom_select_w %02x\n", m_maincpu->pc(), data);
+	m_gfxrom_select = data;
+}
+
+
+
+/***************************************************************************
+
+  Display refresh
+
+***************************************************************************/
+
+uint32_t hexion_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	m_bg_tilemap[1]->draw(screen, bitmap, cliprect, 0, 0);
+	m_bg_tilemap[0]->draw(screen, bitmap, cliprect, 0, 0);
+	return 0;
+}
+
+// machine
+
+
+void hexion_state::coincntr_w(uint8_t data)
+{
+	// bits 0/1 = coin counters
+	machine().bookkeeping().coin_counter_w(0, data & 0x01);
+	machine().bookkeeping().coin_counter_w(1, data & 0x02);
+
+	// bit 5 = flip screen
 	flip_screen_set(data & 0x20);
 
-	/* other bit unknown */
-if ((data & 0xdc) != 0x10) popmessage("coincntr %02x",data);
+	// other bits unknown
+	if ((data & 0xdc) != 0x10) LOGUNKWRITE("coincntr %02x", data);
 }
 
 WRITE_LINE_MEMBER(hexion_state::irq_ack_w)
@@ -111,58 +352,52 @@ WRITE_LINE_MEMBER(hexion_state::nmi_ack_w)
 	m_maincpu->set_input_line(INPUT_LINE_NMI, CLEAR_LINE);
 }
 
-static ADDRESS_MAP_START( hexion_map, AS_PROGRAM, 8, hexion_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0x9fff) AM_ROMBANK("bank1")
-	AM_RANGE(0xa000, 0xbfff) AM_RAM
-	AM_RANGE(0xc000, 0xdffe) AM_READWRITE(bankedram_r, bankedram_w)
-	AM_RANGE(0xdfff, 0xdfff) AM_WRITE(bankctrl_w)
-	AM_RANGE(0xe000, 0xe000) AM_NOP
-	AM_RANGE(0xe800, 0xe87f) AM_DEVREADWRITE("k051649", k051649_device, k051649_waveform_r, k051649_waveform_w)
-	AM_RANGE(0xe880, 0xe889) AM_DEVWRITE("k051649", k051649_device, k051649_frequency_w)
-	AM_RANGE(0xe88a, 0xe88e) AM_DEVWRITE("k051649", k051649_device, k051649_volume_w)
-	AM_RANGE(0xe88f, 0xe88f) AM_DEVWRITE("k051649", k051649_device, k051649_keyonoff_w)
-	AM_RANGE(0xe8e0, 0xe8ff) AM_DEVREADWRITE("k051649", k051649_device, k051649_test_r, k051649_test_w)
-	AM_RANGE(0xf000, 0xf00f) AM_DEVREADWRITE("k053252", k053252_device, read, write)
-	AM_RANGE(0xf200, 0xf200) AM_DEVWRITE("oki", okim6295_device, write)
-	AM_RANGE(0xf400, 0xf400) AM_READ_PORT("DSW1")
-	AM_RANGE(0xf401, 0xf401) AM_READ_PORT("DSW2")
-	AM_RANGE(0xf402, 0xf402) AM_READ_PORT("P1")
-	AM_RANGE(0xf403, 0xf403) AM_READ_PORT("P2")
-	AM_RANGE(0xf440, 0xf440) AM_READ_PORT("DSW3")
-	AM_RANGE(0xf441, 0xf441) AM_READ_PORT("SYSTEM")
-	AM_RANGE(0xf480, 0xf480) AM_WRITE(bankswitch_w)
-	AM_RANGE(0xf4c0, 0xf4c0) AM_WRITE(coincntr_w)
-	AM_RANGE(0xf500, 0xf500) AM_WRITE(gfxrom_select_w)
-	AM_RANGE(0xf540, 0xf540) AM_READ(watchdog_reset_r)
-ADDRESS_MAP_END
+void hexion_state::ccu_int_time_w(uint8_t data)
+{
+	LOGCCU("ccu_int_time rewritten with value of %02x\n", data);
+	m_ccu_int_time = data;
+}
 
-static ADDRESS_MAP_START( hexionb_map, AS_PROGRAM, 8, hexion_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0x9fff) AM_ROMBANK("bank1")
-	AM_RANGE(0xa000, 0xbfff) AM_RAM
-	AM_RANGE(0xc000, 0xdffe) AM_READWRITE(bankedram_r, bankedram_w)
-	AM_RANGE(0xdfff, 0xdfff) AM_WRITE(bankctrl_w)
-	AM_RANGE(0xe000, 0xe000) AM_NOP
-	AM_RANGE(0xe800, 0xe87f) AM_NOP // all the code to use the k051649 is still present
-	AM_RANGE(0xe880, 0xe889) AM_NOP // but the bootleg has an additional M6295 @ 0xf5c0 instead
-	AM_RANGE(0xe88a, 0xe88e) AM_NOP
-	AM_RANGE(0xe88f, 0xe88f) AM_NOP
-	AM_RANGE(0xe8e0, 0xe8ff) AM_NOP
-	AM_RANGE(0xf000, 0xf00f) AM_DEVREADWRITE("k053252", k053252_device, read, write)
-	AM_RANGE(0xf200, 0xf200) AM_DEVWRITE("oki", okim6295_device, write)
-	AM_RANGE(0xf400, 0xf400) AM_READ_PORT("DSW1")
-	AM_RANGE(0xf401, 0xf401) AM_READ_PORT("DSW2")
-	AM_RANGE(0xf402, 0xf402) AM_READ_PORT("P1")
-	AM_RANGE(0xf403, 0xf403) AM_READ_PORT("P2")
-	AM_RANGE(0xf440, 0xf440) AM_READ_PORT("DSW3")
-	AM_RANGE(0xf441, 0xf441) AM_READ_PORT("SYSTEM")
-	AM_RANGE(0xf480, 0xf480) AM_WRITE(bankswitch_w)
-	AM_RANGE(0xf4c0, 0xf4c0) AM_WRITE(coincntr_w)
-	AM_RANGE(0xf500, 0xf500) AM_WRITE(gfxrom_select_w)
-	AM_RANGE(0xf540, 0xf540) AM_READ(watchdog_reset_r)
-	AM_RANGE(0xf5c0, 0xf5c0) AM_DEVWRITE("oki2", okim6295_device, write)
-ADDRESS_MAP_END
+void hexion_state::base_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0x9fff).bankr(m_rombank);
+	map(0xa000, 0xbfff).ram();
+	map(0xc000, 0xdffe).rw(FUNC(hexion_state::bankedram_r), FUNC(hexion_state::bankedram_w));
+	map(0xdfff, 0xdfff).w(FUNC(hexion_state::bankctrl_w));
+	map(0xe000, 0xe000).noprw();
+	map(0xf000, 0xf00f).rw(m_k053252, FUNC(k053252_device::read), FUNC(k053252_device::write));
+	map(0xf200, 0xf200).w("oki", FUNC(okim6295_device::write));
+	map(0xf400, 0xf400).portr("DSW1");
+	map(0xf401, 0xf401).portr("DSW2");
+	map(0xf402, 0xf402).portr("P1");
+	map(0xf403, 0xf403).portr("P2");
+	map(0xf440, 0xf440).portr("DSW3");
+	map(0xf441, 0xf441).portr("SYSTEM");
+	map(0xf480, 0xf480).w(FUNC(hexion_state::bankswitch_w));
+	map(0xf4c0, 0xf4c0).w(FUNC(hexion_state::coincntr_w));
+	map(0xf500, 0xf500).w(FUNC(hexion_state::gfxrom_select_w));
+	map(0xf540, 0xf540).r("watchdog", FUNC(watchdog_timer_device::reset_r));
+}
+
+void hexion_state::hexion_map(address_map &map)
+{
+	base_map(map);
+
+	map(0xe800, 0xe8ff).m("k051649", FUNC(k051649_device::scc_map));
+}
+
+void hexion_state::hexionb_map(address_map &map)
+{
+	base_map(map);
+
+	map(0xe800, 0xe87f).noprw(); // all the code to use the k051649 is still present
+	map(0xe880, 0xe889).noprw(); // but the bootleg has an additional M6295 @ 0xf5c0 instead
+	map(0xe88a, 0xe88e).noprw();
+	map(0xe88f, 0xe88f).noprw();
+	map(0xe8e0, 0xe8ff).noprw();
+	map(0xf5c0, 0xf5c0).w("oki2", FUNC(okim6295_device::write));
+}
 
 static INPUT_PORTS_START( hexion )
 	PORT_START("DSW1")
@@ -200,7 +435,7 @@ static INPUT_PORTS_START( hexion )
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_SERVICE1 )
-	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_SPECIAL )   /* 052591? game waits for it to be 0 */
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_CUSTOM )   // 052591? game waits for it to be 0
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN )
@@ -220,63 +455,74 @@ static const gfx_layout charlayout =
 	16*8
 };
 
-static GFXDECODE_START( hexion )
-	GFXDECODE_ENTRY( "gfx1", 0, charlayout, 0, 16 )
+static GFXDECODE_START( gfx_hexion )
+	GFXDECODE_ENTRY( "tiles", 0, charlayout, 0, 16 )
 GFXDECODE_END
 
 TIMER_DEVICE_CALLBACK_MEMBER(hexion_state::scanline)
 {
 	int scanline = param;
 
+	// z80 /IRQ is connected to the IRQ1(vblank) pin of k053252 CCU
 	if(scanline == 256)
 		m_maincpu->set_input_line(0, ASSERT_LINE);
-	else if ((scanline == 85) || (scanline == 170)) //TODO
+
+	// z80 /NMI is connected to the IRQ2 pin of k053252 CCU
+	// the following code is emulating INT_TIME of the k053252, this code will go away
+	// when the new konami branch is merged.
+	m_ccu_int_time_count--;
+	if (m_ccu_int_time_count <= 0)
+	{
 		m_maincpu->set_input_line(INPUT_LINE_NMI, ASSERT_LINE);
+		m_ccu_int_time_count = m_ccu_int_time;
+	}
 }
 
+void hexion_state::hexion(machine_config &config)
+{
+	// basic machine hardware
+	Z80(config, m_maincpu, XTAL(24'000'000) / 4); // Z80B 6 MHz @ 17F, xtal verified, divider not verified
+	m_maincpu->set_addrmap(AS_PROGRAM, &hexion_state::hexion_map);
+	TIMER(config, "scantimer").configure_scanline(FUNC(hexion_state::scanline), "screen", 0, 1);
+	WATCHDOG_TIMER(config, "watchdog");
 
-static MACHINE_CONFIG_START( hexion, hexion_state )
+	K053252(config, m_k053252, XTAL(24'000'000 )/ 2); // K053252, X0-010(?) @8D, xtal verified, divider not verified
+	m_k053252->int1_ack().set(FUNC(hexion_state::irq_ack_w));
+	m_k053252->int2_ack().set(FUNC(hexion_state::nmi_ack_w));
+	m_k053252->int_time().set(FUNC(hexion_state::ccu_int_time_w));
 
-	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", Z80, XTAL_24MHz/4) /* Z80B 6 MHz @ 17F, xtal verified, divider not verified */
-	MCFG_CPU_PROGRAM_MAP(hexion_map)
-	MCFG_TIMER_DRIVER_ADD_SCANLINE("scantimer", hexion_state, scanline, "screen", 0, 1)
+	// video hardware
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_refresh_hz(60);
+	screen.set_vblank_time(ATTOSECONDS_IN_USEC(0));
+	screen.set_size(64*8, 36*8);
+	screen.set_visarea(0*8, 64*8-1, 0*8, 32*8-1);
+	screen.set_screen_update(FUNC(hexion_state::screen_update));
+	screen.set_palette(m_palette);
 
-	MCFG_DEVICE_ADD("k053252", K053252, XTAL_24MHz/2) /* K053252, X0-010(?) @8D, xtal verified, divider not verified */
-	MCFG_K053252_INT1_ACK_CB(WRITELINE(hexion_state, irq_ack_w))
-	MCFG_K053252_INT2_ACK_CB(WRITELINE(hexion_state, nmi_ack_w))
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_hexion);
+	PALETTE(config, "palette", palette_device::RGB_444_PROMS, "proms", 256);
 
-	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(60)
-	MCFG_SCREEN_VBLANK_TIME(ATTOSECONDS_IN_USEC(0))
-	MCFG_SCREEN_SIZE(64*8, 36*8)
-	MCFG_SCREEN_VISIBLE_AREA(0*8, 64*8-1, 0*8, 32*8-1)
-	MCFG_SCREEN_UPDATE_DRIVER(hexion_state, screen_update)
-	MCFG_SCREEN_PALETTE("palette")
+	// sound hardware
+	SPEAKER(config, "mono").front_center();
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", hexion)
-	MCFG_PALETTE_ADD_RRRRGGGGBBBB_PROMS("palette", 256)
+	// MSM6295GS @ 5E, clock frequency & pin 7 not verified
+	OKIM6295(config, "oki", 1056000, okim6295_device::PIN7_HIGH).add_route(ALL_OUTPUTS, "mono", 0.5);
 
-	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+	// KONAMI 051649 // 2212P003 // JAPAN 8910EAJ @ 1D, xtal verified, divider not verified
+	K051649(config, "k051649", XTAL(24'000'000) / 8).add_route(ALL_OUTPUTS, "mono", 0.5);
+}
 
-	MCFG_OKIM6295_ADD("oki", 1056000, OKIM6295_PIN7_HIGH) /* MSM6295GS @ 5E, clock frequency & pin 7 not verified */
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.5)
+void hexion_state::hexionb(machine_config &config)
+{
+	hexion(config);
+	m_maincpu->set_addrmap(AS_PROGRAM, &hexion_state::hexionb_map);
 
-	MCFG_K051649_ADD("k051649", XTAL_24MHz/16) /* KONAMI 051649 // 2212P003 // JAPAN 8910EAJ @ 1D, xtal verified, divider not verified */
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.5)
-MACHINE_CONFIG_END
+	config.device_remove("k051649");
 
-static MACHINE_CONFIG_DERIVED( hexionb, hexion )
-	MCFG_CPU_MODIFY("maincpu")
-	MCFG_CPU_PROGRAM_MAP(hexionb_map)
-
-	MCFG_DEVICE_REMOVE("k051649")
-
-	MCFG_OKIM6295_ADD("oki2", 1056000, OKIM6295_PIN7_HIGH) // clock frequency & pin 7 not verified
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 0.5)
-MACHINE_CONFIG_END
+	// clock frequency & pin 7 not verified; this clock and pin 7 being low makes the pitch match the non-bootleg version, so is probably correct
+	OKIM6295(config, "oki2", 1056000, okim6295_device::PIN7_LOW).add_route(ALL_OUTPUTS, "mono", 0.5);
+}
 
 
 /***************************************************************************
@@ -286,40 +532,38 @@ MACHINE_CONFIG_END
 ***************************************************************************/
 
 ROM_START( hexion )
-	ROM_REGION( 0x34800, "maincpu", 0 ) /* ROMs + space for additional RAM */
-	ROM_LOAD( "122__j_a__b01.16f", 0x00000, 0x20000, CRC(eabc6dd1) SHA1(e74c1f1f2fcf8973f0741a2d544f25c8639448bf) ) /* "122 // J A // B01" @16F (27c010?) */
-	ROM_RELOAD(               0x10000, 0x20000 )    /* banked at 8000-9fff */
+	ROM_REGION( 0x20000, "maincpu", 0 )
+	ROM_LOAD( "122__j_a__b01.16f", 0x00000, 0x20000, CRC(eabc6dd1) SHA1(e74c1f1f2fcf8973f0741a2d544f25c8639448bf) ) // "122 // J A // B01" @16F (27c010?)
 
-	ROM_REGION( 0x80000, "gfx1", 0 )    /* addressable by the main CPU */
-	ROM_LOAD( "122a07.1h",   0x00000, 0x40000, CRC(22ae55e3) SHA1(41bdc990f69416b639542e2186a3610c16389063) ) /* Later pcbs have mask roms labeled: "KONAMI // 055066 // 122A07 // 233505" @1H (maybe mismarked 2H on pcb?) */
-	ROM_LOAD( "122a06.1g",   0x40000, 0x40000, CRC(438f4388) SHA1(9e23805c9642a237daeaf106187d1e1e0692434d) ) /* Later pcbs have mask roms labeled: "KONAMI // 055065 // 122A06 // 233506" @1G */
+	ROM_REGION( 0x80000, "tiles", 0 )    // addressable by the main CPU
+	ROM_LOAD( "122a07.1h",   0x00000, 0x40000, CRC(22ae55e3) SHA1(41bdc990f69416b639542e2186a3610c16389063) ) // Later PCBs have mask ROMs labeled: "KONAMI // 055066 // 122A07 // 233505" @1H (maybe mismarked 2H on PCB?)
+	ROM_LOAD( "122a06.1g",   0x40000, 0x40000, CRC(438f4388) SHA1(9e23805c9642a237daeaf106187d1e1e0692434d) ) // Later PCBs have mask ROMs labeled: "KONAMI // 055065 // 122A06 // 233506" @1G
 
-	ROM_REGION( 0x40000, "oki", 0 ) /* OKIM6295 samples */
-	ROM_LOAD( "122a05.2f",   0x0000, 0x40000, CRC(bcc831bf) SHA1(c3382065dd0069a4dc0bde2d9931ec85b0bffc73) ) /* Later pcbs have mask roms labeled: "KONAMI // 055064 // 122A05 // 233507" @2F (maybe 2G? marking isn't visible in the picture I have) */
+	ROM_REGION( 0x40000, "oki", 0 )
+	ROM_LOAD( "122a05.2f",   0x0000, 0x40000, CRC(bcc831bf) SHA1(c3382065dd0069a4dc0bde2d9931ec85b0bffc73) ) // Later PCBs have mask ROMs labeled: "KONAMI // 055064 // 122A05 // 233507" @2F (maybe 2G? marking isn't visible in the picture I have)
 
 	ROM_REGION( 0x0300, "proms", 0 )
 	ROM_LOAD( "122a04.10b",   0x0000, 0x0100, CRC(506eb8c6) SHA1(3bff7cf286942d8bdbc3998245c3de20981fbecb) ) // AMD27S21 == 82S129
 	ROM_LOAD( "122a03.11b",   0x0100, 0x0100, CRC(590c4f64) SHA1(db4b34f8c5fdfea034a94d65873f6fb842f123e9) ) // AMD27S21 == 82S129
 	ROM_LOAD( "122a02.13b",   0x0200, 0x0100, CRC(5734305c) SHA1(c72e59acf79a4db1a5a9d827eef899c0675336f2) ) // AMD27S21 == 82S129
 
-	// there are also two PALs of unknown type on the pcb:
+	// there are also two PALs of unknown type on the PCB:
 	//054843 @12F
 	//054844 @12H(12I?)
 ROM_END
 
 ROM_START( hexionb )
-	ROM_REGION( 0x34800, "maincpu", 0 ) /* ROMs + space for additional RAM */
+	ROM_REGION( 0x20000, "maincpu", 0 )
 	ROM_LOAD( "hexionb.u2", 0x00000, 0x20000, CRC(93edc5d4) SHA1(d14c5be85a67eebddda9103bdf19de8c3c05d3af) )
-	ROM_RELOAD(               0x10000, 0x20000 )    /* banked at 8000-9fff */
 
-	ROM_REGION( 0x80000, "gfx1", 0 )    /* addressable by the main CPU */
+	ROM_REGION( 0x80000, "tiles", 0 )    // addressable by the main CPU
 	ROM_LOAD( "hexionb.u30",   0x00000, 0x40000, CRC(22ae55e3) SHA1(41bdc990f69416b639542e2186a3610c16389063) ) // == 122a07.1h
 	ROM_LOAD( "hexionb.u29",   0x40000, 0x40000, CRC(438f4388) SHA1(9e23805c9642a237daeaf106187d1e1e0692434d) ) // == 122a06.1g
 
-	ROM_REGION( 0x40000, "oki", 0 ) /* OKIM6295 samples */
+	ROM_REGION( 0x40000, "oki", 0 )
 	ROM_LOAD( "hexionb.u16",   0x0000, 0x40000, CRC(bcc831bf) SHA1(c3382065dd0069a4dc0bde2d9931ec85b0bffc73) ) // == 122a05.2f
 
-	ROM_REGION( 0x40000, "oki2", 0 ) /* OKIM6295 samples */
+	ROM_REGION( 0x40000, "oki2", 0 )
 	ROM_LOAD( "hexionb.u18",   0x0000, 0x40000, CRC(c179d315) SHA1(b39d5ec8a90b7ae06763191b8324f32fe1d0ca9b) )
 
 	ROM_REGION( 0x0300, "proms", 0 )
@@ -332,5 +576,8 @@ ROM_START( hexionb )
 	//PAL20L10 @U31
 ROM_END
 
-GAME( 1992, hexion, 0,      hexion, hexion, driver_device, 0, ROT0, "Konami",                     "Hexion (Japan ver JAB)", 0 )
-GAME( 1992, hexionb,hexion, hexionb,hexion, driver_device, 0, ROT0, "bootleg (Impeuropex Corp.)", "Hexion (Asia ver AAA, bootleg)", 0 ) // we're missing an original Asia AAA
+} // anonymous namespace
+
+
+GAME( 1992, hexion,  0,      hexion,  hexion, hexion_state, empty_init, ROT0, "Konami",                     "Hexion (Japan ver JAB)",         MACHINE_SUPPORTS_SAVE )
+GAME( 1992, hexionb, hexion, hexionb, hexion, hexion_state, empty_init, ROT0, "bootleg (Impeuropex Corp.)", "Hexion (Asia ver AAA, bootleg)", MACHINE_SUPPORTS_SAVE ) // we're missing an original Asia AAA

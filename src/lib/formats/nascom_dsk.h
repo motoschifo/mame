@@ -1,4 +1,4 @@
-// license:GPL-2.0+
+// license:BSD-3-Clause
 // copyright-holders:Dirk Best
 /***************************************************************************
 
@@ -7,11 +7,10 @@
     Disk image format
 
 ***************************************************************************/
+#ifndef MAME_FORMATS_NASCOM_DSK_H
+#define MAME_FORMATS_NASCOM_DSK_H
 
 #pragma once
-
-#ifndef __NASCOM_DSK_H__
-#define __NASCOM_DSK_H__
 
 #include "wd177x_dsk.h"
 
@@ -28,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_NASCOM_FORMAT;
+extern const nascom_format FLOPPY_NASCOM_FORMAT;
 
-#endif // __NASCOM_DSK_H__
+#endif // MAME_FORMATS_NASCOM_DSK_H

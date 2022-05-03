@@ -16,8 +16,214 @@ Sound:  YM2151
 ***************************************************************************/
 
 #include "emu.h"
+
 #include "cpu/z80/z80.h"
-#include "includes/amspdwy.h"
+#include "machine/gen_latch.h"
+#include "sound/ymopm.h"
+
+#include "emupal.h"
+#include "screen.h"
+#include "speaker.h"
+#include "tilemap.h"
+
+
+namespace {
+
+class amspdwy_state : public driver_device
+{
+public:
+	amspdwy_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
+		m_videoram(*this, "videoram"),
+		m_spriteram(*this, "spriteram"),
+		m_colorram(*this, "colorram"),
+		m_maincpu(*this, "maincpu"),
+		m_audiocpu(*this, "audiocpu"),
+		m_ym2151(*this, "ymsnd"),
+		m_gfxdecode(*this, "gfxdecode"),
+		m_screen(*this, "screen"),
+		m_palette(*this, "palette"),
+		m_soundlatch(*this, "soundlatch"),
+		m_io_analog(*this, "AN%u", 1U),
+		m_io_wheel(*this, "WHEEL%u", 1U),
+		m_io_in0(*this, "IN0")
+	{ }
+
+	void amspdwy(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
+	virtual void machine_reset() override;
+	virtual void video_start() override;
+
+private:
+	/* memory pointers */
+	required_shared_ptr<uint8_t> m_videoram;
+	required_shared_ptr<uint8_t> m_spriteram;
+	required_shared_ptr<uint8_t> m_colorram;
+
+	/* devices */
+	required_device<cpu_device> m_maincpu;
+	required_device<cpu_device> m_audiocpu;
+	required_device<ym2151_device> m_ym2151;
+	required_device<gfxdecode_device> m_gfxdecode;
+	required_device<screen_device> m_screen;
+	required_device<palette_device> m_palette;
+	required_device<generic_latch_8_device> m_soundlatch;
+
+	/* I/O ports */
+	required_ioport_array<2> m_io_analog;
+	required_ioport_array<2> m_io_wheel;
+	required_ioport m_io_in0;
+
+	/* video-related */
+	tilemap_t *m_bg_tilemap;
+	int m_flipscreen;
+
+	/* misc */
+	uint16_t m_wheel_old[2];
+	uint8_t m_wheel_return[2];
+
+	void amspdwy_flipscreen_w(uint8_t data);
+	void amspdwy_videoram_w(offs_t offset, uint8_t data);
+	void amspdwy_colorram_w(offs_t offset, uint8_t data);
+	uint8_t amspdwy_sound_r();
+	TILE_GET_INFO_MEMBER(get_tile_info);
+	TILEMAP_MAPPER_MEMBER(tilemap_scan_cols_back);
+
+	uint32_t screen_update_amspdwy(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	void draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect);
+	template <unsigned Index> uint8_t amspdwy_wheel_r();
+
+	void amspdwy_map(address_map &map);
+	void amspdwy_portmap(address_map &map);
+	void amspdwy_sound_map(address_map &map);
+};
+
+
+
+void amspdwy_state::amspdwy_flipscreen_w(uint8_t data)
+{
+	m_flipscreen ^= 1;
+	flip_screen_set(m_flipscreen);
+}
+
+/***************************************************************************
+
+                        Callbacks for the TileMap code
+
+                              [ Tiles Format ]
+
+    Videoram:   76543210    Code Low Bits
+    Colorram:   765-----
+                ---43---    Code High Bits
+                -----210    Color
+
+***************************************************************************/
+
+TILE_GET_INFO_MEMBER(amspdwy_state::get_tile_info)
+{
+	uint8_t code = m_videoram[tile_index];
+	uint8_t color = m_colorram[tile_index];
+	tileinfo.set(0,
+			code + ((color & 0x18)<<5),
+			color & 0x07,
+			0);
+}
+
+void amspdwy_state::amspdwy_videoram_w(offs_t offset, uint8_t data)
+{
+	m_videoram[offset] = data;
+	m_bg_tilemap->mark_tile_dirty(offset);
+}
+
+void amspdwy_state::amspdwy_colorram_w(offs_t offset, uint8_t data)
+{
+	m_colorram[offset] = data;
+	m_bg_tilemap->mark_tile_dirty(offset);
+}
+
+
+/* logical (col,row) -> memory offset */
+TILEMAP_MAPPER_MEMBER(amspdwy_state::tilemap_scan_cols_back)
+{
+	return col * num_rows + (num_rows - row - 1);
+}
+
+
+void amspdwy_state::video_start()
+{
+	m_bg_tilemap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(amspdwy_state::get_tile_info)), tilemap_mapper_delegate(*this, FUNC(amspdwy_state::tilemap_scan_cols_back)), 8, 8, 0x20, 0x20);
+}
+
+
+
+/***************************************************************************
+
+                                Sprites Drawing
+
+Offset:     Format:     Value:
+
+0                       Y
+1                       X
+2                       Code Low Bits
+3           7-------    Flip X
+            -6------    Flip Y
+            --5-----
+            ---4----    ?
+            ----3---    Code High Bit?
+            -----210    Color
+
+***************************************************************************/
+
+void amspdwy_state::draw_sprites( bitmap_ind16 &bitmap, const rectangle &cliprect )
+{
+	int const max_x = m_screen->width()  - 1;
+	int const max_y = m_screen->height() - 1;
+
+	for (int i = 0; i < m_spriteram.bytes(); i += 4)
+	{
+		int y = m_spriteram[i + 0];
+		int x = m_spriteram[i + 1];
+		int const code = m_spriteram[i + 2];
+		int const attr = m_spriteram[i + 3];
+		int flipx = attr & 0x80;
+		int flipy = attr & 0x40;
+
+		if (flip_screen())
+		{
+			x = max_x - x - 8;
+			y = max_y - y - 8;
+			flipx = !flipx;
+			flipy = !flipy;
+		}
+
+		m_gfxdecode->gfx(0)->transpen(bitmap,cliprect,
+//              code + ((attr & 0x18)<<5),
+				code + ((attr & 0x08)<<5),
+				attr,
+				flipx, flipy,
+				x,y,0 );
+	}
+}
+
+
+
+
+/***************************************************************************
+
+                                Screen Drawing
+
+***************************************************************************/
+
+uint32_t amspdwy_state::screen_update_amspdwy(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	m_bg_tilemap->draw(screen, bitmap, cliprect, 0, 0);
+	draw_sprites(bitmap, cliprect);
+	return 0;
+}
+
+
 
 /***************************************************************************
 
@@ -35,66 +241,50 @@ Sound:  YM2151
     Or last value when wheel delta = 0
 */
 
-UINT8 amspdwy_state::amspdwy_wheel_r( int index )
+template <unsigned Index>
+uint8_t amspdwy_state::amspdwy_wheel_r()
 {
-	static const char *const portnames[] = { "WHEEL1", "WHEEL2", "AN1", "AN2" };
-	UINT8 wheel = ioport(portnames[2 + index])->read();
-	if (wheel != m_wheel_old[index])
+	uint16_t wheel = m_io_analog[Index]->read();
+	if (wheel != m_wheel_old[Index])
 	{
 		wheel = (wheel & 0x7fff) - (wheel & 0x8000);
-		if (wheel > m_wheel_old[index])
-			m_wheel_return[index] = ((+wheel) & 0xf) | 0x00;
+		if (wheel > m_wheel_old[Index])
+			m_wheel_return[Index] = ((+wheel) & 0xf) | 0x00;
 		else
-			m_wheel_return[index] = ((-wheel) & 0xf) | 0x10;
+			m_wheel_return[Index] = ((-wheel) & 0xf) | 0x10;
 
-		m_wheel_old[index] = wheel;
+		m_wheel_old[Index] = wheel;
 	}
-	return m_wheel_return[index] | ioport(portnames[index])->read();
+	return m_wheel_return[Index] | m_io_wheel[Index]->read();
 }
 
-READ8_MEMBER(amspdwy_state::amspdwy_wheel_0_r)
+uint8_t amspdwy_state::amspdwy_sound_r()
 {
-	// player 1
-	return amspdwy_wheel_r(0);
+	return (m_ym2151->status_r() & ~0x30) | m_io_in0->read();
 }
 
-READ8_MEMBER(amspdwy_state::amspdwy_wheel_1_r)
+void amspdwy_state::amspdwy_map(address_map &map)
 {
-	// player 2
-	return amspdwy_wheel_r(1);
+	map(0x0000, 0x7fff).rom();
+	map(0x8000, 0x801f).w(m_palette, FUNC(palette_device::write8)).share("palette");
+	map(0x9000, 0x93ff).mirror(0x0400).ram().w(FUNC(amspdwy_state::amspdwy_videoram_w)).share("videoram");
+	map(0x9800, 0x9bff).ram().w(FUNC(amspdwy_state::amspdwy_colorram_w)).share("colorram");
+	map(0x9c00, 0x9fff).ram(); // unused?
+//  map(0xa000, 0xa000).nopw(); // ?
+	map(0xa000, 0xa000).portr("DSW1");
+	map(0xa400, 0xa400).portr("DSW2").w(FUNC(amspdwy_state::amspdwy_flipscreen_w));
+	map(0xa800, 0xa800).r(FUNC(amspdwy_state::amspdwy_wheel_r<0>)); // player 1
+	map(0xac00, 0xac00).r(FUNC(amspdwy_state::amspdwy_wheel_r<1>)); // player 2
+	map(0xb000, 0xb000).nopw(); // irq ack?
+	map(0xb400, 0xb400).r(FUNC(amspdwy_state::amspdwy_sound_r)).w(m_soundlatch, FUNC(generic_latch_8_device::write));
+	map(0xc000, 0xc0ff).ram().share("spriteram");
+	map(0xe000, 0xe7ff).ram();
 }
 
-READ8_MEMBER(amspdwy_state::amspdwy_sound_r)
+void amspdwy_state::amspdwy_portmap(address_map &map)
 {
-	return (m_ym2151->status_r(space, 0) & ~0x30) | ioport("IN0")->read();
+	map(0x0000, 0x7fff).rom().region("tracks", 0);
 }
-
-WRITE8_MEMBER(amspdwy_state::amspdwy_sound_w)
-{
-	soundlatch_byte_w(space, 0, data);
-	m_audiocpu->set_input_line(INPUT_LINE_NMI, PULSE_LINE);
-}
-
-static ADDRESS_MAP_START( amspdwy_map, AS_PROGRAM, 8, amspdwy_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-	AM_RANGE(0x8000, 0x801f) AM_DEVWRITE("palette", palette_device, write) AM_SHARE("palette")
-	AM_RANGE(0x9000, 0x93ff) AM_MIRROR(0x0400) AM_RAM_WRITE(amspdwy_videoram_w) AM_SHARE("videoram")
-	AM_RANGE(0x9800, 0x9bff) AM_RAM_WRITE(amspdwy_colorram_w) AM_SHARE("colorram")
-	AM_RANGE(0x9c00, 0x9fff) AM_RAM // unused?
-//  AM_RANGE(0xa000, 0xa000) AM_WRITENOP // ?
-	AM_RANGE(0xa000, 0xa000) AM_READ_PORT("DSW1")
-	AM_RANGE(0xa400, 0xa400) AM_READ_PORT("DSW2") AM_WRITE(amspdwy_flipscreen_w)
-	AM_RANGE(0xa800, 0xa800) AM_READ(amspdwy_wheel_0_r)
-	AM_RANGE(0xac00, 0xac00) AM_READ(amspdwy_wheel_1_r)
-	AM_RANGE(0xb000, 0xb000) AM_WRITENOP // irq ack?
-	AM_RANGE(0xb400, 0xb400) AM_READWRITE(amspdwy_sound_r, amspdwy_sound_w)
-	AM_RANGE(0xc000, 0xc0ff) AM_RAM AM_SHARE("spriteram")
-	AM_RANGE(0xe000, 0xe7ff) AM_RAM
-ADDRESS_MAP_END
-
-static ADDRESS_MAP_START( amspdwy_portmap, AS_IO, 8, amspdwy_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM AM_REGION("tracks", 0)
-ADDRESS_MAP_END
 
 
 
@@ -106,14 +296,15 @@ ADDRESS_MAP_END
 
 ***************************************************************************/
 
-static ADDRESS_MAP_START( amspdwy_sound_map, AS_PROGRAM, 8, amspdwy_state )
-	AM_RANGE(0x0000, 0x7fff) AM_ROM
-//  AM_RANGE(0x8000, 0x8000) AM_WRITENOP // ? writes 0 at start
-	AM_RANGE(0x9000, 0x9000) AM_READ(soundlatch_byte_r)
-	AM_RANGE(0xa000, 0xa001) AM_DEVREADWRITE("ymsnd", ym2151_device, read, write)
-	AM_RANGE(0xc000, 0xdfff) AM_RAM
-	AM_RANGE(0xffff, 0xffff) AM_READNOP // ??? IY = FFFF at the start ?
-ADDRESS_MAP_END
+void amspdwy_state::amspdwy_sound_map(address_map &map)
+{
+	map(0x0000, 0x7fff).rom();
+//  map(0x8000, 0x8000).nopw(); // ? writes 0 at start
+	map(0x9000, 0x9000).r(m_soundlatch, FUNC(generic_latch_8_device::read));
+	map(0xa000, 0xa001).rw(m_ym2151, FUNC(ym2151_device::read), FUNC(ym2151_device::write));
+	map(0xc000, 0xdfff).ram();
+	map(0xffff, 0xffff).nopr(); // ??? IY = FFFF at the start ?
+}
 
 
 
@@ -165,18 +356,18 @@ static INPUT_PORTS_START( amspdwy )
 	PORT_DIPUNUSED_DIPLOC( 0x80, 0x00, "SW2:1" )        /* Listed as "Unused" */
 
 	PORT_START("WHEEL1")    // Player 1 Wheel + Coins
-	PORT_BIT( 0x1f, IP_ACTIVE_HIGH, IPT_SPECIAL )   // wheel
+	PORT_BIT( 0x1f, IP_ACTIVE_HIGH, IPT_CUSTOM )   // wheel
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_COIN1 ) PORT_IMPULSE(2) // 2-3f
 
 	PORT_START("WHEEL2")    // Player 2 Wheel + Coins
-	PORT_BIT( 0x1f, IP_ACTIVE_HIGH, IPT_SPECIAL )
+	PORT_BIT( 0x1f, IP_ACTIVE_HIGH, IPT_CUSTOM )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_COIN2 ) PORT_IMPULSE(2)
 
 	PORT_START("IN0")   // Player 1&2 Pedals + YM2151 Sound Status
-	PORT_BIT( 0x0f, IP_ACTIVE_HIGH, IPT_SPECIAL )
+	PORT_BIT( 0x0f, IP_ACTIVE_HIGH, IPT_CUSTOM )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_PLAYER(2)
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_PLAYER(1)
-	PORT_BIT( 0xc0, IP_ACTIVE_HIGH, IPT_SPECIAL )
+	PORT_BIT( 0xc0, IP_ACTIVE_HIGH, IPT_CUSTOM )
 
 	PORT_START("AN1")   // Player 1 Analog Fake Port
 	PORT_BIT( 0xffff, 0x0000, IPT_DIAL ) PORT_SENSITIVITY(15) PORT_KEYDELTA(20) PORT_CODE_DEC(KEYCODE_LEFT) PORT_CODE_INC(KEYCODE_RIGHT) PORT_PLAYER(1)
@@ -217,7 +408,7 @@ static const gfx_layout layout_8x8x2 =
 	8*8
 };
 
-static GFXDECODE_START( amspdwy )
+static GFXDECODE_START( gfx_amspdwy )
 	GFXDECODE_ENTRY( "gfx1", 0, layout_8x8x2, 0, 8 )
 GFXDECODE_END
 
@@ -248,40 +439,43 @@ void amspdwy_state::machine_reset()
 	m_wheel_return[1] = 0;
 }
 
-static MACHINE_CONFIG_START( amspdwy, amspdwy_state )
-
+void amspdwy_state::amspdwy(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", Z80, 3000000)
-	MCFG_CPU_PROGRAM_MAP(amspdwy_map)
-	MCFG_CPU_IO_MAP(amspdwy_portmap)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", amspdwy_state, irq0_line_hold) /* IRQ: 60Hz, NMI: retn */
+	Z80(config, m_maincpu, 3000000);
+	m_maincpu->set_addrmap(AS_PROGRAM, &amspdwy_state::amspdwy_map);
+	m_maincpu->set_addrmap(AS_IO, &amspdwy_state::amspdwy_portmap);
+	m_maincpu->set_vblank_int("screen", FUNC(amspdwy_state::irq0_line_hold)); /* IRQ: 60Hz, NMI: retn */
 
-	MCFG_CPU_ADD("audiocpu", Z80, 3000000)
-	MCFG_CPU_PROGRAM_MAP(amspdwy_sound_map)
+	Z80(config, m_audiocpu, 3000000);
+	m_audiocpu->set_addrmap(AS_PROGRAM, &amspdwy_state::amspdwy_sound_map);
 
-	MCFG_QUANTUM_PERFECT_CPU("maincpu")
+	config.set_perfect_quantum(m_maincpu);
 
 	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_REFRESH_RATE(60)
-	MCFG_SCREEN_VBLANK_TIME(ATTOSECONDS_IN_USEC(0))
-	MCFG_SCREEN_SIZE(256, 256)
-	MCFG_SCREEN_VISIBLE_AREA(0, 256-1, 0+16, 256-16-1)
-	MCFG_SCREEN_UPDATE_DRIVER(amspdwy_state, screen_update_amspdwy)
-	MCFG_SCREEN_PALETTE("palette")
+	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+	m_screen->set_refresh_hz(60);
+	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC(0));
+	m_screen->set_size(256, 256);
+	m_screen->set_visarea(0, 256-1, 0+16, 256-16-1);
+	m_screen->set_screen_update(FUNC(amspdwy_state::screen_update_amspdwy));
+	m_screen->set_palette(m_palette);
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", amspdwy)
-	MCFG_PALETTE_ADD("palette", 32)
-	MCFG_PALETTE_FORMAT(BBGGGRRR_inverted)
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_amspdwy);
+	PALETTE(config, m_palette).set_format(palette_device::BGR_233_inverted, 32);
 
 	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_STEREO("lspeaker", "rspeaker")
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
 
-	MCFG_YM2151_ADD("ymsnd", 3000000)
-	MCFG_YM2151_IRQ_HANDLER(INPUTLINE("audiocpu", 0))
-	MCFG_SOUND_ROUTE(0, "lspeaker", 1.0)
-	MCFG_SOUND_ROUTE(1, "rspeaker", 1.0)
-MACHINE_CONFIG_END
+	GENERIC_LATCH_8(config, m_soundlatch);
+	m_soundlatch->data_pending_callback().set_inputline(m_audiocpu, INPUT_LINE_NMI);
+
+	YM2151(config, m_ym2151, 3000000);
+	m_ym2151->irq_handler().set_inputline(m_audiocpu, 0);
+	m_ym2151->add_route(0, "lspeaker", 1.0);
+	m_ym2151->add_route(1, "rspeaker", 1.0);
+}
 
 
 
@@ -376,8 +570,10 @@ ROM_START( amspdwya )
 	ROM_LOAD( "lohi4644.2a",  0x3000, 0x1000, CRC(a1d802b1) SHA1(1249ce406b1aa518885a02ab063fa14906ccec2e) )
 ROM_END
 
+} // anonymous namespace
+
 
 /* (C) 1987 ETI 8402 MAGNOLIA ST. #C SANTEE, CA 92071 */
 
-GAME( 1987, amspdwy,  0,       amspdwy, amspdwy, driver_device,  0, ROT0, "Enerdyne Technologies Inc.", "American Speedway (set 1)", MACHINE_SUPPORTS_SAVE )
-GAME( 1987, amspdwya, amspdwy, amspdwy, amspdwya, driver_device, 0, ROT0, "Enerdyne Technologies Inc.", "American Speedway (set 2)", MACHINE_SUPPORTS_SAVE )
+GAME( 1987, amspdwy,  0,       amspdwy, amspdwy,  amspdwy_state, empty_init, ROT0, "Enerdyne Technologies Inc.", "American Speedway (set 1)", MACHINE_SUPPORTS_SAVE )
+GAME( 1987, amspdwya, amspdwy, amspdwy, amspdwya, amspdwy_state, empty_init, ROT0, "Enerdyne Technologies Inc.", "American Speedway (set 2)", MACHINE_SUPPORTS_SAVE )

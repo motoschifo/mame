@@ -6,8 +6,10 @@
 
 ****************************************************************************/
 
-#ifndef __PSION_PACK_H__
-#define __PSION_PACK_H__
+#ifndef MAME_MACHINE_PSION_PACK_H
+#define MAME_MACHINE_PSION_PACK_H
+
+#include "imagedev/memcard.h"
 
 
 /***************************************************************************
@@ -17,34 +19,30 @@
 // ======================> datapack_device
 
 class datapack_device : public device_t,
-						public device_image_interface
+						public device_memcard_image_interface
 {
 public:
 	// construction/destruction
-	datapack_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	datapack_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 	virtual ~datapack_device();
 
 	// image-level overrides
-	virtual bool call_load() override;
+	virtual image_init_result call_load() override;
 	virtual void call_unload() override;
-	virtual bool call_create(int format_type, option_resolution *create_args) override;
-	virtual bool call_softlist_load(software_list_device &swlist, const char *swname, const rom_entry *start_entry) override { return load_software(swlist, swname, start_entry); }
+	virtual image_init_result call_create(int format_type, util::option_resolution *create_args) override;
 
-	virtual iodevice_t image_type() const override { return IO_CARTSLOT; }
-	virtual bool is_readable()  const override { return 1; }
-	virtual bool is_writeable() const override { return 1; }
-	virtual bool is_creatable() const override { return 1; }
-	virtual bool must_be_loaded() const override { return 0; }
-	virtual bool is_reset_on_load() const override { return 0; }
-	virtual const char *image_interface() const override { return "psion_pack"; }
-	virtual const char *file_extensions() const override { return "opk"; }
-	virtual const option_guide *create_option_guide() const override;
+	virtual bool is_reset_on_load() const noexcept override { return false; }
+	virtual const char *image_interface() const noexcept override { return "psion_pack"; }
+	virtual const char *file_extensions() const noexcept override { return "opk"; }
+	virtual const char *image_type_name() const noexcept override { return "datapack"; }
+	virtual const char *image_brief_type_name() const noexcept override { return "dpak"; }
+	virtual const util::option_guide &create_option_guide() const override;
 
 	// specific implementation
-	UINT8 data_r();
-	void  data_w(UINT8 data);
-	UINT8 control_r();
-	void control_w(UINT8 data);
+	uint8_t data_r();
+	void  data_w(uint8_t data);
+	uint8_t control_r();
+	void control_w(uint8_t data);
 
 protected:
 	// internal helper
@@ -54,26 +52,22 @@ protected:
 	virtual void device_start() override;
 	virtual void device_config_complete() override;
 
+	// device_image_interface implementation
+	virtual const software_list_loader &get_software_list_loader() const override;
+
 private:
 	// internal device state
-	UINT8  m_id;                //datapack ID
-	UINT8  m_size;              //size in 8k blocks
-	UINT8  m_data;              //data lines
-	UINT8  m_control;           //control lines
-	UINT16 m_counter;           //address counter
-	UINT8  m_page;              //active page (only for paged Datapack)
-	UINT8  m_segment;           //active segment (only for segmented Datapack)
+	uint8_t  m_id = 0;                //datapack ID
+	uint8_t  m_size = 0;              //size in 8k blocks
+	uint8_t  m_data = 0;              //data lines
+	uint8_t  m_control = 0;           //control lines
+	uint16_t m_counter = 0;           //address counter
+	uint8_t  m_page = 0;              //active page (only for paged Datapack)
+	uint8_t  m_segment = 0;           //active segment (only for segmented Datapack)
 };
 
 
 // device type definition
-extern const device_type PSION_DATAPACK;
+DECLARE_DEVICE_TYPE(PSION_DATAPACK, datapack_device)
 
-
-/***************************************************************************
-    DEVICE CONFIGURATION MACROS
-***************************************************************************/
-
-#define MCFG_PSION_DATAPACK_ADD(_tag) \
-	MCFG_DEVICE_ADD(_tag, PSION_DATAPACK, 0)
-#endif /* __PSION_PACK_H__ */
+#endif // MAME_MACHINE_PSION_PACK_H

@@ -13,7 +13,7 @@ bgfx_uniform::bgfx_uniform(std::string name, bgfx::UniformType::Enum type)
 	: m_name(name)
 	, m_type(type)
 {
-	m_handle = bgfx::createUniform(m_name.c_str(), m_type);
+	m_handle = BGFX_INVALID_HANDLE;
 	m_data_size = get_size_for_type(type);
 	if (m_data_size > 0)
 	{
@@ -23,14 +23,24 @@ bgfx_uniform::bgfx_uniform(std::string name, bgfx::UniformType::Enum type)
 
 bgfx_uniform::~bgfx_uniform()
 {
-	bgfx::destroyUniform(m_handle);
+	if (m_handle.idx != bgfx::kInvalidHandle)
+	{
+		bgfx::destroy(m_handle);
+	}
 	delete [] m_data;
+}
+
+void bgfx_uniform::create()
+{
+	m_handle = bgfx::createUniform(m_name.c_str(), m_type);
 }
 
 void bgfx_uniform::upload()
 {
-	if (m_type != bgfx::UniformType::Int1) // Avoid samplers; set separately!
+	if (m_type != bgfx::UniformType::Sampler)
+	{
 		bgfx::setUniform(m_handle, m_data);
+	}
 }
 
 bgfx_uniform* bgfx_uniform::set(float* value)
@@ -40,7 +50,7 @@ bgfx_uniform* bgfx_uniform::set(float* value)
 
 bgfx_uniform* bgfx_uniform::set_int(int value)
 {
-	return set(&value, get_size_for_type(bgfx::UniformType::Int1));
+	return set(&value, get_size_for_type(bgfx::UniformType::Sampler));
 }
 
 bgfx_uniform* bgfx_uniform::set_mat3(float* value)
@@ -67,7 +77,7 @@ size_t bgfx_uniform::get_size_for_type(bgfx::UniformType::Enum type)
 		case bgfx::UniformType::Vec4:
 			return sizeof(float) * 4;
 
-		case bgfx::UniformType::Int1:
+		case bgfx::UniformType::Sampler:
 			return sizeof(int);
 
 		case bgfx::UniformType::Mat3:

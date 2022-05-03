@@ -8,14 +8,17 @@
 //
 //============================================================
 
+// only for oslog callback
+#include <functional>
 
 #ifdef SDLMAME_UNIX
-#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_EMSCRIPTEN))
+#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_EMSCRIPTEN)) && (!defined(SDLMAME_ANDROID))
 #ifndef SDLMAME_HAIKU
 #include <fontconfig/fontconfig.h>
 #endif
 #endif
 #ifdef SDLMAME_MACOSX
+#define __ASSERT_MACROS_DEFINE_VERSIONS_WITHOUT_UNDERSCORES 0
 #include <Carbon/Carbon.h>
 #endif
 #endif
@@ -27,16 +30,15 @@
 
 // only for strconv.h
 #if defined(SDLMAME_WIN32)
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
-#include "sdlinc.h"
+#include <SDL2/SDL.h>
 
 // MAME headers
+#include "corestr.h"
 #include "osdepend.h"
 #include "emu.h"
-#include "clifront.h"
 #include "emuopts.h"
 #include "strconv.h"
 
@@ -44,16 +46,7 @@
 #include "video.h"
 #include "osdsdl.h"
 #include "modules/lib/osdlib.h"
-
-// we override SDL's normal startup on Win32
-// please see sdlprefix.h as well
-
-#if defined(SDLMAME_X11) && (SDL_MAJOR_VERSION == 1) && (SDL_MINOR_VERSION == 2)
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#endif
-
-#include "watchdog.h"
+#include "modules/diagnostics/diagnostics_module.h"
 
 //============================================================
 //  OPTIONS
@@ -61,7 +54,7 @@
 
 #ifndef INI_PATH
 #if defined(SDLMAME_WIN32)
-	#define INI_PATH ".;ini"
+	#define INI_PATH ".;ini;ini/presets"
 #elif defined(SDLMAME_MACOSX)
 	#define INI_PATH "$HOME/Library/Application Support/APP_NAME;$HOME/.APP_NAME;.;ini"
 #else
@@ -87,10 +80,10 @@ const options_entry sdl_options::s_option_entries[] =
 	{ SDLOPTION_INIPATH,                     INI_PATH,    OPTION_STRING,     "path to ini files" },
 
 	// performance options
-	{ NULL,                                   NULL,       OPTION_HEADER,     "SDL PERFORMANCE OPTIONS" },
+	{ nullptr,                                nullptr,       OPTION_HEADER,     "SDL PERFORMANCE OPTIONS" },
 	{ SDLOPTION_SDLVIDEOFPS,                  "0",        OPTION_BOOLEAN,    "show sdl video performance" },
 	// video options
-	{ NULL,                                   NULL,       OPTION_HEADER,     "SDL VIDEO OPTIONS" },
+	{ nullptr,                                nullptr,       OPTION_HEADER,     "SDL VIDEO OPTIONS" },
 // OS X can be trusted to have working hardware OpenGL, so default to it on for the best user experience
 	{ SDLOPTION_CENTERH,                      "1",        OPTION_BOOLEAN,    "center horizontally within the view area" },
 	{ SDLOPTION_CENTERV,                      "1",        OPTION_BOOLEAN,    "center vertically within the view area" },
@@ -98,17 +91,18 @@ const options_entry sdl_options::s_option_entries[] =
 
 	// full screen options
 	#ifdef SDLMAME_X11
-	{ NULL,                                   NULL,  OPTION_HEADER,     "SDL FULL SCREEN OPTIONS" },
+	{ nullptr,                               nullptr,  OPTION_HEADER,     "SDL FULL SCREEN OPTIONS" },
 	{ SDLOPTION_USEALLHEADS,                 "0",     OPTION_BOOLEAN,    "split full screen image across monitors" },
-	#endif
+	{ SDLOPTION_ATTACH_WINDOW,               "",      OPTION_STRING,     "attach to arbitrary window" },
+	#endif // SDLMAME_X11
 
 	// keyboard mapping
-	{ NULL,                                   NULL,  OPTION_HEADER,     "SDL KEYBOARD MAPPING" },
+	{ nullptr,                               nullptr,  OPTION_HEADER,     "SDL KEYBOARD MAPPING" },
 	{ SDLOPTION_KEYMAP,                      "0",    OPTION_BOOLEAN,    "enable keymap" },
 	{ SDLOPTION_KEYMAP_FILE,                 "keymap.dat", OPTION_STRING, "keymap filename" },
 
 	// joystick mapping
-	{ NULL,                                  NULL,   OPTION_HEADER,     "SDL JOYSTICK MAPPING" },
+	{ nullptr,                               nullptr,   OPTION_HEADER,     "SDL JOYSTICK MAPPING" },
 	{ SDLOPTION_JOYINDEX "1",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #1" },
 	{ SDLOPTION_JOYINDEX "2",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #2" },
 	{ SDLOPTION_JOYINDEX "3",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #3" },
@@ -117,11 +111,11 @@ const options_entry sdl_options::s_option_entries[] =
 	{ SDLOPTION_JOYINDEX "6",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #6" },
 	{ SDLOPTION_JOYINDEX "7",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #7" },
 	{ SDLOPTION_JOYINDEX "8",                OSDOPTVAL_AUTO, OPTION_STRING,         "name of joystick mapped to joystick #8" },
-	{ SDLOPTION_SIXAXIS,                     "0",    OPTION_BOOLEAN,    "Use special handling for PS3 Sixaxis controllers" },
+	{ SDLOPTION_SIXAXIS,                     "0",    OPTION_BOOLEAN,    "use special handling for PS3 Sixaxis controllers" },
 
 #if (USE_XINPUT)
 	// lightgun mapping
-	{ NULL,                                  NULL,   OPTION_HEADER,     "SDL LIGHTGUN MAPPING" },
+	{ nullptr,                               nullptr,   OPTION_HEADER,     "SDL LIGHTGUN MAPPING" },
 	{ SDLOPTION_LIGHTGUNINDEX "1",           OSDOPTVAL_AUTO, OPTION_STRING,         "name of lightgun mapped to lightgun #1" },
 	{ SDLOPTION_LIGHTGUNINDEX "2",           OSDOPTVAL_AUTO, OPTION_STRING,         "name of lightgun mapped to lightgun #2" },
 	{ SDLOPTION_LIGHTGUNINDEX "3",           OSDOPTVAL_AUTO, OPTION_STRING,         "name of lightgun mapped to lightgun #3" },
@@ -132,7 +126,7 @@ const options_entry sdl_options::s_option_entries[] =
 	{ SDLOPTION_LIGHTGUNINDEX "8",           OSDOPTVAL_AUTO, OPTION_STRING,         "name of lightgun mapped to lightgun #8" },
 #endif
 
-	{ NULL,                                  NULL,   OPTION_HEADER,     "SDL MOUSE MAPPING" },
+	{ nullptr,                               nullptr,   OPTION_HEADER,     "SDL MOUSE MAPPING" },
 	{ SDLOPTION_MOUSEINDEX "1",              OSDOPTVAL_AUTO, OPTION_STRING,         "name of mouse mapped to mouse #1" },
 	{ SDLOPTION_MOUSEINDEX "2",              OSDOPTVAL_AUTO, OPTION_STRING,         "name of mouse mapped to mouse #2" },
 	{ SDLOPTION_MOUSEINDEX "3",              OSDOPTVAL_AUTO, OPTION_STRING,         "name of mouse mapped to mouse #3" },
@@ -142,7 +136,7 @@ const options_entry sdl_options::s_option_entries[] =
 	{ SDLOPTION_MOUSEINDEX "7",              OSDOPTVAL_AUTO, OPTION_STRING,         "name of mouse mapped to mouse #7" },
 	{ SDLOPTION_MOUSEINDEX "8",              OSDOPTVAL_AUTO, OPTION_STRING,         "name of mouse mapped to mouse #8" },
 
-	{ NULL,                                  NULL,   OPTION_HEADER,     "SDL KEYBOARD MAPPING" },
+	{ nullptr,                               nullptr,   OPTION_HEADER,     "SDL KEYBOARD MAPPING" },
 	{ SDLOPTION_KEYBINDEX "1",               OSDOPTVAL_AUTO, OPTION_STRING,         "name of keyboard mapped to keyboard #1" },
 	{ SDLOPTION_KEYBINDEX "2",               OSDOPTVAL_AUTO, OPTION_STRING,         "name of keyboard mapped to keyboard #2" },
 	{ SDLOPTION_KEYBINDEX "3",               OSDOPTVAL_AUTO, OPTION_STRING,         "name of keyboard mapped to keyboard #3" },
@@ -153,16 +147,16 @@ const options_entry sdl_options::s_option_entries[] =
 	{ SDLOPTION_KEYBINDEX "8",               OSDOPTVAL_AUTO, OPTION_STRING,         "name of keyboard mapped to keyboard #8" },
 
 	// SDL low level driver options
-	{ NULL,                                  NULL,   OPTION_HEADER,     "SDL LOWLEVEL DRIVER OPTIONS" },
-	{ SDLOPTION_VIDEODRIVER ";vd",           OSDOPTVAL_AUTO,  OPTION_STRING,        "sdl video driver to use ('x11', 'directfb', ... or 'auto' for SDL default" },
-	{ SDLOPTION_RENDERDRIVER ";rd",          OSDOPTVAL_AUTO,  OPTION_STRING,        "sdl render driver to use ('software', 'opengl', 'directfb' ... or 'auto' for SDL default" },
-	{ SDLOPTION_AUDIODRIVER ";ad",           OSDOPTVAL_AUTO,  OPTION_STRING,        "sdl audio driver to use ('alsa', 'arts', ... or 'auto' for SDL default" },
+	{ nullptr,                               nullptr,   OPTION_HEADER,     "SDL LOW-LEVEL DRIVER OPTIONS" },
+	{ SDLOPTION_VIDEODRIVER ";vd",           OSDOPTVAL_AUTO,  OPTION_STRING,        "SDL video driver to use ('x11', 'directfb', ... or 'auto' for SDL default" },
+	{ SDLOPTION_RENDERDRIVER ";rd",          OSDOPTVAL_AUTO,  OPTION_STRING,        "SDL render driver to use ('software', 'opengl', 'directfb' ... or 'auto' for SDL default" },
+	{ SDLOPTION_AUDIODRIVER ";ad",           OSDOPTVAL_AUTO,  OPTION_STRING,        "SDL audio driver to use ('alsa', 'arts', ... or 'auto' for SDL default" },
 #if USE_OPENGL
 	{ SDLOPTION_GL_LIB,                      SDLOPTVAL_GLLIB, OPTION_STRING,        "alternative libGL.so to use; 'auto' for system default" },
 #endif
 
 	// End of list
-	{ NULL }
+	{ nullptr }
 };
 
 //============================================================
@@ -172,10 +166,13 @@ const options_entry sdl_options::s_option_entries[] =
 sdl_options::sdl_options()
 : osd_options()
 {
+#if defined (SDLMAME_ANDROID)
+	chdir (SDL_AndroidGetExternalStoragePath());
+#endif
 	std::string ini_path(INI_PATH);
 	add_entries(sdl_options::s_option_entries);
 	strreplace(ini_path,"APP_NAME", emulator_info::get_appname_lower());
-	set_default_value(SDLOPTION_INIPATH, ini_path.c_str());
+	set_default_value(SDLOPTION_INIPATH, std::move(ini_path));
 }
 
 //============================================================
@@ -189,20 +186,28 @@ sdl_options::sdl_options()
 extern "C" DECLSPEC void SDLCALL SDL_SetModuleHandle(void *hInst);
 #endif
 
-// translated to utf8_main
-int main(int argc, char *argv[])
+int main(int argc, char** argv)
 {
+	std::vector<std::string> args = osd_get_command_line(argc, argv);
 	int res = 0;
 
 	// disable I/O buffering
-	setvbuf(stdout, (char *) NULL, _IONBF, 0);
-	setvbuf(stderr, (char *) NULL, _IONBF, 0);
+	setvbuf(stdout, (char *) nullptr, _IONBF, 0);
+	setvbuf(stderr, (char *) nullptr, _IONBF, 0);
+
+	// Initialize crash diagnostics
+	diagnostics_module::get_instance()->init_crash_diagnostics();
+
+#if defined(SDLMAME_ANDROID)
+	/* Enable standard application logging */
+	SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_VERBOSE);
+#endif
 
 	// FIXME: this should be done differently
 
 #ifdef SDLMAME_UNIX
 	sdl_entered_debugger = 0;
-#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_HAIKU)) && (!defined(SDLMAME_EMSCRIPTEN))
+#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_HAIKU)) && (!defined(SDLMAME_EMSCRIPTEN)) && (!defined(SDLMAME_ANDROID))
 	FcInit();
 #endif
 #endif
@@ -211,12 +216,11 @@ int main(int argc, char *argv[])
 		sdl_options options;
 		sdl_osd_interface osd(options);
 		osd.register_options();
-		cli_frontend frontend(options, osd);
-		res = frontend.execute(argc, argv);
+		res = emulator_info::start_frontend(options, osd, args);
 	}
 
 #ifdef SDLMAME_UNIX
-#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_HAIKU)) && (!defined(SDLMAME_EMSCRIPTEN))
+#if (!defined(SDLMAME_MACOSX)) && (!defined(SDLMAME_HAIKU)) && (!defined(SDLMAME_EMSCRIPTEN)) && (!defined(SDLMAME_ANDROID))
 	if (!sdl_entered_debugger)
 	{
 		FcFini();
@@ -227,19 +231,6 @@ int main(int argc, char *argv[])
 	exit(res);
 }
 
-
-
-//============================================================
-//  output_oslog
-//============================================================
-
-static void output_oslog(const running_machine &machine, const char *buffer)
-{
-	fputs(buffer, stderr);
-}
-
-
-
 //============================================================
 //  constructor
 //============================================================
@@ -247,7 +238,6 @@ static void output_oslog(const running_machine &machine, const char *buffer)
 sdl_osd_interface::sdl_osd_interface(sdl_options &options)
 : osd_common_t(options), m_options(options)
 {
-	m_watchdog = NULL;
 }
 
 
@@ -268,10 +258,7 @@ void sdl_osd_interface::osd_exit()
 {
 	osd_common_t::osd_exit();
 
-	if (!SDLMAME_INIT_IN_WORKER_THREAD)
-	{
-		SDL_QuitSubSystem(SDL_INIT_TIMER| SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER );
-	}
+	SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
 //============================================================
@@ -289,7 +276,7 @@ void sdl_osd_interface::osd_exit()
 
 static void defines_verbose(void)
 {
-	osd_printf_verbose("Build version:      %s\n", build_version);
+	osd_printf_verbose("Build version:      %s\n", emulator_info::get_build_version());
 	osd_printf_verbose("Build architecure:  ");
 	MACRO_VERBOSE(SDLMAME_ARCH);
 	osd_printf_verbose("\n");
@@ -389,16 +376,39 @@ static void osd_sdl_info(void)
 
 void sdl_osd_interface::video_register()
 {
-	video_options_add("soft", NULL);
-	video_options_add("opengl", NULL);
-	video_options_add("bgfx", NULL);
-	//video_options_add("auto", NULL); // making d3d video default one
+	video_options_add("soft", nullptr);
+	video_options_add("accel", nullptr);
+#if USE_OPENGL
+	video_options_add("opengl", nullptr);
+#endif
+	video_options_add("bgfx", nullptr);
+	//video_options_add("auto", nullptr); // making d3d video default one
 }
+
+
+//============================================================
+//  output_oslog
+//============================================================
+
+void sdl_osd_interface::output_oslog(const char *buffer)
+{
+	fputs(buffer, stderr);
+}
+
+
+//============================================================
+//  osd_setup_osd_specific_emu_options
+//============================================================
+
+void osd_setup_osd_specific_emu_options(emu_options &opts)
+{
+	opts.add_entries(osd_options::s_option_entries);
+}
+
 
 //============================================================
 //  init
 //============================================================
-
 
 void sdl_osd_interface::init(running_machine &machine)
 {
@@ -409,50 +419,60 @@ void sdl_osd_interface::init(running_machine &machine)
 
 	// determine if we are benchmarking, and adjust options appropriately
 	int bench = options().bench();
-	std::string error_string;
 	if (bench > 0)
 	{
-		options().set_value(OPTION_THROTTLE, false, OPTION_PRIORITY_MAXIMUM, error_string);
-		options().set_value(OSDOPTION_SOUND, "none", OPTION_PRIORITY_MAXIMUM, error_string);
-		options().set_value(OSDOPTION_VIDEO, "none", OPTION_PRIORITY_MAXIMUM, error_string);
-		options().set_value(OPTION_SECONDS_TO_RUN, bench, OPTION_PRIORITY_MAXIMUM, error_string);
-		assert(error_string.c_str()[0] == 0);
+		options().set_value(OPTION_SLEEP, false, OPTION_PRIORITY_MAXIMUM);
+		options().set_value(OPTION_THROTTLE, false, OPTION_PRIORITY_MAXIMUM);
+		options().set_value(OSDOPTION_SOUND, "none", OPTION_PRIORITY_MAXIMUM);
+		options().set_value(OSDOPTION_VIDEO, "none", OPTION_PRIORITY_MAXIMUM);
+		options().set_value(OPTION_SECONDS_TO_RUN, bench, OPTION_PRIORITY_MAXIMUM);
 	}
 
 	// Some driver options - must be before audio init!
 	stemp = options().audio_driver();
-	if (stemp != NULL && strcmp(stemp, OSDOPTVAL_AUTO) != 0)
+	if (stemp != nullptr && strcmp(stemp, OSDOPTVAL_AUTO) != 0)
 	{
 		osd_printf_verbose("Setting SDL audiodriver '%s' ...\n", stemp);
 		osd_setenv(SDLENV_AUDIODRIVER, stemp, 1);
 	}
 
 	stemp = options().video_driver();
-	if (stemp != NULL && strcmp(stemp, OSDOPTVAL_AUTO) != 0)
+	if (stemp != nullptr)
 	{
-		osd_printf_verbose("Setting SDL videodriver '%s' ...\n", stemp);
-		osd_setenv(SDLENV_VIDEODRIVER, stemp, 1);
+		if (strcmp(stemp, OSDOPTVAL_AUTO) != 0)
+		{
+			osd_printf_verbose("Setting SDL videodriver '%s' ...\n", stemp);
+			osd_setenv(SDLENV_VIDEODRIVER, stemp, 1);
+		}
+		else
+		{
+#if defined(__linux__)
+			// bgfx does not work with wayland
+			osd_printf_verbose("Setting SDL videodriver '%s' ...\n", "x11");
+			osd_setenv(SDLENV_VIDEODRIVER, "x11", 1);
+#endif
+		}
 	}
 
-		stemp = options().render_driver();
-		if (stemp != NULL)
+	stemp = options().render_driver();
+	if (stemp != nullptr)
+	{
+		if (strcmp(stemp, OSDOPTVAL_AUTO) != 0)
 		{
-			if (strcmp(stemp, OSDOPTVAL_AUTO) != 0)
-			{
-				osd_printf_verbose("Setting SDL renderdriver '%s' ...\n", stemp);
-				//osd_setenv(SDLENV_RENDERDRIVER, stemp, 1);
-				SDL_SetHint(SDL_HINT_RENDER_DRIVER, stemp);
-			}
-			else
-			{
-#if defined(SDLMAME_WIN32)
-				// OpenGL renderer has less issues with mode switching on windows
-				osd_printf_verbose("Setting SDL renderdriver '%s' ...\n", "opengl");
-				//osd_setenv(SDLENV_RENDERDRIVER, stemp, 1);
-				SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
-#endif
-			}
+			osd_printf_verbose("Setting SDL renderdriver '%s' ...\n", stemp);
+			//osd_setenv(SDLENV_RENDERDRIVER, stemp, 1);
+			SDL_SetHint(SDL_HINT_RENDER_DRIVER, stemp);
 		}
+		else
+		{
+#if defined(SDLMAME_WIN32)
+			// OpenGL renderer has less issues with mode switching on windows
+			osd_printf_verbose("Setting SDL renderdriver '%s' ...\n", "opengl");
+			//osd_setenv(SDLENV_RENDERDRIVER, stemp, 1);
+			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+#endif
+		}
+	}
 
 	/* Set the SDL environment variable for drivers wanting to load the
 	 * lib at startup.
@@ -461,7 +481,7 @@ void sdl_osd_interface::init(running_machine &machine)
 	/* FIXME: move lib loading code from drawogl.c here */
 
 	stemp = options().gl_lib();
-	if (stemp != NULL && strcmp(stemp, OSDOPTVAL_AUTO) != 0)
+	if (stemp != nullptr && strcmp(stemp, OSDOPTVAL_AUTO) != 0)
 	{
 		osd_setenv("SDL_VIDEO_GL_DRIVER", stemp, 1);
 		osd_printf_verbose("Setting SDL_VIDEO_GL_DRIVER = '%s' ...\n", stemp);
@@ -485,36 +505,24 @@ void sdl_osd_interface::init(running_machine &machine)
 
 	/* Initialize SDL */
 
-	if (!SDLMAME_INIT_IN_WORKER_THREAD)
+	if (SDL_InitSubSystem(SDL_INIT_VIDEO))
 	{
-#ifdef SDLMAME_EMSCRIPTEN
-		// timer brings in threads which are not supported in Emscripten
-		if (SDL_InitSubSystem(SDL_INIT_VIDEO| SDL_INIT_GAMECONTROLLER|SDL_INIT_NOPARACHUTE)) {
-#else
-		if (SDL_InitSubSystem(SDL_INIT_TIMER| SDL_INIT_VIDEO| SDL_INIT_GAMECONTROLLER|SDL_INIT_NOPARACHUTE)) {
-#endif
-			osd_printf_error("Could not initialize SDL %s\n", SDL_GetError());
-			exit(-1);
-		}
-		osd_sdl_info();
+		osd_printf_error("Could not initialize SDL %s\n", SDL_GetError());
+		exit(-1);
 	}
+	osd_sdl_info();
 
 	defines_verbose();
 
 	osd_common_t::init_subsystems();
 
 	if (options().oslog())
-		machine.add_logerror_callback(output_oslog);
-
-	/* now setup watchdog */
-
-	int watchdog_timeout = options().watchdog();
-
-	if (watchdog_timeout != 0)
 	{
-		m_watchdog = auto_alloc(machine, watchdog);
-		m_watchdog->setTimeout(watchdog_timeout);
+		using namespace std::placeholders;
+		machine.add_logerror_callback(std::bind(&sdl_osd_interface::output_oslog, this, _1));
 	}
+
+
 
 #ifdef SDLMAME_EMSCRIPTEN
 	SDL_EventState(SDL_TEXTINPUT, SDL_FALSE);
@@ -522,4 +530,3 @@ void sdl_osd_interface::init(running_machine &machine)
 	SDL_EventState(SDL_TEXTINPUT, SDL_TRUE);
 #endif
 }
-

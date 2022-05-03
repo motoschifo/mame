@@ -7,13 +7,15 @@
     NCR Decision Mate V format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_DMV_DSK_H
+#define MAME_FORMATS_DMV_DSK_H
 
-#ifndef DMV_DSK_H_
-#define DMV_DSK_H_
+#pragma once
 
 #include "upd765_dsk.h"
 
-class dmv_format : public upd765_format {
+class dmv_format : public upd765_format
+{
 public:
 	dmv_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_DMV_FORMAT;
+extern const dmv_format FLOPPY_DMV_FORMAT;
 
-#endif /* DMV_DSK_H_ */
+#endif // MAME_FORMATS_DMV_DSK_H

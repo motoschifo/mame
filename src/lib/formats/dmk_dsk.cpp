@@ -13,9 +13,9 @@ TODO:
 
 *********************************************************************/
 
-#include <assert.h>
-
 #include "dmk_dsk.h"
+
+#include "ioprocs.h"
 
 
 dmk_format::dmk_format()
@@ -41,14 +41,16 @@ const char *dmk_format::extensions() const
 }
 
 
-int dmk_format::identify(io_generic *io, UINT32 form_factor)
+int dmk_format::identify(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants) const
 {
+	uint64_t size;
+	if (io.length(size))
+		return 0;
+
 	const int header_size = 16;
-	UINT8 header[header_size];
-
-	UINT64 size = io_generic_size(io);
-
-	io_generic_read(io, header, 0, header_size);
+	uint8_t header[header_size];
+	size_t actual;
+	io.read_at(0, header, header_size, actual);
 
 	int tracks = header[1];
 	int track_size = ( header[3] << 8 ) | header[2];
@@ -74,19 +76,20 @@ int dmk_format::identify(io_generic *io, UINT32 form_factor)
 
 	if (size == header_size + heads * tracks * track_size)
 	{
-		return 70;
+		return FIFID_STRUCT|FIFID_SIZE;
 	}
 
 	return 0;
 }
 
 
-bool dmk_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
+bool dmk_format::load(util::random_read &io, uint32_t form_factor, const std::vector<uint32_t> &variants, floppy_image *image) const
 {
-	const int header_size = 16;
-	UINT8 header[header_size];
+	size_t actual;
 
-	io_generic_read(io, header, 0, header_size);
+	const int header_size = 16;
+	uint8_t header[header_size];
+	io.read_at(0, header, header_size, actual);
 
 	const int tracks = header[1];
 	const int track_size = ( header[3] << 8 ) | header[2];
@@ -121,14 +124,14 @@ bool dmk_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	{
 		for (int head = 0; head < heads; head++)
 		{
-			std::vector<UINT8> track_data(track_size);
-			std::vector<UINT32> raw_track_data;
+			std::vector<uint8_t> track_data(track_size);
+			std::vector<uint32_t> raw_track_data;
 			int iam_location = -1;
 			int idam_location[64];
 			int dam_location[64];
 
 			// Read track
-			io_generic_read(io, &track_data[0], header_size + ( heads * track + head ) * track_size, track_size);
+			io.read_at(header_size + (heads * track + head) * track_size, &track_data[0], track_size, actual);
 
 			for (int i = 0; i < 64; i++)
 			{
@@ -137,8 +140,8 @@ bool dmk_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 			}
 
 			// Find IDAM locations
-			UINT16 track_header_offset = 0;
-			UINT16 track_offset = ( ( track_data[track_header_offset + 1] << 8 ) | track_data[track_header_offset] ) & 0x3fff;
+			uint16_t track_header_offset = 0;
+			uint16_t track_offset = ( ( track_data[track_header_offset + 1] << 8 ) | track_data[track_header_offset] ) & 0x3fff;
 			track_header_offset += 2;
 
 			while ( track_offset != 0 && track_offset >= 0x83 && track_offset < track_size && track_header_offset < 0x80 )
@@ -212,17 +215,10 @@ bool dmk_format::load(io_generic *io, UINT32 form_factor, floppy_image *image)
 	return true;
 }
 
-
-bool dmk_format::save(io_generic *io, floppy_image *image)
-{
-	return false;
-}
-
-
 bool dmk_format::supports_save() const
 {
 	return false;
 }
 
 
-const floppy_format_type FLOPPY_DMK_FORMAT = &floppy_image_format_creator<dmk_format>;
+const dmk_format FLOPPY_DMK_FORMAT;

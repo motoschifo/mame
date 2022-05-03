@@ -6,60 +6,60 @@
 
         Unibus models
         ==================
-        PDP-11/20 and PDP-11/15 ? The original, non-microprogrammed processor;
+        PDP-11/20 and PDP-11/15 - The original, non-microprogrammed processor;
                 designed by Jim O'Loughlin. Floating point was supported by
                 peripheral options using various data formats.
-        PDP-11/35 and PDP-11/40 ? A microprogrammed successor to the PDP-11/20;
+        PDP-11/35 and PDP-11/40 - A microprogrammed successor to the PDP-11/20;
                 the design team was led by Jim O'Loughlin.
         PDP-11/45, PDP-11/50, and PDP-11/55 ? A much faster microprogrammed processor
                 that could use up to 256 kB of semiconductor memory instead of or in
                 addition to core memory. First model to support an optional FP11
                 floating-point coprocessor, which established the format used in
                 later models.
-        PDP-11/70 ? The 11/45 architecture expanded to allow 4 MB of physical memory
+        PDP-11/70 - The 11/45 architecture expanded to allow 4 MB of physical memory
                 segregated onto a private memory bus, 2 kB of cache memory, and much
                 faster I/O devices connected via the Massbus.[9]
-        PDP-11/05 and PDP-11/10 ? A cost-reduced successor to the PDP-11/20.
-        PDP-11/34 and PDP-11/04 ? Cost-reduced follow-on products to the 11/35
+        PDP-11/05 and PDP-11/10 - A cost-reduced successor to the PDP-11/20.
+        PDP-11/34 and PDP-11/04 - Cost-reduced follow-on products to the 11/35
                 and 11/05; the PDP-11/34 concept was created by Bob Armstrong.
                 The 11/34 supported up to 256 kB of Unibus memory. The PDP-11/34a
                 supported a fast floating-point option, and the 11/34c supported a
                 cache memory option.
-        PDP-11/60 ? A PDP-11 with user-writable microcontrol store; this was
+        PDP-11/60 - A PDP-11 with user-writable microcontrol store; this was
                 designed by another team led by Jim O'Loughlin.
-        PDP-11/44 ? Replacement for the 11/45 and 11/70 that supported optional cache
+        PDP-11/44 - Replacement for the 11/45 and 11/70 that supported optional cache
                 memory and floating-point processor, and included a sophisticated serial
                 console interface and support for 4 MB of physical memory. The design
                 team was managed by John Sofio.
-        PDP-11/24 ? First VLSI PDP-11 for Unibus, using the "Fonz-11" (F11) chip set
+        PDP-11/24 - First VLSI PDP-11 for Unibus, using the "Fonz-11" (F11) chip set
                 with a Unibus adapter.
-        PDP-11/84 ? Using the VLSI "Jaws-11" (J11) chip set with a Unibus adapter.
-        PDP-11/94 ? J11-based, faster than 11/84.
+        PDP-11/84 - Using the VLSI "Jaws-11" (J11) chip set with a Unibus adapter.
+        PDP-11/94 - J11-based, faster than 11/84.
 
         Q-bus models
         ==============
-        PDP-11/03 (also known as the LSI-11/03) ? The first LSI PDP-11, this system
+        PDP-11/03 (also known as the LSI-11/03) - The first LSI PDP-11, this system
                 used a chipset from Western Digital and supported 60 kB of memory.
-        PDP-11/23 ? Second generation of LSI (F-11). Early units supported
+        PDP-11/23 - Second generation of LSI (F-11). Early units supported
                 only 248 kB of memory.
-        PDP-11/23+/MicroPDP-11/23 ? Improved 11/23 with more functions on the
+        PDP-11/23+/MicroPDP-11/23 - Improved 11/23 with more functions on the
                 (larger) processor card.
-        MicroPDP-11/73 ? The third generation LSI-11, this system used the
+        MicroPDP-11/73 - The third generation LSI-11, this system used the
                 faster "Jaws-11" (J-11) chip set and supported up to 4 MB of memory.
-        MicroPDP-11/53 ? Slower 11/73 with on-board memory.
-        MicroPDP-11/83 ? Faster 11/73 with PMI (private memory interconnect).
-        MicroPDP-11/93 ? Faster 11/83; final DEC Q-Bus PDP-11 model.
+        MicroPDP-11/53 - Slower 11/73 with on-board memory.
+        MicroPDP-11/83 - Faster 11/73 with PMI (private memory interconnect).
+        MicroPDP-11/93 - Faster 11/83; final DEC Q-Bus PDP-11 model.
         KXJ11 - QBUS card (M7616) with PDP-11 based peripheral processor and
                 DMA controller. Based on a J11 CPU equipped with 512 kB of RAM,
                 64 kB of ROM, and parallel and serial interfaces.
-        Mentec M100 ? Mentec redesign of the 11/93, with J-11 chipset at 19.66 MHz,
+        Mentec M100 - Mentec redesign of the 11/93, with J-11 chipset at 19.66 MHz,
                 four on-board serial ports, 1-4 MB of on-board memory, and optional FPU.
-        Mentec M11 ? Processor upgrade board; microcode implementation of PDP-11
+        Mentec M11 - Processor upgrade board; microcode implementation of PDP-11
                 instruction set by Mentec, using the TI 8832 ALU and TI 8818
                 microsequencer from Texas Instruments.
-        Mentec M1 ? Processor upgrade board; microcode implementation of
+        Mentec M1 - Processor upgrade board; microcode implementation of
                 PDP-11 instruction set by Mentec, using Atmel 0.35 ?m ASIC.[10]
-        Quickware QED-993 ? High performance PDP-11/93 processor upgrade board.
+        Quickware QED-993 - High performance PDP-11/93 processor upgrade board.
         DECserver 500 and 550 LAT terminal servers DSRVS-BA using the KDJ11-SB chipset
 
         All PDP-11's execept the first one (11/15 and 11/20) are microprogrammed.
@@ -89,88 +89,76 @@
 ****************************************************************************/
 
 #include "emu.h"
+#include "bus/qbus/qbus.h"
+#include "bus/rs232/rs232.h"
 #include "cpu/t11/t11.h"
-#include "machine/terminal.h"
+#include "cpu/i86/i186.h"
+#include "machine/dl11.h"
 #include "machine/rx01.h"
 
-#define TERMINAL_TAG "terminal"
+
+namespace {
 
 class pdp11_state : public driver_device
 {
 public:
 	pdp11_state(const machine_config &mconfig, device_type type, const char *tag)
-		: driver_device(mconfig, type, tag),
-		m_maincpu(*this, "maincpu"),
-		m_terminal(*this, TERMINAL_TAG)
-	{
-	}
+		: driver_device(mconfig, type, tag)
+		, m_maincpu(*this, "maincpu")
+		, m_dl11(*this, "dl11")
+		, m_rs232(*this, "rs232")
+		, m_qbus(*this, "qbus")
+	{ }
 
-	required_device<cpu_device> m_maincpu;
-	required_device<generic_terminal_device> m_terminal;
-	DECLARE_READ16_MEMBER( teletype_ctrl_r );
-	DECLARE_WRITE16_MEMBER( teletype_ctrl_w );
-	DECLARE_WRITE8_MEMBER( kbd_put );
-	UINT8 m_teletype_data;
-	UINT16 m_teletype_status;
+	void pdp11ub2(machine_config &config);
+	void pdp11(machine_config &config);
+	void pdp11qb(machine_config &config);
+	void sms1000(machine_config &config);
+
+protected:
+	virtual void machine_start() override;
 	virtual void machine_reset() override;
+
+private:
+	required_device<t11_device> m_maincpu;
+	required_device<dl11_device> m_dl11;
+	required_device<rs232_port_device> m_rs232;
+	required_device<qbus_device> m_qbus;
 	DECLARE_MACHINE_RESET(pdp11ub2);
 	DECLARE_MACHINE_RESET(pdp11qb);
-	void load9312prom(UINT8 *desc, UINT8 *src, int size);
+	void load9312prom(uint8_t *desc, uint8_t *src, int size);
+	void pdp11_mem(address_map &map);
+	void pdp11qb_mem(address_map &map);
+	void sms1000_mem_188(address_map &map);
 };
 
-READ16_MEMBER(pdp11_state::teletype_ctrl_r)
+void pdp11_state::pdp11_mem(address_map &map)
 {
-	UINT16 res = 0;
+	map.unmap_value_high();
+	map(0x0000, 0xdfff).ram();  // RAM
+	map(0xea00, 0xfeff).rom();
+	map(0xff70, 0xff77).rw(m_dl11, FUNC(dl11_device::read), FUNC(dl11_device::write));
 
-	switch(offset)
-	{
-		/*
-		    keyboard
-		    ---- x--- ---- ---- busy bit
-		    ---- ---- x--- ---- ready bit (set on character receive, clear on buffer read)
-		    ---- ---- -x-- ---- irq enable
-		    ---- ---- ---- ---x reader enable (?)
-		*/
-		case 0: res = m_teletype_status; break; // reader status register (tks)
-		case 1: m_teletype_status &= ~0x80; res = m_teletype_data; break;// reader buffer register (tkb)
-		/*
-		    printer
-		    ---- ---- x--- ---- ready bit
-		    ---- ---- -x-- ---- irq enable
-		    ---- ---- ---- -x-- maintenance
-		*/
-		case 2: res = 0x80; break; // punch status register (tps)
-		case 3: res = 0; break; // punch buffer register (tpb)
-	}
-
-	return res;
+	map(0xfe78, 0xfe7b).w("rx01", FUNC(rx01_device::write));
 }
 
-WRITE16_MEMBER(pdp11_state::teletype_ctrl_w)
+void pdp11_state::pdp11qb_mem(address_map &map)
 {
-	switch(offset)
-	{
-		case 3:
-			m_terminal->write(space, 0, data);
-			break;
-	}
+	map.unmap_value_high();
+	map(0x0000, 0xe9ff).ram();  // RAM
+	map(0xea00, 0xefff).rom();
+	map(0xf000, 0xffff).ram();
 }
 
-static ADDRESS_MAP_START(pdp11_mem, AS_PROGRAM, 16, pdp11_state)
-	ADDRESS_MAP_UNMAP_HIGH
-	AM_RANGE( 0x0000, 0xdfff ) AM_RAM  // RAM
-	AM_RANGE( 0xea00, 0xfeff ) AM_ROM
-	AM_RANGE( 0xff70, 0xff77 ) AM_READWRITE(teletype_ctrl_r,teletype_ctrl_w)
-
-	AM_RANGE( 0xfe78, 0xfe7b ) AM_DEVREADWRITE("rx01", rx01_device, read, write)
-ADDRESS_MAP_END
-
-static ADDRESS_MAP_START(pdp11qb_mem, AS_PROGRAM, 16, pdp11_state)
-	ADDRESS_MAP_UNMAP_HIGH
-	AM_RANGE( 0x0000, 0xe9ff ) AM_RAM  // RAM
-	AM_RANGE( 0xea00, 0xefff ) AM_ROM
-	AM_RANGE( 0xf000, 0xffff ) AM_RAM
-ADDRESS_MAP_END
+void pdp11_state::sms1000_mem_188(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x00000, 0x027ff).ram();
+	map(0x03000, 0x037ff).rom().region("prom", 0);
+	map(0x40000, 0x47fff).rom().region("subcpu", 0);
+	map(0x50000, 0x5ffff).nopr();
+	map(0xf8000, 0xfffff).rom().region("subcpu", 0);
+}
 
 #define M9312_PORT_CONFSETTING \
 PORT_CONFSETTING ( 0x00, "'DL' BOOT prom for RL11 controller") \
@@ -258,45 +246,48 @@ static INPUT_PORTS_START( pdp11 )
 	M9312_PORT_CONFSETTING
 INPUT_PORTS_END
 
+void pdp11_state::machine_start()
+{
+}
 
 void pdp11_state::machine_reset()
 {
 	// Load M9301-YA
-	UINT8* user1 = memregion("user1")->base();
-	UINT8* maincpu = memregion("maincpu")->base();
+	uint8_t* user1 = memregion("user1")->base();
+	uint8_t* maincpu = memregion("maincpu")->base();
 	int i;
 
 	for(i=0;i<0x100;i++) {
-		UINT8 nib1 = user1[i+0x000] ^ 0x00;
-		UINT8 nib2 = user1[i+0x200] ^ 0x01;
-		UINT8 nib3 = user1[i+0x400] ^ 0x0f;
-		UINT8 nib4 = user1[i+0x600] ^ 0x0e;
+		uint8_t nib1 = user1[i+0x000] ^ 0x00;
+		uint8_t nib2 = user1[i+0x200] ^ 0x01;
+		uint8_t nib3 = user1[i+0x400] ^ 0x0f;
+		uint8_t nib4 = user1[i+0x600] ^ 0x0e;
 
 		maincpu[0xea00 + i*2 + 1] = (nib1 << 4) + nib2;
 		maincpu[0xea00 + i*2 + 0] = (nib3 << 4) + nib4;
 	}
 	for(i=0x100;i<0x200;i++) {
-		UINT8 nib1 = user1[i+0x000] ^ 0x00;
-		UINT8 nib2 = user1[i+0x200] ^ 0x01;
-		UINT8 nib3 = user1[i+0x400] ^ 0x0f;
-		UINT8 nib4 = user1[i+0x600] ^ 0x0e;
+		uint8_t nib1 = user1[i+0x000] ^ 0x00;
+		uint8_t nib2 = user1[i+0x200] ^ 0x01;
+		uint8_t nib3 = user1[i+0x400] ^ 0x0f;
+		uint8_t nib4 = user1[i+0x600] ^ 0x0e;
 
 		maincpu[0xf600 + (i-0x100)*2 + 1] = (nib1 << 4) + nib2;
 		maincpu[0xf600 + (i-0x100)*2 + 0] = (nib3 << 4) + nib4;
 	}
 }
 
-void pdp11_state::load9312prom(UINT8 *desc, UINT8 *src, int size)
+void pdp11_state::load9312prom(uint8_t *desc, uint8_t *src, int size)
 {
 	//   3   2   1   8
 	//   7   6   5   4
 	// ~11 ~10   9   0
 	//  15  14  13 ~12
 	for(int i=0;i<size;i++) {
-		UINT8 nib1 = src[i*4+0];
-		UINT8 nib2 = src[i*4+1];
-		UINT8 nib3 = src[i*4+2];
-		UINT8 nib4 = src[i*4+3];
+		uint8_t nib1 = src[i*4+0];
+		uint8_t nib2 = src[i*4+1];
+		uint8_t nib3 = src[i*4+2];
+		uint8_t nib4 = src[i*4+3];
 
 		desc[i*2 + 0] = (nib2 << 4) + ((nib1 & 0x0e) | (nib3 & 1));
 		desc[i*2 + 1] = ((nib4 ^ 0x01)<<4) + ((nib1 & 0x01) | ((nib3 ^ 0x0c) & 0x0e));
@@ -306,16 +297,16 @@ void pdp11_state::load9312prom(UINT8 *desc, UINT8 *src, int size)
 MACHINE_RESET_MEMBER(pdp11_state,pdp11ub2)
 {
 	// Load M9312
-	UINT8* user1 = memregion("consproms")->base() + ioport("CONSPROM")->read() * 0x0400;
-	UINT8* maincpu = memregion("maincpu")->base();
+	uint8_t* user1 = memregion("consproms")->base() + ioport("CONSPROM")->read() * 0x0400;
+	uint8_t* maincpu = memregion("maincpu")->base();
 
 	//0165000
 	load9312prom(maincpu + 0165000,user1,0x100);
 
-	UINT8 s1 = ioport("S1")->read();
+	uint8_t s1 = ioport("S1")->read();
 
 	if (s1 & 0x02) { // if boot enabled
-		UINT16 addr = 0173000;
+		uint16_t addr = 0173000;
 		if (s1 & 1) {
 			addr = 0165000;
 		}
@@ -340,37 +331,58 @@ MACHINE_RESET_MEMBER(pdp11_state,pdp11qb)
 }
 
 
-WRITE8_MEMBER( pdp11_state::kbd_put )
+void pdp11_state::pdp11(machine_config &config)
 {
-	m_teletype_data = data;
-	m_teletype_status |= 0x80;
+	/* basic machine hardware */
+	T11(config, m_maincpu, 4'000'000); // Need proper CPU here
+	m_maincpu->set_initial_mode(6 << 13);
+	m_maincpu->set_addrmap(AS_PROGRAM, &pdp11_state::pdp11_mem);
+
+	DL11(config, m_dl11, XTAL(4'608'000));
+	m_dl11->set_rxc(9600);
+	m_dl11->set_txc(9600);
+	m_dl11->set_rxvec(060);
+	m_dl11->set_txvec(064);
+	m_dl11->txd_wr_callback().set(m_rs232, FUNC(rs232_port_device::write_txd));
+// future
+//  m_dl11->txrdy_wr_callback().set_inputline(m_maincpu, T11_IRQ0);
+//  m_dl11->rxrdy_wr_callback().set_inputline(m_maincpu, T11_IRQ0);
+
+	RS232_PORT(config, m_rs232, default_rs232_devices, "terminal");
+	m_rs232->rxd_handler().set(m_dl11, FUNC(dl11_device::rx_w));
+
+	RX01(config, "rx01", 0);
+	QBUS(config, m_qbus, 0);
+	m_qbus->set_space(m_maincpu, AS_PROGRAM);
+	m_qbus->birq4().set_inputline(m_maincpu, T11_IRQ0);
+	QBUS_SLOT(config, "qbus" ":1", qbus_cards, "pc11");
+	QBUS_SLOT(config, "qbus" ":2", qbus_cards, nullptr);
+	QBUS_SLOT(config, "qbus" ":3", qbus_cards, nullptr);
+	QBUS_SLOT(config, "qbus" ":4", qbus_cards, nullptr);
 }
 
-static MACHINE_CONFIG_START( pdp11, pdp11_state )
-	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu",T11, XTAL_4MHz) // Need proper CPU here
-	MCFG_T11_INITIAL_MODE(6 << 13)
-	MCFG_CPU_PROGRAM_MAP(pdp11_mem)
-
-
-	/* video hardware */
-	MCFG_DEVICE_ADD(TERMINAL_TAG, GENERIC_TERMINAL, 0)
-	MCFG_GENERIC_TERMINAL_KEYBOARD_CB(WRITE8(pdp11_state, kbd_put))
-
-	MCFG_RX01_ADD("rx01")
-MACHINE_CONFIG_END
-
-static MACHINE_CONFIG_DERIVED( pdp11ub2, pdp11 )
+void pdp11_state::pdp11ub2(machine_config &config)
+{
+	pdp11(config);
 	MCFG_MACHINE_RESET_OVERRIDE(pdp11_state,pdp11ub2)
-MACHINE_CONFIG_END
+}
 
-static MACHINE_CONFIG_DERIVED( pdp11qb, pdp11 )
+void pdp11_state::pdp11qb(machine_config &config)
+{
+	pdp11(config); // FIXME: MXV11-B requires a F-11 or J-11 CPU
 	MCFG_MACHINE_RESET_OVERRIDE(pdp11_state,pdp11qb)
 
-	MCFG_CPU_MODIFY("maincpu")
-	MCFG_T11_INITIAL_MODE(0 << 13)
-	MCFG_CPU_PROGRAM_MAP(pdp11qb_mem)
-MACHINE_CONFIG_END
+	m_maincpu->set_initial_mode(0 << 13);
+	m_maincpu->set_addrmap(AS_PROGRAM, &pdp11_state::pdp11qb_mem);
+}
+
+void pdp11_state::sms1000(machine_config &config)
+{
+	pdp11qb(config);
+
+	i80188_cpu_device &subcpu(I80188(config, "subcpu", 12.288_MHz_XTAL));
+	subcpu.set_addrmap(AS_PROGRAM, &pdp11_state::sms1000_mem_188);
+}
 
 /* ROM definition */
 ROM_START( pdp11ub )
@@ -432,12 +444,17 @@ ROM_END
 
 ROM_START( sms1000 )
 	ROM_REGION( 0x10000, "maincpu", ROMREGION_ERASEFF )
-	ROM_REGION( 0x20000, "user1", ROMREGION_ERASEFF )
-	ROM_LOAD( "21251000u",    0x00000, 0x008000, CRC(68db0afc) SHA1(577124bc64f6ddc9771e11b483120a175bfcf8c5) )
 	ROM_LOAD( "21251001u",    0x00000, 0x010000, CRC(eec3ccbb) SHA1(69eedb2c3bffe0a2988b1c066df1fea195618087) )
+
+	ROM_REGION( 0x8000, "subcpu", 0 )
+	ROM_LOAD( "21251000u",    0x00000, 0x008000, CRC(68db0afc) SHA1(577124bc64f6ddc9771e11b483120a175bfcf8c5) )
+
+	ROM_REGION( 0x800, "prom", 0 )
 	ROM_LOAD( "21251002u",    0x00000, 0x000800, CRC(66ca0eaf) SHA1(8141f64f81d9954169bcff6c79fd9f85e91f98e0) )
+
+	ROM_REGION( 0x20000, "user1", ROMREGION_ERASEFF )
 	ROM_LOAD( "2123001",      0x00000, 0x000800, CRC(7eb10e9b) SHA1(521ce8b8a79075c30ad92d810141c725d26fc50e) )
-	ROM_LOAD( "2115001.jed",  0x00000, 0x000b19, CRC(02170f78) SHA1(afe50d165b39bff1cadae4290344341376729fda) )
+	ROM_LOAD( "2115001.jed",  0x01000, 0x000b19, CRC(02170f78) SHA1(afe50d165b39bff1cadae4290344341376729fda) )
 	// no idea how large these undumped proms are
 	ROM_LOAD( "2096001",      0x1f000, 0x000100, NO_DUMP )
 	ROM_LOAD( "2097002",      0x1f000, 0x000100, NO_DUMP )
@@ -461,10 +478,13 @@ ROM_START( sms1000 )
 	ROM_LOAD( "2127001b",     0x1f000, 0x000100, NO_DUMP ) // has 3 of these
 ROM_END
 
+} // Anonymous namespace
+
+
 /* Driver */
 
-/*    YEAR  NAME    PARENT  COMPAT   MACHINE    INPUT    INIT    COMPANY   FULLNAME       FLAGS */
-COMP( ????, pdp11ub,  0,       0,   pdp11,    pdp11, driver_device,  0,   "Digital Equipment Corporation",   "PDP-11 [Unibus](M9301-YA)",       MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
-COMP( ????, pdp11ub2, pdp11ub, 0,   pdp11ub2, pdp11, driver_device,  0,   "Digital Equipment Corporation",   "PDP-11 [Unibus](M9312)",      MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
-COMP( ????, pdp11qb,  pdp11ub, 0,   pdp11qb,  pdp11, driver_device,  0,   "Digital Equipment Corporation",   "PDP-11 [Q-BUS] (M7195 - MXV11)",      MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
-COMP( 1987, sms1000,  pdp11ub, 0,   pdp11qb,  pdp11, driver_device,  0,   "Scientific Micro Systems",   "SMS-1000",      MACHINE_IS_SKELETON )
+/*    YEAR  NAME      PARENT   COMPAT  MACHINE   INPUT  CLASS        INIT        COMPANY                          FULLNAME                            FLAGS */
+COMP( 197?, pdp11ub,  0,       0,      pdp11,    pdp11, pdp11_state, empty_init, "Digital Equipment Corporation", "PDP-11 [Unibus](M9301-YA)",        MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
+COMP( 197?, pdp11ub2, pdp11ub, 0,      pdp11ub2, pdp11, pdp11_state, empty_init, "Digital Equipment Corporation", "PDP-11 [Unibus](M9312)",           MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
+COMP( 198?, pdp11qb,  pdp11ub, 0,      pdp11qb,  pdp11, pdp11_state, empty_init, "Digital Equipment Corporation", "PDP-11 [Q-BUS] (M7195 - MXV11-B)", MACHINE_NOT_WORKING | MACHINE_NO_SOUND)
+COMP( 1987, sms1000,  0,       0,      sms1000,  pdp11, pdp11_state, empty_init, "Scientific Micro Systems",      "SMS-1000",                         MACHINE_IS_SKELETON )

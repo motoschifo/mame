@@ -1,8 +1,8 @@
 // license:BSD-3-Clause
-// copyright-holders:Aaron Giles
+// copyright-holders:Andrew Gardner, Vas Crabb
 /*********************************************************************
 
-    dvwpoints.c
+    dvwpoints.cpp
 
     Watchpoint debugger view.
 
@@ -11,102 +11,89 @@
 #include "emu.h"
 #include "dvwpoints.h"
 
+#include "points.h"
+
+#include <algorithm>
 #include <iomanip>
 
 
 
-static int cIndexAscending(const void* a, const void* b)
+static bool cIndexAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return left->index() - right->index();
+	return a->index() < b->index();
 }
 
-static int cIndexDescending(const void* a, const void* b)
+static bool cIndexDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cIndexAscending(b, a);
 }
 
-static int cEnabledAscending(const void* a, const void* b)
+static bool cEnabledAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return (left->enabled() ? 1 : 0) - (right->enabled() ? 1 : 0);
+	return !a->enabled() && b->enabled();
 }
 
-static int cEnabledDescending(const void* a, const void* b)
+static bool cEnabledDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cEnabledAscending(b, a);
 }
 
-static int cCpuAscending(const void* a, const void* b)
+static bool cCpuAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return strcmp(left->debugInterface()->device().tag(), right->debugInterface()->device().tag());
+	return strcmp(a->debugInterface()->device().tag(), b->debugInterface()->device().tag()) < 0;
 }
 
-static int cCpuDescending(const void* a, const void* b)
+static bool cCpuDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cCpuAscending(b, a);
 }
 
-static int cSpaceAscending(const void* a, const void* b)
+static bool cSpaceAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return strcmp(left->space().name(), right->space().name());
+	return strcmp(a->space().name(), b->space().name()) < 0;
 }
 
-static int cSpaceDescending(const void* a, const void* b)
+static bool cSpaceDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cSpaceAscending(b, a);
 }
 
-static int cAddressAscending(const void* a, const void* b)
+static bool cAddressAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return (left->address() > right->address()) ? 1 : (left->address() < right->address()) ? -1 : 0;
+	return a->address() < b->address();
 }
 
-static int cAddressDescending(const void* a, const void* b)
+static bool cAddressDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cAddressAscending(b, a);
 }
 
-static int cTypeAscending(const void* a, const void* b)
+static bool cTypeAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return left->type() - right->type();
+	return int(a->type()) < int(b->type());
 }
 
-static int cTypeDescending(const void* a, const void* b)
+static bool cTypeDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cTypeAscending(b, a);
 }
 
-static int cConditionAscending(const void* a, const void* b)
+static bool cConditionAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return strcmp(left->condition(), right->condition());
+	return strcmp(a->condition(), b->condition()) < 0;
 }
 
-static int cConditionDescending(const void* a, const void* b)
+static bool cConditionDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cConditionAscending(b, a);
 }
 
-static int cActionAscending(const void* a, const void* b)
+static bool cActionAscending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
-	const device_debug::watchpoint* left = *(device_debug::watchpoint**)a;
-	const device_debug::watchpoint* right = *(device_debug::watchpoint**)b;
-	return strcmp(left->action(), right->action());
+	return a->action() < b->action();
 }
 
-static int cActionDescending(const void* a, const void* b)
+static bool cActionDescending(const debug_watchpoint *a, const debug_watchpoint *b)
 {
 	return cActionAscending(b, a);
 }
@@ -128,7 +115,7 @@ debug_view_watchpoints::debug_view_watchpoints(running_machine &machine, debug_v
 {
 	// fail if no available sources
 	enumerate_sources();
-	if (m_source_list.count() == 0)
+	if (m_source_list.empty())
 		throw std::bad_alloc();
 }
 
@@ -150,19 +137,20 @@ debug_view_watchpoints::~debug_view_watchpoints()
 void debug_view_watchpoints::enumerate_sources()
 {
 	// start with an empty list
-	m_source_list.reset();
+	m_source_list.clear();
 
 	// iterate over devices with disassembly interfaces
-	disasm_interface_iterator iter(machine().root_device());
-	for (device_disasm_interface *dasm = iter.first(); dasm != nullptr; dasm = iter.next())
+	for (device_disasm_interface &dasm : disasm_interface_enumerator(machine().root_device()))
 	{
-		std::string name;
-		name = string_format("%s '%s'", dasm->device().name(), dasm->device().tag());
-		m_source_list.append(*global_alloc(debug_view_source(name.c_str(), &dasm->device())));
+		m_source_list.emplace_back(
+				std::make_unique<debug_view_source>(
+					util::string_format("%s '%s'", dasm.device().name(), dasm.device().tag()),
+					&dasm.device()));
 	}
 
 	// reset the source to a known good entry
-	set_source(*m_source_list.first());
+	if (!m_source_list.empty())
+		set_source(*m_source_list[0]);
 }
 
 
@@ -224,20 +212,20 @@ void debug_view_watchpoints::pad_ostream_to_length(std::ostream& str, int len)
 void debug_view_watchpoints::gather_watchpoints()
 {
 	m_buffer.resize(0);
-	for (const debug_view_source *source = m_source_list.first(); source != nullptr; source = source->next())
+	for (auto &source : m_source_list)
 	{
 		// Collect
 		device_debug &debugInterface = *source->device()->debug();
-		for (address_spacenum spacenum = AS_0; spacenum < ADDRESS_SPACES; ++spacenum)
+		for (int spacenum = 0; spacenum < debugInterface.watchpoint_space_count(); ++spacenum)
 		{
-			for (device_debug::watchpoint *wp = debugInterface.watchpoint_first(spacenum); wp != nullptr; wp = wp->next())
-				m_buffer.push_back(wp);
+			for (const auto &wp : debugInterface.watchpoint_vector(spacenum))
+				m_buffer.push_back(wp.get());
 		}
 	}
 
 	// And now for the sort
 	if (!m_buffer.empty())
-		qsort(&m_buffer[0], m_buffer.size(), sizeof(device_debug::watchpoint *), m_sortType);
+		std::stable_sort(m_buffer.begin(), m_buffer.end(), m_sortType);
 }
 
 
@@ -252,20 +240,21 @@ void debug_view_watchpoints::view_update()
 	gather_watchpoints();
 
 	// Set the view region so the scroll bars update
-	m_total.x = tableBreaks[ARRAY_LENGTH(tableBreaks) - 1];
+	m_total.x = tableBreaks[std::size(tableBreaks) - 1];
 	m_total.y = m_buffer.size() + 1;
 	if (m_total.y < 10)
 		m_total.y = 10;
 
 	// Draw
-	debug_view_char		*dest = &m_viewdata[0];
-	util::ovectorstream	linebuf;
-	linebuf.reserve(ARRAY_LENGTH(tableBreaks) - 1);
+	debug_view_char     *dest = &m_viewdata[0];
+	util::ovectorstream linebuf;
+	linebuf.reserve(std::size(tableBreaks) - 1);
 
 	// Header
 	if (m_visible.y > 0)
 	{
 		linebuf.clear();
+		linebuf.rdbuf()->clear();
 		linebuf << "ID";
 		if (m_sortType == &cIndexAscending) linebuf.put('\\');
 		else if (m_sortType == &cIndexDescending) linebuf.put('/');
@@ -300,7 +289,7 @@ void debug_view_watchpoints::view_update()
 		pad_ostream_to_length(linebuf, tableBreaks[7]);
 
 		auto const &text(linebuf.vec());
-		for (UINT32 i = m_topleft.x; i < (m_topleft.x + m_visible.x); i++, dest++)
+		for (u32 i = m_topleft.x; i < (m_topleft.x + m_visible.x); i++, dest++)
 		{
 			dest->byte = (i < text.size()) ? text[i] : ' ';
 			dest->attrib = DCA_ANCILLARY;
@@ -314,9 +303,10 @@ void debug_view_watchpoints::view_update()
 		if ((wpi < m_buffer.size()) && wpi >= 0)
 		{
 			static char const *const types[] = { "unkn ", "read ", "write", "r/w  " };
-			device_debug::watchpoint *const wp = m_buffer[wpi];
+			debug_watchpoint *const wp = m_buffer[wpi];
 
 			linebuf.clear();
+			linebuf.rdbuf()->clear();
 			util::stream_format(linebuf, "%2X", wp->index());
 			pad_ostream_to_length(linebuf, tableBreaks[0]);
 			linebuf.put(wp->enabled() ? 'X' : 'O');
@@ -325,11 +315,11 @@ void debug_view_watchpoints::view_update()
 			pad_ostream_to_length(linebuf, tableBreaks[2]);
 			linebuf << wp->space().name();
 			pad_ostream_to_length(linebuf, tableBreaks[3]);
-			util::stream_format(linebuf, "%0*X", wp->space().addrchars(), wp->space().byte_to_address(wp->address()));
+			util::stream_format(linebuf, "%0*X", wp->space().addrchars(), wp->address());
 			linebuf.put('-');
-			util::stream_format(linebuf, "%0*X", wp->space().addrchars(), wp->space().byte_to_address_end(wp->address() + wp->length()) - 1);
+			util::stream_format(linebuf, "%0*X", wp->space().addrchars(), wp->address() + wp->length() - 1);
 			pad_ostream_to_length(linebuf, tableBreaks[4]);
-			linebuf << types[wp->type() & 3];
+			linebuf << types[int(wp->type())];
 			pad_ostream_to_length(linebuf, tableBreaks[5]);
 			if (strcmp(wp->condition(), "1"))
 				linebuf << wp->condition();
@@ -338,7 +328,7 @@ void debug_view_watchpoints::view_update()
 			pad_ostream_to_length(linebuf, tableBreaks[7]);
 
 			auto const &text(linebuf.vec());
-			for (UINT32 i = m_topleft.x; i < (m_topleft.x + m_visible.x); i++, dest++)
+			for (u32 i = m_topleft.x; i < (m_topleft.x + m_visible.x); i++, dest++)
 			{
 				dest->byte = (i < text.size()) ? text[i] : ' ';
 				dest->attrib = DCA_NORMAL;

@@ -37,9 +37,35 @@
 
 */
 
+#include "emu.h"
 #include "melps4.h"
-#include "debugger.h"
+#include "melps4d.h"
 
+
+melps4_cpu_device::melps4_cpu_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int prgwidth, address_map_constructor program, int datawidth, address_map_constructor data, int d_pins, u8 sm_page, u8 int_page)
+	: cpu_device(mconfig, type, tag, owner, clock)
+	, m_program_config("program", ENDIANNESS_LITTLE, 16, prgwidth, -1, program)
+	, m_data_config("data", ENDIANNESS_LITTLE, 8, datawidth, 0, data)
+	, m_prgwidth(prgwidth)
+	, m_datawidth(datawidth)
+	, m_d_pins(d_pins)
+	, m_sm_page(sm_page)
+	, m_int_page(int_page)
+	, m_xami_mask(0xf)
+	, m_sp_mask(0x7<<4)
+	, m_ba_op(0x01)
+	, m_stack_levels(3)
+	, m_read_k(*this)
+	, m_read_d(*this)
+	, m_read_s(*this)
+	, m_read_f(*this)
+	, m_write_d(*this)
+	, m_write_s(*this)
+	, m_write_f(*this)
+	, m_write_g(*this)
+	, m_write_u(*this)
+	, m_write_t(*this)
+{ }
 
 // disasm
 void melps4_cpu_device::state_string_export(const device_state_entry &entry, std::string &str) const
@@ -68,13 +94,6 @@ void melps4_cpu_device::state_string_export(const device_state_entry &entry, std
 //-------------------------------------------------
 //  device_start - device-specific startup
 //-------------------------------------------------
-
-enum
-{
-	MELPS4_PC=1, MELPS4_A, MELPS4_B, MELPS4_E,
-	MELPS4_Y, MELPS4_X, MELPS4_Z,
-	MELPS4_H, MELPS4_L, MELPS4_C, MELPS4_V, MELPS4_W
-};
 
 void melps4_cpu_device::device_start()
 {
@@ -187,27 +206,35 @@ void melps4_cpu_device::device_start()
 	save_item(NAME(m_w));
 
 	// register state for debugger
-	state_add(STATE_GENPC, "curpc", m_pc).formatstr("%04X").noshow();
+	state_add(STATE_GENPC, "GENPC", m_pc).formatstr("%04X").noshow();
+	state_add(STATE_GENPCBASE, "CURPC", m_pc).formatstr("%04X").noshow();
 	state_add(STATE_GENFLAGS, "GENFLAGS", m_cy).formatstr("%9s").noshow();
 
-	state_add(MELPS4_PC, "PC", m_pc).formatstr("%04X");
-	state_add(MELPS4_A, "A", m_a).formatstr("%2d"); // show in decimal
-	state_add(MELPS4_B, "B", m_b).formatstr("%2d"); // "
-	state_add(MELPS4_E, "E", m_e).formatstr("%02X");
-	state_add(MELPS4_Y, "Y", m_y).formatstr("%1X");
-	state_add(MELPS4_X, "X", m_x).formatstr("%1d");
-	state_add(MELPS4_Z, "Z", m_z).formatstr("%1d");
+	m_state_count = 0;
+	state_add(++m_state_count, "PC", m_pc).formatstr("%04X"); // 1
+	state_add(++m_state_count, "A", m_a).formatstr("%2d"); // 2 - show in decimal
+	state_add(++m_state_count, "B", m_b).formatstr("%2d"); // 3 - "
+	state_add(++m_state_count, "E", m_e).formatstr("%02X"); // 4
+	state_add(++m_state_count, "Y", m_y).formatstr("%1X"); // 5
+	state_add(++m_state_count, "X", m_x).formatstr("%1d"); // 6
+	state_add(++m_state_count, "Z", m_z).formatstr("%1d"); // 7
 
-	state_add(MELPS4_H, "H", m_h).formatstr("%1X");
-	state_add(MELPS4_L, "L", m_l).formatstr("%1X");
-	state_add(MELPS4_C, "C", m_c).formatstr("%1X");
-	state_add(MELPS4_V, "V", m_v).formatstr("%1X");
-	state_add(MELPS4_W, "W", m_w).formatstr("%1X");
+	state_add(++m_state_count, "H", m_h).formatstr("%1X"); // 8
+	state_add(++m_state_count, "L", m_l).formatstr("%1X"); // 9
+	state_add(++m_state_count, "C", m_c).formatstr("%1X"); // 10
+	state_add(++m_state_count, "V", m_v).formatstr("%1X"); // 11
+	state_add(++m_state_count, "W", m_w).formatstr("%1X"); // 12
 
-	m_icountptr = &m_icount;
+	set_icountptr(m_icount);
 }
 
-
+device_memory_interface::space_config_vector melps4_cpu_device::memory_space_config() const
+{
+	return space_config_vector {
+		std::make_pair(AS_PROGRAM, &m_program_config),
+		std::make_pair(AS_DATA,    &m_data_config)
+	};
+}
 
 //-------------------------------------------------
 //  device_reset - device-specific reset
@@ -246,7 +273,7 @@ void melps4_cpu_device::device_reset()
 //  i/o handling
 //-------------------------------------------------
 
-UINT8 melps4_cpu_device::read_gen_port(int port)
+u8 melps4_cpu_device::read_gen_port(int port)
 {
 	// input generic port
 	switch (port)
@@ -263,7 +290,7 @@ UINT8 melps4_cpu_device::read_gen_port(int port)
 	return 0;
 }
 
-void melps4_cpu_device::write_gen_port(int port, UINT8 data)
+void melps4_cpu_device::write_gen_port(int port, u8 data)
 {
 	// output generic port
 	switch (port)
@@ -292,7 +319,7 @@ int melps4_cpu_device::read_d_pin(int bit)
 {
 	// read port D, return state of selected pin
 	bit &= 0xf;
-	UINT16 d = (m_port_d | m_read_d(bit, 0xffff)) & m_d_mask;
+	u16 d = (m_port_d | m_read_d(bit, 0xffff)) & m_d_mask;
 	return d >> bit & 1;
 }
 
@@ -418,9 +445,10 @@ void melps4_cpu_device::execute_run()
 		m_prohibit_irq = false;
 
 		// fetch next opcode
-		debugger_instruction_hook(this, m_pc);
+		if (!m_skip)
+			debugger_instruction_hook(m_pc);
 		m_icount--;
-		m_op = m_program->read_word(m_pc << 1) & 0x1ff;
+		m_op = m_program->read_word(m_pc) & 0x1ff;
 		m_bitmask = 1 << (m_op & 3);
 		m_pc = (m_pc & ~0x7f) | ((m_pc + 1) & 0x7f); // stays in the same page
 
@@ -437,4 +465,9 @@ void melps4_cpu_device::execute_run()
 		else
 			execute_one();
 	}
+}
+
+std::unique_ptr<util::disasm_interface> melps4_cpu_device::create_disassembler()
+{
+	return std::make_unique<melps4_disassembler>();
 }

@@ -7,6 +7,7 @@
 #include "emu.h"
 #include "includes/copsnrob.h"
 #include "sound/discrete.h"
+#include "speaker.h"
 
 
 /* Discrete Sound Input Nodes */
@@ -267,13 +268,13 @@ static const discrete_555_cc_desc copsnrob_motor01_555cc =
 #define COPSNROB_CUSTOM_NOISE__FREQ     DISCRETE_INPUT(0)
 
 DISCRETE_CLASS_STEP_RESET(copsnrob_custom_noise, 2,
-	int     m_flip_flop;
-	int     m_noise1_had_xtime;
-	int     m_noise2_had_xtime;
-	UINT8   m_high_byte;
-	UINT8   m_low_byte;
-	double  m_t_used;
-	double  m_t1;
+	int     m_flip_flop = 0;
+	int     m_noise1_had_xtime = 0;
+	int     m_noise2_had_xtime = 0;
+	uint8_t m_high_byte = 0;
+	uint8_t m_low_byte = 0;
+	double  m_t_used = 0;
+	double  m_t1 = 0;
 );
 
 #define COPSNROB_CUSTOM_NOISE_HIGH  4.2
@@ -283,9 +284,9 @@ DISCRETE_STEP(copsnrob_custom_noise)
 	double  t_used = m_t_used;
 	double  t1 = m_t1;
 	double  x_time = 0;
-	UINT8   low_byte = m_low_byte;
-	UINT8   high_byte = m_high_byte;
-	UINT8   xnor_out;                           /* IC F2, pin 2 */
+	uint8_t low_byte = m_low_byte;
+	uint8_t high_byte = m_high_byte;
+	uint8_t xnor_out;                           /* IC F2, pin 2 */
 	int     last_noise1_bit = (low_byte >> 4) & 0x01;
 	int     last_noise2_bit = (low_byte >> 5) & 0x01;
 
@@ -373,10 +374,10 @@ DISCRETE_RESET(copsnrob_custom_noise)
 #define COPSNROB_CUSTOM_ZINGS_555_MONOSTABLE__C     DISCRETE_INPUT(2)
 
 DISCRETE_CLASS_STEP_RESET(copsnrob_zings_555_monostable, 1,
-	double  m_rc;
-	double  m_exponent;
-	double  m_v_cap;
-	int     m_flip_flop;
+	double  m_rc = 0;
+	double  m_exponent = 0;
+	double  m_v_cap = 0;
+	int     m_flip_flop = 0;
 );
 
 DISCRETE_STEP(copsnrob_zings_555_monostable)
@@ -470,13 +471,13 @@ DISCRETE_RESET(copsnrob_zings_555_monostable)
 #define COPSNROB_CUSTOM_ZINGS_555_ASTABLE__HIGH     4.5
 
 DISCRETE_CLASS_STEP_RESET(copsnrob_zings_555_astable, 1,
-	double  m_r2c2;
-	double  m_r_total_cv;
-	double  m_exponent1;
-	double  m_exponent2;
-	double  m_v_cap1;
-	double  m_v_cap2;
-	int     m_flip_flop;
+	double  m_r2c2 = 0;
+	double  m_r_total_cv = 0;
+	double  m_exponent1 = 0;
+	double  m_exponent2 = 0;
+	double  m_v_cap1 = 0;
+	double  m_v_cap2 = 0;
+	int     m_flip_flop = 0;
 );
 
 DISCRETE_STEP(copsnrob_zings_555_astable)
@@ -589,7 +590,7 @@ DISCRETE_RESET(copsnrob_zings_555_astable)
  ************************************************/
 
 
-DISCRETE_SOUND_START(copsnrob)
+static DISCRETE_SOUND_START(copsnrob_discrete)
 
 	/************************************************
 	 * Input register mapping
@@ -687,57 +688,30 @@ DISCRETE_SOUND_START(copsnrob)
 DISCRETE_SOUND_END
 
 
-WRITE8_MEMBER(copsnrob_state::copsnrob_misc_w)
+WRITE_LINE_MEMBER(copsnrob_state::one_start_w)
 {
-	UINT8 latched_data = m_ic_h3_data;
-	UINT8 special_data = data & 0x01;
+	/* One Start */
+	m_leds[0] = state ? 0 :1;
+}
 
-	/* ignore if no change */
-	if (((latched_data >> offset) & 0x01) == special_data)
-		return;
 
-	if (special_data)
-		latched_data |= 1 << offset;
-	else
-		latched_data &= ~(1 << offset);
+void copsnrob_state::copsnrob_audio(machine_config &config)
+{
+	/* sound hardware */
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
 
-	switch (offset)
-	{
-		case 0x00:
-			m_discrete->write(space, COPSNROB_MOTOR3_INV, special_data);
-			break;
+	discrete_sound_device &discrete(DISCRETE(config, "discrete", copsnrob_discrete));
+	discrete.add_route(0, "lspeaker", 1.0);
+	discrete.add_route(1, "rspeaker", 1.0);
 
-		case 0x01:
-			m_discrete->write(space, COPSNROB_MOTOR2_INV, special_data);
-			break;
-
-		case 0x02:
-			m_discrete->write(space, COPSNROB_MOTOR1_INV, special_data);
-			break;
-
-		case 0x03:
-			m_discrete->write(space, COPSNROB_MOTOR0_INV, special_data);
-			break;
-
-		case 0x04:
-			m_discrete->write(space, COPSNROB_SCREECH_INV, special_data);
-			break;
-
-		case 0x05:
-			m_discrete->write(space, COPSNROB_CRASH_INV, special_data);
-			break;
-
-		case 0x06:
-			/* One Start */
-			output().set_led_value(0, !special_data);
-			break;
-
-		case 0x07:
-			m_discrete->write(space, COPSNROB_AUDIO_ENABLE, special_data);
-			//machine().sound().system_mute(special_data);
-			break;
-
-	}
-
-	m_ic_h3_data = latched_data;
+	f9334_device &latch(F9334(config, "latch")); // H3 on audio board
+	latch.q_out_cb<0>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_MOTOR3_INV>));
+	latch.q_out_cb<1>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_MOTOR2_INV>));
+	latch.q_out_cb<2>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_MOTOR1_INV>));
+	latch.q_out_cb<3>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_MOTOR0_INV>));
+	latch.q_out_cb<4>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_SCREECH_INV>));
+	latch.q_out_cb<5>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_CRASH_INV>));
+	latch.q_out_cb<6>().set(FUNC(copsnrob_state::one_start_w));
+	latch.q_out_cb<7>().set("discrete", FUNC(discrete_device::write_line<COPSNROB_AUDIO_ENABLE>));
 }

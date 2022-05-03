@@ -7,9 +7,11 @@
  *
  */
 
-#include <stdio.h>
 #include "emu.h"
 #include "ds1204.h"
+
+#include <cstdio>
+
 
 #define VERBOSE_LEVEL ( 0 )
 
@@ -27,11 +29,12 @@ inline void ATTR_PRINTF( 3, 4 ) ds1204_device::verboselog( int n_level, const ch
 }
 
 // device type definition
-const device_type DS1204 = &device_creator<ds1204_device>;
+DEFINE_DEVICE_TYPE(DS1204, ds1204_device, "ds1204", "DS1204 Electronic Key")
 
-ds1204_device::ds1204_device( const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock )
-	: device_t( mconfig, DS1204, "DS1204", tag, owner, clock, "ds1204", __FILE__ ),
+ds1204_device::ds1204_device( const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock )
+	: device_t(mconfig, DS1204, tag, owner, clock),
 	device_nvram_interface(mconfig, *this),
+	m_region(*this, DEVICE_SELF),
 	m_rst( 0 ),
 	m_clk( 0 ),
 	m_dqw( 0 ), m_dqr(0), m_state(0), m_bit(0)
@@ -69,7 +72,7 @@ void ds1204_device::nvram_default()
 
 	int expected_bytes = sizeof( m_unique_pattern ) + sizeof( m_identification ) + sizeof( m_security_match ) + sizeof( m_secure_memory );
 
-	if( !m_region )
+	if (!m_region.found())
 	{
 		logerror( "ds1204(%s) region not found\n", tag() );
 	}
@@ -79,7 +82,7 @@ void ds1204_device::nvram_default()
 	}
 	else
 	{
-		UINT8 *region = m_region->base();
+		uint8_t *region = m_region->base();
 
 		memcpy( m_unique_pattern, region, sizeof( m_unique_pattern ) ); region += sizeof( m_unique_pattern );
 		memcpy( m_identification, region, sizeof( m_identification ) ); region += sizeof( m_identification );
@@ -88,20 +91,24 @@ void ds1204_device::nvram_default()
 	}
 }
 
-void ds1204_device::nvram_read( emu_file &file )
+bool ds1204_device::nvram_read( util::read_stream &file )
 {
-	file.read( m_unique_pattern, sizeof( m_unique_pattern ) );
-	file.read( m_identification, sizeof( m_identification ) );
-	file.read( m_security_match, sizeof( m_security_match ) );
-	file.read( m_secure_memory, sizeof( m_secure_memory ) );
+	size_t actual;
+	bool result = !file.read( m_unique_pattern, sizeof( m_unique_pattern ), actual ) && actual == sizeof( m_unique_pattern );
+	result = result && !file.read( m_identification, sizeof( m_identification ), actual ) && actual == sizeof( m_identification );
+	result = result && !file.read( m_security_match, sizeof( m_security_match ), actual ) && actual == sizeof( m_security_match );
+	result = result && !file.read( m_secure_memory, sizeof( m_secure_memory ), actual ) && actual == sizeof( m_secure_memory );
+	return result;
 }
 
-void ds1204_device::nvram_write( emu_file &file )
+bool ds1204_device::nvram_write( util::write_stream &file )
 {
-	file.write( m_unique_pattern, sizeof( m_unique_pattern ) );
-	file.write( m_identification, sizeof( m_identification ) );
-	file.write( m_security_match, sizeof( m_security_match ) );
-	file.write( m_secure_memory, sizeof( m_secure_memory ) );
+	size_t actual;
+	bool result = !file.write( m_unique_pattern, sizeof( m_unique_pattern ), actual ) && actual == sizeof( m_unique_pattern );
+	result = result && !file.write( m_identification, sizeof( m_identification ), actual ) && actual == sizeof( m_identification );
+	result = result && !file.write( m_security_match, sizeof( m_security_match ), actual ) && actual == sizeof( m_security_match );
+	result = result && !file.write( m_secure_memory, sizeof( m_secure_memory ), actual ) && actual == sizeof( m_secure_memory );
+	return result;
 }
 
 void ds1204_device::new_state( int state )
@@ -110,7 +117,7 @@ void ds1204_device::new_state( int state )
 	m_bit = 0;
 }
 
-void ds1204_device::writebit( UINT8 *buffer )
+void ds1204_device::writebit( uint8_t *buffer )
 {
 	if( m_clk )
 	{
@@ -130,7 +137,7 @@ void ds1204_device::writebit( UINT8 *buffer )
 	}
 }
 
-void ds1204_device::readbit( UINT8 *buffer )
+void ds1204_device::readbit( uint8_t *buffer )
 {
 	if( !m_clk )
 	{

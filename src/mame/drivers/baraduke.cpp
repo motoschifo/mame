@@ -14,14 +14,14 @@ Custom ICs:
 ----------
 98XX     lamp/coin output
 99XX     sound volume
-CUS27    clock divider
+CUS27    ULA clock divider
 CUS30    sound control
-CUS31
-CUS39    sprite generator
+CUS31    ULA
+CUS39    ULA sprite generator
 CUS41    address decoder
 CUS42    dual scrolling tilemap address generator
-CUS43    dual tilemap generator
-CUS48    sprite address generator
+CUS43    ULA dual tilemap generator
+CUS48    ULA sprite address generator
 CUS60    MCU (63701) aka 60A1
 
 
@@ -108,12 +108,15 @@ DIP locations verified for:
 ***************************************************************************/
 
 #include "emu.h"
-#include "cpu/m6809/m6809.h"
-#include "cpu/m6800/m6800.h"
 #include "includes/baraduke.h"
 
+#include "cpu/m6809/m6809.h"
+#include "machine/watchdog.h"
+#include "screen.h"
+#include "speaker.h"
 
-WRITE8_MEMBER(baraduke_state::inputport_select_w)
+
+void baraduke_state::inputport_select_w(uint8_t data)
 {
 	if ((data & 0xe0) == 0x60)
 		m_inputport_selected = data & 0x07;
@@ -125,7 +128,7 @@ WRITE8_MEMBER(baraduke_state::inputport_select_w)
 	}
 }
 
-READ8_MEMBER(baraduke_state::inputport_r)
+uint8_t baraduke_state::inputport_r()
 {
 	switch (m_inputport_selected)
 	{
@@ -148,60 +151,49 @@ READ8_MEMBER(baraduke_state::inputport_r)
 	}
 }
 
-WRITE8_MEMBER(baraduke_state::baraduke_lamps_w)
+void baraduke_state::baraduke_lamps_w(uint8_t data)
 {
-	output().set_led_value(0,data & 0x08);
-	output().set_led_value(1,data & 0x10);
+	m_lamps[0] = BIT(data, 3);
+	m_lamps[1] = BIT(data, 4);
 }
 
-WRITE8_MEMBER(baraduke_state::baraduke_irq_ack_w)
+void baraduke_state::baraduke_irq_ack_w(uint8_t data)
 {
 	m_maincpu->set_input_line(0, CLEAR_LINE);
 }
 
 
 
-static ADDRESS_MAP_START( baraduke_map, AS_PROGRAM, 8, baraduke_state )
-	AM_RANGE(0x0000, 0x1fff) AM_READWRITE(baraduke_spriteram_r,baraduke_spriteram_w) AM_SHARE("spriteram")  /* Sprite RAM */
-	AM_RANGE(0x2000, 0x3fff) AM_READWRITE(baraduke_videoram_r,baraduke_videoram_w) AM_SHARE("videoram") /* Video RAM */
-	AM_RANGE(0x4000, 0x43ff) AM_DEVREADWRITE("namco", namco_cus30_device, namcos1_cus30_r, namcos1_cus30_w)       /* PSG device, shared RAM */
-	AM_RANGE(0x4800, 0x4fff) AM_READWRITE(baraduke_textram_r,baraduke_textram_w) AM_SHARE("textram")/* video RAM (text layer) */
-	AM_RANGE(0x8000, 0x8000) AM_WRITE(watchdog_reset_w)         /* watchdog reset */
-	AM_RANGE(0x8800, 0x8800) AM_WRITE(baraduke_irq_ack_w)       /* irq acknowledge */
-	AM_RANGE(0xb000, 0xb002) AM_WRITE(baraduke_scroll0_w)       /* scroll (layer 0) */
-	AM_RANGE(0xb004, 0xb006) AM_WRITE(baraduke_scroll1_w)       /* scroll (layer 1) */
-	AM_RANGE(0x6000, 0xffff) AM_ROM                             /* ROM */
-ADDRESS_MAP_END
+void baraduke_state::baraduke_map(address_map &map)
+{
+	map(0x0000, 0x1fff).rw(FUNC(baraduke_state::baraduke_spriteram_r), FUNC(baraduke_state::baraduke_spriteram_w)).share("spriteram");  /* Sprite RAM */
+	map(0x2000, 0x3fff).rw(FUNC(baraduke_state::baraduke_videoram_r), FUNC(baraduke_state::baraduke_videoram_w)).share("videoram"); /* Video RAM */
+	map(0x4000, 0x43ff).rw(m_cus30, FUNC(namco_cus30_device::namcos1_cus30_r), FUNC(namco_cus30_device::namcos1_cus30_w));       /* PSG device, shared RAM */
+	map(0x4800, 0x4fff).rw(FUNC(baraduke_state::baraduke_textram_r), FUNC(baraduke_state::baraduke_textram_w)).share("textram");/* video RAM (text layer) */
+	map(0x8000, 0x8000).w("watchdog", FUNC(watchdog_timer_device::reset_w)); /* watchdog reset */
+	map(0x8800, 0x8800).w(FUNC(baraduke_state::baraduke_irq_ack_w));       /* irq acknowledge */
+	map(0xb000, 0xb002).w(FUNC(baraduke_state::baraduke_scroll0_w));       /* scroll (layer 0) */
+	map(0xb004, 0xb006).w(FUNC(baraduke_state::baraduke_scroll1_w));       /* scroll (layer 1) */
+	map(0x6000, 0xffff).rom();                             /* ROM */
+}
 
-READ8_MEMBER(baraduke_state::soundkludge_r)
+uint8_t baraduke_state::soundkludge_r()
 {
 	return ((m_counter++) >> 4) & 0xff;
 }
 
-static ADDRESS_MAP_START( mcu_map, AS_PROGRAM, 8, baraduke_state )
-	AM_RANGE(0x0000, 0x001f) AM_DEVREADWRITE("mcu", hd63701_cpu_device, m6801_io_r,m6801_io_w)/* internal registers */
-	AM_RANGE(0x0080, 0x00ff) AM_RAM                             /* built in RAM */
-	AM_RANGE(0x1105, 0x1105) AM_READ(soundkludge_r)             /* cures speech */
-	AM_RANGE(0x1000, 0x13ff) AM_DEVREADWRITE("namco", namco_cus30_device, namcos1_cus30_r, namcos1_cus30_w) /* PSG device, shared RAM */
-	AM_RANGE(0x8000, 0xbfff) AM_ROM                             /* MCU external ROM */
-	AM_RANGE(0x8000, 0x8000) AM_WRITENOP                        /* watchdog reset? */
-	AM_RANGE(0x8800, 0x8800) AM_WRITENOP                        /* irq acknoledge? */
-	AM_RANGE(0xc000, 0xc7ff) AM_RAM                             /* RAM */
-	AM_RANGE(0xf000, 0xffff) AM_ROM                             /* MCU internal ROM */
-ADDRESS_MAP_END
-
-
-READ8_MEMBER(baraduke_state::readFF)
+void baraduke_state::mcu_map(address_map &map)
 {
-	return 0xff;
+	map(0x0000, 0x001f).m("mcu", FUNC(hd63701v0_cpu_device::m6801_io));/* internal registers */
+	map(0x0080, 0x00ff).ram();                             /* built in RAM */
+	map(0x1000, 0x13ff).rw(m_cus30, FUNC(namco_cus30_device::namcos1_cus30_r), FUNC(namco_cus30_device::namcos1_cus30_w)); /* PSG device, shared RAM */
+	map(0x1105, 0x1105).r(FUNC(baraduke_state::soundkludge_r));             /* cures speech */
+	map(0x8000, 0xbfff).rom();                             /* MCU external ROM */
+	map(0x8000, 0x8000).nopw();                        /* watchdog reset? */
+	map(0x8800, 0x8800).nopw();                        /* irq acknoledge? */
+	map(0xc000, 0xc7ff).ram();                             /* RAM */
+	map(0xf000, 0xffff).rom();                             /* MCU internal ROM */
 }
-
-static ADDRESS_MAP_START( mcu_port_map, AS_IO, 8, baraduke_state )
-	AM_RANGE(M6801_PORT1, M6801_PORT1) AM_READ(inputport_r)         /* input ports read */
-	AM_RANGE(M6801_PORT1, M6801_PORT1) AM_WRITE(inputport_select_w) /* input port select */
-	AM_RANGE(M6801_PORT2, M6801_PORT2) AM_READ(readFF)  /* leds won't work otherwise */
-	AM_RANGE(M6801_PORT2, M6801_PORT2) AM_WRITE(baraduke_lamps_w)       /* lamps */
-ADDRESS_MAP_END
 
 
 
@@ -344,60 +336,54 @@ static const gfx_layout tile_layout =
 	16*8
 };
 
-static const gfx_layout spritelayout =
-{
-	16,16,
-	RGN_FRAC(1,1),
-	4,
-	{ 0, 1, 2, 3 },
-	{ 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4,
-		8*4, 9*4, 10*4, 11*4, 12*4, 13*4, 14*4, 15*4 },
-	{ 8*8*0, 8*8*1, 8*8*2, 8*8*3, 8*8*4, 8*8*5, 8*8*6, 8*8*7,
-	8*8*8, 8*8*9, 8*8*10, 8*8*11, 8*8*12, 8*8*13, 8*8*14, 8*8*15 },
-	128*8
-};
-
-static GFXDECODE_START( baraduke )
-	GFXDECODE_ENTRY( "gfx1", 0,      text_layout,  0, 512 )
-	GFXDECODE_ENTRY( "gfx2", 0x0000, tile_layout,  0, 256 )
-	GFXDECODE_ENTRY( "gfx2", 0x4000, tile_layout,  0, 256 )
-	GFXDECODE_ENTRY( "gfx3", 0,      spritelayout, 0, 128 )
+static GFXDECODE_START( gfx_baraduke )
+	GFXDECODE_ENTRY( "gfx1", 0,      text_layout,            0, 512 )
+	GFXDECODE_ENTRY( "gfx2", 0x0000, tile_layout,            0, 256 )
+	GFXDECODE_ENTRY( "gfx2", 0x4000, tile_layout,            0, 256 )
+	GFXDECODE_ENTRY( "gfx3", 0,      gfx_16x16x4_packed_msb, 0, 128 )
 GFXDECODE_END
 
 
+void baraduke_state::machine_start()
+{
+	m_lamps.resolve();
+}
 
-static MACHINE_CONFIG_START( baraduke, baraduke_state )
 
+void baraduke_state::baraduke(machine_config &config)
+{
 	/* basic machine hardware */
-	MCFG_CPU_ADD("maincpu", M6809, XTAL_49_152MHz/32)
-	MCFG_CPU_PROGRAM_MAP(baraduke_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", baraduke_state,  irq0_line_assert)
+	MC6809E(config, m_maincpu, XTAL(49'152'000)/32); // 68A09E
+	m_maincpu->set_addrmap(AS_PROGRAM, &baraduke_state::baraduke_map);
 
-	MCFG_CPU_ADD("mcu", HD63701, XTAL_49_152MHz/8)
-	MCFG_CPU_PROGRAM_MAP(mcu_map)
-	MCFG_CPU_IO_MAP(mcu_port_map)
-	MCFG_CPU_VBLANK_INT_DRIVER("screen", baraduke_state,  irq0_line_hold)
+	HD63701V0(config, m_mcu, XTAL(49'152'000)/8);
+	m_mcu->set_addrmap(AS_PROGRAM, &baraduke_state::mcu_map);
+	m_mcu->in_p1_cb().set(FUNC(baraduke_state::inputport_r));         /* input ports read */
+	m_mcu->out_p1_cb().set(FUNC(baraduke_state::inputport_select_w)); /* input port select */
+	m_mcu->in_p2_cb().set_constant(0xff);                             /* leds won't work otherwise */
+	m_mcu->out_p2_cb().set(FUNC(baraduke_state::baraduke_lamps_w));   /* lamps */
 
-	MCFG_QUANTUM_TIME(attotime::from_hz(6000))      /* we need heavy synch */
+	config.set_maximum_quantum(attotime::from_hz(6000));      /* we need heavy synch */
+
+	WATCHDOG_TIMER(config, "watchdog");
 
 	/* video hardware */
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_RAW_PARAMS(XTAL_49_152MHz/8, 384, 0, 36*8, 264, 2*8, 30*8)
-	MCFG_SCREEN_UPDATE_DRIVER(baraduke_state, screen_update_baraduke)
-	MCFG_SCREEN_VBLANK_DRIVER(baraduke_state, screen_eof_baraduke)
-	MCFG_SCREEN_PALETTE("palette")
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_raw(XTAL(49'152'000)/8, 384, 0, 36*8, 264, 2*8, 30*8);
+	screen.set_screen_update(FUNC(baraduke_state::screen_update_baraduke));
+	screen.screen_vblank().set(FUNC(baraduke_state::screen_vblank_baraduke));
+	screen.set_palette(m_palette);
 
-	MCFG_GFXDECODE_ADD("gfxdecode", "palette", baraduke)
-	MCFG_PALETTE_ADD("palette", 2048)
-	MCFG_PALETTE_INIT_OWNER(baraduke_state, baraduke)
+	GFXDECODE(config, m_gfxdecode, m_palette, gfx_baraduke);
+	PALETTE(config, m_palette, FUNC(baraduke_state::baraduke_palette), 2048);
 
 	/* sound hardware */
-	MCFG_SPEAKER_STANDARD_MONO("mono")
+	SPEAKER(config, "mono").front_center();
 
-	MCFG_SOUND_ADD("namco", NAMCO_CUS30, XTAL_49_152MHz/2048)
-	MCFG_NAMCO_AUDIO_VOICES(8)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "mono", 1.0)
-MACHINE_CONFIG_END
+	NAMCO_CUS30(config, m_cus30, XTAL(49'152'000)/2048);
+	m_cus30->set_voices(8);
+	m_cus30->add_route(ALL_OUTPUTS, "mono", 1.0);
+}
 
 
 
@@ -518,19 +504,16 @@ ROM_START( metrocrsa )
 ROM_END
 
 
-DRIVER_INIT_MEMBER(baraduke_state,baraduke)
+void baraduke_state::init_baraduke()
 {
-	UINT8 *rom;
-	int i;
-
 	/* unpack the third tile ROM */
-	rom = memregion("gfx2")->base() + 0x8000;
-	for (i = 0x2000;i < 0x4000;i++)
+	uint8_t *rom = memregion("gfx2")->base() + 0x8000;
+	for (int i = 0x2000; i < 0x4000; i++)
 	{
 		rom[i + 0x2000] = rom[i];
 		rom[i + 0x4000] = rom[i] << 4;
 	}
-	for (i = 0;i < 0x2000;i++)
+	for (int i = 0; i < 0x2000; i++)
 	{
 		rom[i + 0x2000] = rom[i] << 4;
 	}
@@ -538,7 +521,7 @@ DRIVER_INIT_MEMBER(baraduke_state,baraduke)
 
 
 
-GAME( 1985, metrocrs, 0,        baraduke, metrocrs, baraduke_state, baraduke, ROT0, "Namco", "Metro-Cross (set 1)", 0 )
-GAME( 1985, metrocrsa,metrocrs, baraduke, metrocrs, baraduke_state, baraduke, ROT0, "Namco", "Metro-Cross (set 2)", 0 )
-GAME( 1985, aliensec, 0,        baraduke, baraduke, baraduke_state, baraduke, ROT0, "Namco", "Alien Sector", 0 )
-GAME( 1985, baraduke, aliensec, baraduke, baraduke, baraduke_state, baraduke, ROT0, "Namco", "Baraduke", 0 )
+GAME( 1985, metrocrs,  0,        baraduke, metrocrs, baraduke_state, init_baraduke, ROT0, "Namco", "Metro-Cross (set 1)", 0 )
+GAME( 1985, metrocrsa, metrocrs, baraduke, metrocrs, baraduke_state, init_baraduke, ROT0, "Namco", "Metro-Cross (set 2)", 0 )
+GAME( 1985, aliensec,  0,        baraduke, baraduke, baraduke_state, init_baraduke, ROT0, "Namco", "Alien Sector", 0 )
+GAME( 1985, baraduke,  aliensec, baraduke, baraduke, baraduke_state, init_baraduke, ROT0, "Namco", "Baraduke", 0 )

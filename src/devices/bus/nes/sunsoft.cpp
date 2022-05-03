@@ -16,7 +16,7 @@
  * Sunsoft-5B [mapper 69]
 
  TODO:
- - check 1-line glitches due to IRQ in Sunsoft-3
+ - 1-line glitches in Fantasy Zone II (Sunsoft-3) seem to be PPU timing related. The cycle-based IRQ timer below "should" be ok.
 
  ***********************************************************************************************************/
 
@@ -24,8 +24,9 @@
 #include "emu.h"
 #include "sunsoft.h"
 
-#include "cpu/m6502/m6502.h"
 #include "sound/ay8910.h"
+#include "speaker.h"
+
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE 1
@@ -40,60 +41,55 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_SUNSOFT_1 = &device_creator<nes_sunsoft_1_device>;
-const device_type NES_SUNSOFT_2 = &device_creator<nes_sunsoft_2_device>;
-const device_type NES_SUNSOFT_3 = &device_creator<nes_sunsoft_3_device>;
-const device_type NES_SUNSOFT_4 = &device_creator<nes_sunsoft_4_device>;
-const device_type NES_SUNSOFT_FME7 = &device_creator<nes_sunsoft_fme7_device>;
-const device_type NES_SUNSOFT_5 = &device_creator<nes_sunsoft_5_device>;
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_1,    nes_sunsoft_1_device,    "nes_sun1", "NES Cart Sunsoft 1 PCB")
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_2,    nes_sunsoft_2_device,    "nes_sun2", "NES Cart Sunsoft 2 PCB")
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_3,    nes_sunsoft_3_device,    "nes_sun3", "NES Cart Sunsoft 3 PCB")
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_4,    nes_sunsoft_4_device,    "nes_sun4", "NES Cart Sunsoft 4 PCB")
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_FME7, nes_sunsoft_fme7_device, "nes_fme7", "NES Cart Sunsoft FME7 PCB")
+DEFINE_DEVICE_TYPE(NES_SUNSOFT_5,    nes_sunsoft_5_device,    "nes_sun5", "NES Cart Sunsoft 5A/5B PCB")
 
 
-nes_sunsoft_1_device::nes_sunsoft_1_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SUNSOFT_1, "NES Cart Sunsoft 1 PCB", tag, owner, clock, "nes_sun1", __FILE__)
+nes_sunsoft_1_device::nes_sunsoft_1_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_SUNSOFT_1, tag, owner, clock)
 {
 }
 
-nes_sunsoft_2_device::nes_sunsoft_2_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SUNSOFT_2, "NES Cart Sunsoft 2 PCB", tag, owner, clock, "nes_sun2", __FILE__)
+nes_sunsoft_2_device::nes_sunsoft_2_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_SUNSOFT_2, tag, owner, clock)
 {
 }
 
-nes_sunsoft_3_device::nes_sunsoft_3_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SUNSOFT_3, "NES Cart Sunsoft 3 PCB", tag, owner, clock, "nes_sun3", __FILE__), m_irq_count(0), m_irq_enable(0), m_irq_toggle(0), irq_timer(nullptr)
-				{
-}
-
-nes_sunsoft_4_device::nes_sunsoft_4_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source), m_reg(0), m_latch1(0), m_latch2(0), m_wram_enable(0)
-				{
-}
-
-nes_sunsoft_4_device::nes_sunsoft_4_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SUNSOFT_4, "NES Cart Sunsoft 4 PCB", tag, owner, clock, "nes_sun4", __FILE__), m_reg(0), m_latch1(0), m_latch2(0), m_wram_enable(0)
-				{
-}
-
-nes_sunsoft_fme7_device::nes_sunsoft_fme7_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source), m_irq_count(0), m_irq_enable(0), irq_timer(nullptr), m_latch(0), m_wram_bank(0)
-				{
-}
-
-nes_sunsoft_fme7_device::nes_sunsoft_fme7_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_SUNSOFT_4, "NES Cart Sunsoft FME7 PCB", tag, owner, clock, "nes_fme7", __FILE__), m_irq_count(0), m_irq_enable(0), irq_timer(nullptr), m_latch(0), m_wram_bank(0)
-				{
-}
-
-nes_sunsoft_5_device::nes_sunsoft_5_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_sunsoft_fme7_device(mconfig, NES_SUNSOFT_5, "NES Cart Sunsoft 5A/5B PCB", tag, owner, clock, "nes_sun5", __FILE__),
-						m_ym2149(*this, "ay")
+nes_sunsoft_3_device::nes_sunsoft_3_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, NES_SUNSOFT_3, tag, owner, clock), m_irq_count(0), m_irq_enable(0), m_irq_toggle(0), irq_timer(nullptr)
 {
 }
 
-
-void nes_sunsoft_1_device::device_start()
+nes_sunsoft_4_device::nes_sunsoft_4_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
+	: nes_nrom_device(mconfig, type, tag, owner, clock), m_wram_enable(0)
 {
-	common_start();
 }
+
+nes_sunsoft_4_device::nes_sunsoft_4_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_sunsoft_4_device(mconfig, NES_SUNSOFT_4, tag, owner, clock)
+{
+}
+
+nes_sunsoft_fme7_device::nes_sunsoft_fme7_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, type, tag, owner, clock), m_irq_count(0), m_irq_enable(0), irq_timer(nullptr), m_latch(0), m_wram_bank(0)
+{
+}
+
+nes_sunsoft_fme7_device::nes_sunsoft_fme7_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_sunsoft_fme7_device(mconfig, NES_SUNSOFT_FME7, tag, owner, clock)
+{
+}
+
+nes_sunsoft_5_device::nes_sunsoft_5_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_sunsoft_fme7_device(mconfig, NES_SUNSOFT_5, tag, owner, clock)
+	, m_ym2149(*this, "ay")
+{
+}
+
 
 void nes_sunsoft_1_device::pcb_reset()
 {
@@ -101,11 +97,6 @@ void nes_sunsoft_1_device::pcb_reset()
 	prg16_89ab(0);
 	prg16_cdef(m_prg_chunks - 1);
 	chr8(0, m_chr_source);
-}
-
-void nes_sunsoft_2_device::device_start()
-{
-	common_start();
 }
 
 void nes_sunsoft_2_device::pcb_reset()
@@ -122,7 +113,7 @@ void nes_sunsoft_3_device::device_start()
 {
 	common_start();
 	irq_timer = timer_alloc(TIMER_IRQ);
-	irq_timer->adjust(attotime::zero, 0, machine().device<cpu_device>("maincpu")->cycles_to_attotime(1));
+	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_toggle));
@@ -135,6 +126,7 @@ void nes_sunsoft_3_device::pcb_reset()
 	prg16_89ab(0);
 	prg16_cdef(m_prg_chunks - 1);
 	chr8(0, m_chr_source);
+
 	m_irq_toggle = 0;
 	m_irq_count = 0;
 	m_irq_enable = 0;
@@ -143,8 +135,6 @@ void nes_sunsoft_3_device::pcb_reset()
 void nes_sunsoft_4_device::device_start()
 {
 	common_start();
-	save_item(NAME(m_latch1));
-	save_item(NAME(m_latch2));
 	save_item(NAME(m_reg));
 	save_item(NAME(m_wram_enable));
 }
@@ -156,9 +146,7 @@ void nes_sunsoft_4_device::pcb_reset()
 	prg16_cdef(m_prg_chunks - 1);
 	chr8(0, m_chr_source);
 
-	m_reg = 0;
-	m_latch1 = 0;
-	m_latch2 = 0;
+	m_reg[0] = m_reg[1] = m_reg[2] = 0;
 	m_wram_enable = 0;
 }
 
@@ -166,9 +154,7 @@ void nes_sunsoft_fme7_device::device_start()
 {
 	common_start();
 	irq_timer = timer_alloc(TIMER_IRQ);
-	// this has to be hardcoded because some some scanline code only suits NTSC... it will be fixed with PPU rewrite
-	irq_timer->adjust(attotime::zero, 0, attotime::from_hz((21477272.724 / 12)));
-//  irq_timer->adjust(attotime::zero, 0, machine().device<cpu_device>("maincpu")->cycles_to_attotime(1));
+	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_wram_bank));
 	save_item(NAME(m_latch));
@@ -208,7 +194,7 @@ void nes_sunsoft_fme7_device::pcb_reset()
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_sunsoft_1_device::write_m)
+void nes_sunsoft_1_device::write_m(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("Sunsoft 1 write_m, offset: %04x, data: %02x\n", offset, data));
 
@@ -234,9 +220,9 @@ WRITE8_MEMBER(nes_sunsoft_1_device::write_m)
 
 // there are two 'variants' depending on hardwired or mapper ctrl mirroring
 
-WRITE8_MEMBER(nes_sunsoft_2_device::write_h)
+void nes_sunsoft_2_device::write_h(offs_t offset, uint8_t data)
 {
-	UINT8 helper = (data & 0x07) | ((data & 0x80) ? 0x08 : 0x00);
+	uint8_t helper = (data & 0x07) | ((data & 0x80) ? 0x08 : 0x00);
 	LOG_MMC(("Sunsoft 2 write_h, offset: %04x, data: %02x\n", offset, data));
 
 	// this pcb is subject to bus conflict
@@ -255,51 +241,36 @@ WRITE8_MEMBER(nes_sunsoft_2_device::write_h)
 
  Sunsoft-3 board emulation
 
- The two games using this board have incompatible mirroring
- wiring, making necessary two distinct mappers & pcb_id
+ Games: Fantasy Zone II, Mito Koumon II - Sekai Manyuki
 
  iNES: mapper 67
 
  -------------------------------------------------*/
 
-
-void nes_sunsoft_3_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void nes_sunsoft_3_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	if (id == TIMER_IRQ)
 	{
-		if (m_irq_enable)
+		if (m_irq_enable && --m_irq_count == 0xffff)
 		{
-			if (!m_irq_count)
-			{
-				m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
-				m_irq_count = 0xffff;
-				m_irq_enable = 0;
-			}
-			else
-				m_irq_count--;
+			set_irq_line(ASSERT_LINE);
+			m_irq_enable = 0;
 		}
 	}
 }
 
-WRITE8_MEMBER(nes_sunsoft_3_device::write_h)
+void nes_sunsoft_3_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("Sunsoft 3 write_h, offset %04x, data: %02x\n", offset, data));
 
 	switch (offset & 0x7800)
 	{
 		case 0x0800:
-			chr2_0(data, CHRROM);
-			break;
 		case 0x1800:
-			chr2_2(data, CHRROM);
-			break;
 		case 0x2800:
-			chr2_4(data, CHRROM);
-			break;
 		case 0x3800:
-			chr2_6(data, CHRROM);
+			chr2_x((offset >> 11) & 0x06, data & 0x3f, CHRROM);
 			break;
-		case 0x4000:
 		case 0x4800:
 			m_irq_toggle ^= 1;
 			if (m_irq_toggle)
@@ -310,7 +281,6 @@ WRITE8_MEMBER(nes_sunsoft_3_device::write_h)
 		case 0x5800:
 			m_irq_enable = BIT(data, 4);
 			m_irq_toggle = 0;
-			m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
 			break;
 		case 0x6800:
 			switch (data & 3)
@@ -322,10 +292,10 @@ WRITE8_MEMBER(nes_sunsoft_3_device::write_h)
 			}
 			break;
 		case 0x7800:
-			prg16_89ab(data);
+			prg16_89ab(data & 0x0f);
 			break;
 		default:
-			LOG_MMC(("Sunsoft 3 write_h uncaught write, offset: %04x, data: %02x\n", offset, data));
+			set_irq_line(CLEAR_LINE);
 			break;
 	}
 }
@@ -340,141 +310,99 @@ WRITE8_MEMBER(nes_sunsoft_3_device::write_h)
 
  -------------------------------------------------*/
 
-void nes_sunsoft_4_device::sun4_mirror( int mirror, int mirr0, int mirr1 )
+void nes_sunsoft_4_device::sun4_mirror()
 {
-	switch (mirror)
+	static constexpr u8 ciram_lut[4] =
 	{
-		case 0x00:
-			set_nt_mirroring(PPU_MIRROR_VERT);
-			break;
-		case 0x01:
-			set_nt_mirroring(PPU_MIRROR_HORZ);
-			break;
-		case 0x02:
-			set_nt_mirroring(PPU_MIRROR_LOW);
-			break;
-		case 0x03:
-			set_nt_mirroring(PPU_MIRROR_HIGH);
-			break;
-		case 0x10:
-			set_nt_page(0, VROM, mirr0 | 0x80, 0);
-			set_nt_page(1, VROM, mirr1 | 0x80, 0);
-			set_nt_page(2, VROM, mirr0 | 0x80, 0);
-			set_nt_page(3, VROM, mirr1 | 0x80, 0);
-			break;
-		case 0x11:
-			set_nt_page(0, VROM, mirr0 | 0x80, 0);
-			set_nt_page(1, VROM, mirr0 | 0x80, 0);
-			set_nt_page(2, VROM, mirr1 | 0x80, 0);
-			set_nt_page(3, VROM, mirr1 | 0x80, 0);
-			break;
-		case 0x12:
-			set_nt_page(0, VROM, mirr0 | 0x80, 0);
-			set_nt_page(1, VROM, mirr0 | 0x80, 0);
-			set_nt_page(2, VROM, mirr0 | 0x80, 0);
-			set_nt_page(3, VROM, mirr0 | 0x80, 0);
-			break;
-		case 0x13:
-			set_nt_page(0, VROM, mirr1 | 0x80, 0);
-			set_nt_page(1, VROM, mirr1 | 0x80, 0);
-			set_nt_page(2, VROM, mirr1 | 0x80, 0);
-			set_nt_page(3, VROM, mirr1 | 0x80, 0);
-			break;
-	}
+		PPU_MIRROR_VERT, PPU_MIRROR_HORZ, PPU_MIRROR_LOW, PPU_MIRROR_HIGH
+	};
+
+	static constexpr u8 vrom_lut[4][4] =
+	{
+		{ 0, 1, 0, 1 }, // vert
+		{ 0, 0, 1, 1 }, // horz
+		{ 0, 0, 0, 0 }, // low
+		{ 1, 1, 1, 1 }  // high
+	};
+
+	int mirr = m_reg[2] & 0x03;
+
+	if (BIT(m_reg[2], 4))
+		for (int i = 0; i < 4; i++)
+			set_nt_page(i, VROM, m_reg[vrom_lut[mirr][i]], 0);
+	else
+		set_nt_mirroring(ciram_lut[mirr]);
 }
 
-WRITE8_MEMBER(nes_sunsoft_4_device::sun4_write)
+void nes_sunsoft_4_device::sun4_write(offs_t offset, u8 data)
 {
 	LOG_MMC(("Sunsoft 4 write_h, offset %04x, data: %02x\n", offset, data));
 
 	switch (offset & 0x7000)
 	{
 		case 0x0000:
-			chr2_0(data, CHRROM);
-			break;
 		case 0x1000:
-			chr2_2(data, CHRROM);
-			break;
 		case 0x2000:
-			chr2_4(data, CHRROM);
-			break;
 		case 0x3000:
-			chr2_6(data, CHRROM);
+			chr2_x((offset >> 11) & 0x06, data, CHRROM);
 			break;
 		case 0x4000:
-			m_latch1 = data & 0x7f;
-			sun4_mirror(m_reg, m_latch1, m_latch2);
-			break;
 		case 0x5000:
-			m_latch2 = data & 0x7f;
-			sun4_mirror(m_reg, m_latch1, m_latch2);
-			break;
 		case 0x6000:
-			m_reg = data & 0x13;
-			sun4_mirror(m_reg, m_latch1, m_latch2);
+			m_reg[(offset >> 12) - 4] = data | 0x80;
+			sun4_mirror();
 			break;
 		case 0x7000:
 			prg16_89ab(data & 0x0f);
 			m_wram_enable = BIT(data, 4);
 			break;
-		default:
-			LOG_MMC(("Sunsoft 4 write_h uncaught write, offset: %04x, data: %02x\n", offset, data));
-			break;
 	}
 }
 
-WRITE8_MEMBER(nes_sunsoft_4_device::write_m)
+void nes_sunsoft_4_device::write_m(offs_t offset, u8 data)
 {
 	LOG_MMC(("Sunsoft 4 write_m, offset: %04x, data: %02x\n", offset, data));
 
-	if (!m_battery.empty() && m_wram_enable)
-		m_battery[offset & (m_battery.size() - 1)] = data;
-	if (!m_prgram.empty() && m_wram_enable)
-		m_prgram[offset & (m_prgram.size() - 1)] = data;
+	if (m_wram_enable)
+		device_nes_cart_interface::write_m(offset, data);
 }
 
-READ8_MEMBER(nes_sunsoft_4_device::read_m)
+u8 nes_sunsoft_4_device::read_m(offs_t offset)
 {
 	LOG_MMC(("Sunsoft 4 read_m, offset: %04x\n", offset));
 
-	if (!m_battery.empty() && m_wram_enable)
-		return m_battery[offset & (m_battery.size() - 1)];
-	if (!m_prgram.empty() && m_wram_enable)
-		return m_prgram[offset & (m_prgram.size() - 1)];
+	if (m_wram_enable)
+		return device_nes_cart_interface::read_m(offset);
 
-	return m_open_bus;   // open bus
+	return get_open_bus();
 }
 
 /*-------------------------------------------------
 
  JxROM & Sunsoft 5A / 5B / FME7 board emulation
 
- Notice that Sunsoft-5B = FME7 + sound chip (the latter being
- currently unemulated in MESS)
+ Notice that Sunsoft-5B = FME7 + sound chip
 
  iNES: mapper 69
 
  -------------------------------------------------*/
 
-void nes_sunsoft_fme7_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void nes_sunsoft_fme7_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	if (id == TIMER_IRQ)
 	{
-		if ((m_irq_enable & 0x80)) // bit7, counter decrement
+		if (BIT(m_irq_enable, 7)) // counter decrement enabled
 		{
-			if (!m_irq_count)
+			if (--m_irq_count == 0xffff)
 			{
-				m_irq_count = 0xffff;
-				if (m_irq_enable & 0x01) // bit0, trigger enable
-					m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
+				if (BIT(m_irq_enable, 0)) // IRQs enabled
+					set_irq_line(ASSERT_LINE);
 			}
-			else
-				m_irq_count--;
 		}
 	}
 }
 
-WRITE8_MEMBER(nes_sunsoft_fme7_device::fme7_write)
+void nes_sunsoft_fme7_device::fme7_write(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("fme7_write, offset %04x, data: %02x\n", offset, data));
 
@@ -514,8 +442,7 @@ WRITE8_MEMBER(nes_sunsoft_fme7_device::fme7_write)
 					break;
 				case 0x0d:
 					m_irq_enable = data;
-					if (!(m_irq_enable & 1))
-						m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+					set_irq_line(CLEAR_LINE);
 					break;
 				case 0x0e:
 					m_irq_count = (m_irq_count & 0xff00) | data;
@@ -532,9 +459,9 @@ WRITE8_MEMBER(nes_sunsoft_fme7_device::fme7_write)
 	}
 }
 
-WRITE8_MEMBER(nes_sunsoft_fme7_device::write_m)
+void nes_sunsoft_fme7_device::write_m(offs_t offset, uint8_t data)
 {
-	UINT8 bank = m_wram_bank & 0x3f;
+	uint8_t bank = m_wram_bank & 0x3f;
 	LOG_MMC(("Sunsoft FME7 write_m, offset: %04x, data: %02x\n", offset, data));
 
 	if (!(m_wram_bank & 0x40))  // is PRG ROM, no write
@@ -548,9 +475,9 @@ WRITE8_MEMBER(nes_sunsoft_fme7_device::write_m)
 	}
 }
 
-READ8_MEMBER(nes_sunsoft_fme7_device::read_m)
+uint8_t nes_sunsoft_fme7_device::read_m(offs_t offset)
 {
-	UINT8 bank = m_wram_bank & 0x3f;
+	uint8_t bank = m_wram_bank & 0x3f;
 	LOG_MMC(("Sunsoft FME7 read_m, offset: %04x\n", offset));
 
 	if (!(m_wram_bank & 0x40))  // is PRG ROM
@@ -563,7 +490,7 @@ READ8_MEMBER(nes_sunsoft_fme7_device::read_m)
 			return m_prgram[((bank * 0x2000) + offset) & (m_prgram.size() - 1)];
 	}
 
-	return m_open_bus;   // open bus
+	return get_open_bus();
 }
 
 
@@ -577,27 +504,24 @@ READ8_MEMBER(nes_sunsoft_fme7_device::read_m)
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_sunsoft_5_device::write_h)
+void nes_sunsoft_5_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("sunsoft 5 write_h, offset %04x, data: %02x\n", offset, data));
 
 	switch (offset & 0x6000)
 	{
 		case 0x4000:
-			m_ym2149->address_w(space, 0, data & 0x0f);
+			m_ym2149->address_w(data & 0x0f);
 			break;
 		case 0x6000:
-			m_ym2149->data_w(space, 0, data);
+			m_ym2149->data_w(data);
 			break;
 		default:
-			fme7_write(space, offset, data, mem_mask);
+			fme7_write(offset, data);
 			break;
 	}
 }
 
-//-------------------------------------------------
-//  MACHINE_DRIVER( sun_5b )
-//-------------------------------------------------
 
 // From NESdev wiki: The 5B's audio is driven by the CPU clock (1.78977267 MHz),
 // but like the NES's APU, the YM2149F has an optional clock divider which
@@ -606,23 +530,17 @@ WRITE8_MEMBER(nes_sunsoft_5_device::write_h)
 // YM2149F operating in this mode. To use an AY-3-8910 as a substitute,
 // you would need an external divider to reduce the clock speed by half.
 
-#define SUN5_NTSC_CLOCK (21477272.724 / 12)
-
-static MACHINE_CONFIG_FRAGMENT( sun_5b )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("ay", YM2149, SUN5_NTSC_CLOCK/2) // divide by 2 for the internal divider
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
 
 //-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-machine_config_constructor nes_sunsoft_5_device::device_mconfig_additions() const
+void nes_sunsoft_5_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( sun_5b );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	// TODO: this is not how Sunsoft 5B clock signaling works!
+	// The board uses the CLK pin in reality, not hardcoded NTSC values!
+	SUNSOFT_5B_SOUND(config, m_ym2149, XTAL(21'477'272)/12).add_route(ALL_OUTPUTS, "addon", 0.50);
 }

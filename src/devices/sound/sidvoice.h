@@ -1,111 +1,110 @@
 // license:BSD-3-Clause
 // copyright-holders:Peter Trauner
-#pragma once
+#ifndef MAME_SOUND_SIDVOICE_H
+#define MAME_SOUND_SIDVOICE_H
 
-#ifndef __SIDVOICE_H__
-#define __SIDVOICE_H__
+#pragma once
 
 
 /*
   approximation of the sid6581 chip
   this part is for 1 (of the 3) voices of a chip
 */
-#include "sound/mos6581.h"
-
-struct sw_storage
-{
-	UINT16 len;
-#if defined(DIRECT_FIXPOINT)
-	UINT32 stp;
-#else
-	UINT32 pnt;
-	INT16 stp;
-#endif
-};
-
 struct SID6581_t;
 
 struct sidOperator
 {
-	SID6581_t *sid;
-	UINT8 reg[7];
-	UINT32 SIDfreq;
-	UINT16 SIDpulseWidth;
-	UINT8 SIDctrl;
-	UINT8 SIDAD, SIDSR;
-
-	sidOperator* carrier;
-	sidOperator* modulator;
-	int sync;
-
-	UINT16 pulseIndex, newPulseIndex;
-	UINT16 curSIDfreq;
-	UINT16 curNoiseFreq;
-
-	UINT8 output;//, outputMask;
-
-	char filtVoiceMask;
-	int filtEnabled;
-	float filtLow, filtRef;
-	INT8 filtIO;
-
-	INT32 cycleLenCount;
+	struct sw_storage
+	{
+		uint16_t len = 0;
 #if defined(DIRECT_FIXPOINT)
-	cpuLword cycleLen, cycleAddLen;
+		uint32_t stp = 0;
 #else
-	UINT32 cycleAddLenPnt;
-	UINT16 cycleLen, cycleLenPnt;
+		uint32_t pnt = 0;
+		int16_t stp = 0;
+#endif
+	};
+
+	SID6581_t *sid = nullptr;
+	uint8_t reg[7]{ 0 };
+	uint32_t SIDfreq = 0;
+	uint16_t SIDpulseWidth = 0;
+	uint8_t SIDctrl = 0;
+	uint8_t SIDAD = 0, SIDSR = 0;
+
+	sidOperator *carrier = nullptr;
+	sidOperator *modulator = nullptr;
+	int sync = 0;
+
+	uint16_t pulseIndex = 0, newPulseIndex = 0;
+	uint16_t curSIDfreq = 0;
+	uint16_t curNoiseFreq = 0;
+
+	uint8_t output = 0/*, outputMask = 0*/;
+
+	char filtVoiceMask = 0;
+	int filtEnabled = 0;
+	float filtLow = 0, filtRef = 0;
+	int8_t filtIO = 0;
+
+	int32_t cycleLenCount = 0;
+#if defined(DIRECT_FIXPOINT)
+	PAIR cycleLen, cycleAddLen;
+#else
+	uint32_t cycleAddLenPnt = 0;
+	uint16_t cycleLen, cycleLenPnt = 0;
 #endif
 
-	INT8(*outProc)(sidOperator *);
-	void(*waveProc)(sidOperator *);
+	int8_t (*outProc)(sidOperator *) = nullptr;
+	void (*waveProc)(sidOperator *) = nullptr;
 
 #if defined(DIRECT_FIXPOINT)
-	cpuLword waveStep, waveStepAdd;
+	PAIR waveStep, waveStepAdd;
 #else
-	UINT16 waveStep, waveStepAdd;
-	UINT32 waveStepPnt, waveStepAddPnt;
+	uint16_t waveStep = 0, waveStepAdd = 0;
+	uint32_t waveStepPnt = 0, waveStepAddPnt = 0;
 #endif
-	UINT16 waveStepOld;
-	struct sw_storage wavePre[2];
+	uint16_t waveStepOld = 0;
+	sw_storage wavePre[2];
 
-#if defined(DIRECT_FIXPOINT) && defined(LARGE_NOISE_TABLE)
-	cpuLword noiseReg;
-#elif defined(DIRECT_FIXPOINT)
-	cpuLBword noiseReg;
+#if defined(DIRECT_FIXPOINT)
+	PAIR noiseReg;
 #else
-	UINT32 noiseReg;
+	uint32_t noiseReg = 0;
 #endif
-	UINT32 noiseStep, noiseStepAdd;
-	UINT8 noiseOutput;
-	int noiseIsLocked;
+	uint32_t noiseStep = 0, noiseStepAdd = 0;
+	uint8_t noiseOutput = 0;
+	int noiseIsLocked = 0;
 
-	UINT8 ADSRctrl;
-//  int gateOnCtrl, gateOffCtrl;
-	UINT16 (*ADSRproc)(sidOperator *);
+	uint8_t ADSRctrl = 0;
+//  int gateOnCtrl = 0, gateOffCtrl = 0;
+	uint16_t (*ADSRproc)(sidOperator *) = nullptr;
 
 #ifdef SID_FPUENVE
-	float fenveStep, fenveStepAdd;
-	UINT32 enveStep;
+	float fenveStep = 0.0, fenveStepAdd = 0.0;
+	uint32_t enveStep = 0;
 #elif defined(DIRECT_FIXPOINT)
-	cpuLword enveStep, enveStepAdd;
+	PAIR enveStep, enveStepAdd;
 #else
-	UINT16 enveStep, enveStepAdd;
-	UINT32 enveStepPnt, enveStepAddPnt;
+	uint16_t enveStep = 0, enveStepAdd = 0;
+	uint32_t enveStepPnt = 0, enveStepAddPnt = 0;
 #endif
-	UINT8 enveVol, enveSusVol;
-	UINT16 enveShortAttackCount;
+	uint8_t enveVol = 0, enveSusVol = 0;
+	uint16_t enveShortAttackCount = 0;
+
+	void clear();
+
+	void set();
+	void set2();
+	static int8_t wave_calc_normal(sidOperator *pVoice);
+
+private:
+	void wave_calc_cycle_len();
 };
 
-typedef INT8 (*ptr2sidFunc)(sidOperator *);
-typedef UINT16 (*ptr2sidUwordFunc)(sidOperator *);
+typedef int8_t (*ptr2sidFunc)(sidOperator *);
+typedef uint16_t (*ptr2sidUwordFunc)(sidOperator *);
 typedef void (*ptr2sidVoidFunc)(sidOperator *);
-
-void sidClearOperator( sidOperator* pVoice );
-
-void sidEmuSet(sidOperator* pVoice);
-void sidEmuSet2(sidOperator* pVoice);
-INT8 sidWaveCalcNormal(sidOperator* pVoice);
 
 void sidInitWaveformTables(int type);
 void sidInitMixerEngine(running_machine &machine);
@@ -117,4 +116,4 @@ extern ptr2sidVoidFunc sid8580ModeNormalTable[16];
 extern ptr2sidVoidFunc sid8580ModeRingTable[16];
 #endif
 
-#endif /* __SIDVOICE_H__ */
+#endif // MAME_SOUND_SIDVOICE_H

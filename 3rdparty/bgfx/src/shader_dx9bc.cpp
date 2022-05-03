@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 Branimir Karadzic. All rights reserved.
+ * Copyright 2011-2021 Branimir Karadzic. All rights reserved.
  * License: https://github.com/bkaradzic/bgfx#license-bsd-2-clause
  */
 
@@ -225,7 +225,7 @@ namespace bgfx
 
 	const char* getName(Dx9bcOpcode::Enum _opcode)
 	{
-		BX_CHECK(_opcode < Dx9bcOpcode::Count, "Unknown opcode id %d (%x).", _opcode, _opcode);
+		BX_ASSERT(_opcode < Dx9bcOpcode::Count, "Unknown opcode id %d (%x).", _opcode, _opcode);
 		return s_dx9bcOpcode[_opcode];
 	}
 
@@ -282,9 +282,9 @@ namespace bgfx
 		size += bx::read(_reader, token, _err);
 
 		_subOperand.type        =   Dx9bcOperandType::Enum( ( (token & UINT32_C(0x70000000) ) >> 28)
-														  | ( (token & UINT32_C(0x00001800) ) >>  8) );
+		                                                  | ( (token & UINT32_C(0x00001800) ) >>  8) );
 		_subOperand.regIndex    =                             (token & UINT32_C(0x000007ff) );
-		_subOperand.swizzleBits =                      uint8_t( (token & UINT32_C(0x00ff0000) ) >> 16);
+		_subOperand.swizzleBits =                    uint8_t( (token & UINT32_C(0x00ff0000) ) >> 16);
 
 		return size;
 	}
@@ -443,12 +443,12 @@ namespace bgfx
 
 		switch (_instruction.numOperands)
 		{
-		case 6: size += read(_reader, _instruction.operand[currOp++], _err);
-		case 5: size += read(_reader, _instruction.operand[currOp++], _err);
-		case 4: size += read(_reader, _instruction.operand[currOp++], _err);
-		case 3: size += read(_reader, _instruction.operand[currOp++], _err);
-		case 2: size += read(_reader, _instruction.operand[currOp++], _err);
-		case 1: size += read(_reader, _instruction.operand[currOp++], _err);
+		case 6: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 5: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 4: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 3: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 2: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 1: size += read(_reader, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
 		case 0:
 			if (!valuesBeforeOpcode
 			&&  0 < info.numValues)
@@ -458,7 +458,7 @@ namespace bgfx
 			break;
 
 		default:
-			BX_CHECK(false, "Instruction %s with invalid number of operands %d (numValues %d)."
+			BX_ASSERT(false, "Instruction %s with invalid number of operands %d (numValues %d)."
 					, getName(_instruction.opcode)
 					, _instruction.numOperands
 					, info.numValues
@@ -482,12 +482,12 @@ namespace bgfx
 		uint32_t currOp = 0;
 		switch (_instruction.numOperands)
 		{
-		case 6: size += write(_writer, _instruction.operand[currOp++], _err);
-		case 5: size += write(_writer, _instruction.operand[currOp++], _err);
-		case 4: size += write(_writer, _instruction.operand[currOp++], _err);
-		case 3: size += write(_writer, _instruction.operand[currOp++], _err);
-		case 2: size += write(_writer, _instruction.operand[currOp++], _err);
-		case 1: size += write(_writer, _instruction.operand[currOp++], _err);
+		case 6: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 5: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 4: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 3: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 2: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
+		case 1: size += write(_writer, _instruction.operand[currOp++], _err); BX_FALLTHROUGH;
 		case 0:
 			break;
 		}
@@ -642,7 +642,7 @@ namespace bgfx
 				char temp[512];
 				toString(temp, 512, instruction);
 
-				BX_CHECK(length/4 == instruction.length
+				BX_ASSERT(length/4 == instruction.length
 						, "%s\nread %d, expected %d"
 						, temp
 						, length/4
@@ -712,7 +712,7 @@ namespace bgfx
 		{
 			Dx9bcInstruction instruction;
 			uint32_t size = read(&reader, instruction, _err);
-			BX_CHECK(size/4 == instruction.length, "read %d, expected %d", size/4, instruction.length); BX_UNUSED(size);
+			BX_ASSERT(size/4 == instruction.length, "read %d, expected %d", size/4, instruction.length); BX_UNUSED(size);
 
 			bool cont = _fn(token * sizeof(uint32_t), instruction, _userData);
 			if (!cont)
@@ -737,11 +737,11 @@ namespace bgfx
 		{
 			Dx9bcInstruction instruction;
 			uint32_t size = read(&reader, instruction, _err);
-			BX_CHECK(size/4 == instruction.length, "read %d, expected %d", size/4, instruction.length); BX_UNUSED(size);
+			BX_ASSERT(size/4 == instruction.length, "read %d, expected %d", size/4, instruction.length); BX_UNUSED(size);
 
 			_fn(instruction, _userData);
 
-			write(&writer, instruction);
+			write(&writer, instruction, _err);
 
 			token += instruction.length;
 		}
@@ -749,7 +749,7 @@ namespace bgfx
 		uint8_t* data = (uint8_t*)mb.more();
 		uint32_t size = uint32_t(bx::getSize(&writer) );
 		_dst.byteCode.reserve(size);
-		memcpy(_dst.byteCode.data(), data, size);
+		bx::memCopy(_dst.byteCode.data(), data, size);
 	}
 
 } // namespace bgfx

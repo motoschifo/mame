@@ -8,42 +8,17 @@
 //
 //============================================================
 
-#ifndef INPUT_SDLCOMMON_H_
-#define INPUT_SDLCOMMON_H_
+#ifndef MAME_OSD_INPUT_INPUT_SDLCOMMON_H
+#define MAME_OSD_INPUT_INPUT_SDLCOMMON_H
 
-#include <vector>
-#include <unordered_map>
+#pragma once
+
 #include <algorithm>
-#include <queue>
+#include <unordered_map>
 
 #define MAX_DEVMAP_ENTRIES  16
 #define SDL_MODULE_EVENT_BUFFER_SIZE 5
 
-// state information for a keyboard
-struct keyboard_state
-{
-	INT32   state[0x3ff];                                   // must be INT32!
-	INT8    oldkey[MAX_KEYS];
-	INT8    currkey[MAX_KEYS];
-};
-
-// state information for a mouse
-struct mouse_state
-{
-	INT32 lX, lY;
-	INT32 buttons[MAX_BUTTONS];
-};
-
-
-// state information for a joystick; DirectInput state must be first element
-struct joystick_state
-{
-	SDL_Joystick *device;
-	INT32 axes[MAX_AXES];
-	INT32 buttons[MAX_BUTTONS];
-	INT32 hatsU[MAX_HATS], hatsD[MAX_HATS], hatsL[MAX_HATS], hatsR[MAX_HATS];
-	INT32 balls[MAX_AXES];
-};
 
 struct device_map_t
 {
@@ -62,6 +37,7 @@ struct device_map_t
 class sdl_event_subscriber
 {
 public:
+	virtual ~sdl_event_subscriber() {}
 	virtual void handle_event(SDL_Event &sdlevent) = 0;
 };
 
@@ -76,27 +52,35 @@ protected:
 	}
 
 public:
-	void subscribe(int* event_types, int num_event_types, TSubscriber *subscriber)
+	virtual ~event_manager_t()
+	{
+	}
+
+	template <size_t N>
+	void subscribe(int const (&event_types)[N], TSubscriber *subscriber)
 	{
 		std::lock_guard<std::mutex> scope_lock(m_lock);
 
 		// Add the subscription
-		for (int i = 0; i < num_event_types; i++)
-		{
-			m_subscription_index.emplace(event_types[i], subscriber);
-		}
+		for (int i : event_types)
+			m_subscription_index.emplace(i, subscriber);
 	}
 
 	void unsubscribe(TSubscriber *subscriber)
 	{
 		std::lock_guard<std::mutex> scope_lock(m_lock);
 
-		// Loop over the entries and find ones that match our subscriber
-		// remove those that match
-		for (auto iter = m_subscription_index.begin(); iter != m_subscription_index.end(); iter++)
+		// Remove the events that match the subscriber
+		for (auto it = begin(m_subscription_index); it != end(m_subscription_index);)
 		{
-			if (iter->second == subscriber)
-				m_subscription_index.erase(iter);
+			if (it->second == subscriber)
+			{
+				it = m_subscription_index.erase(it);
+			}
+			else
+			{
+				++it;
+			}
 		}
 	}
 
@@ -105,22 +89,22 @@ public:
 
 class sdl_window_info;
 
-// REVIEW: Do we need to handle SDLMAME_EVENTS_IN_WORKER_THREAD eventually?
 class sdl_event_manager : public event_manager_t<sdl_event_subscriber>
 {
 private:
-	bool                  m_app_has_mouse_focus;
-	sdl_window_info *     m_focus_window;
+	bool                                 m_mouse_over_window;
+	std::shared_ptr<sdl_window_info>     m_focus_window;
 
 	sdl_event_manager()
-		: m_app_has_mouse_focus(true),
+		: m_mouse_over_window(true),
 		  m_focus_window(nullptr)
 	{
 	}
 
 public:
-	bool app_has_mouse_focus() { return m_app_has_mouse_focus; }
-	sdl_window_info * focus_window() { return m_focus_window; }
+	bool mouse_over_window() const { return m_mouse_over_window; }
+	bool has_focus() const { return m_focus_window != nullptr; }
+	std::shared_ptr<sdl_window_info> focus_window() const { return m_focus_window; }
 
 	static sdl_event_manager& instance()
 	{
@@ -137,17 +121,6 @@ private:
 //============================================================
 //  INLINE FUNCTIONS
 //============================================================
-
-static inline int devmap_leastfree(device_map_t *devmap)
-{
-	int i;
-	for (i = 0; i < MAX_DEVMAP_ENTRIES; i++)
-	{
-		if (devmap->map[i].name.length() == 0)
-			return i;
-	}
-	return -1;
-}
 
 static inline std::string remove_spaces(const char *s)
 {
@@ -174,6 +147,7 @@ static inline void devmap_init(running_machine &machine, device_map_t *devmap, c
 	// Initialize the map to default uninitialized values
 	for (dev = 0; dev < MAX_DEVMAP_ENTRIES; dev++)
 	{
+		devmap->map[dev].name.clear();
 		devmap->map[dev].physical = -1;
 		devmap->logical[dev] = -1;
 	}
@@ -195,10 +169,10 @@ static inline void devmap_init(running_machine &machine, device_map_t *devmap, c
 		{
 			// remove the spaces from the name store it in the index
 			devmap->map[dev].name = remove_spaces(dev_name);
-			osd_printf_verbose("%s: Logical id %d: %s\n", label, dev + 1, devmap->map[dev].name.c_str());
+			osd_printf_verbose("%s: Logical id %d: %s\n", label, dev + 1, devmap->map[dev].name);
 			devmap->initialized = 1;
 		}
 	}
 }
 
-#endif
+#endif // MAME_OSD_INPUT_INPUT_SDLCOMMON_H

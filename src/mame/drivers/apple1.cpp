@@ -80,7 +80,9 @@
 #include "bus/a1bus/a1cassette.h"
 #include "bus/a1bus/a1cffa.h"
 
-#include "softlist.h"
+#include "emupal.h"
+#include "screen.h"
+#include "softlist_dev.h"
 
 #define A1_CPU_TAG  "maincpu"
 #define A1_PIA_TAG  "pia6821"
@@ -95,6 +97,7 @@ public:
 		m_maincpu(*this, A1_CPU_TAG),
 		m_pia(*this, A1_PIA_TAG),
 		m_ram(*this, RAM_TAG),
+		m_screen(*this, "screen"),
 		m_basicram(*this, A1_BASICRAM_TAG),
 		m_kb0(*this, "KEY0"),
 		m_kb1(*this, "KEY1"),
@@ -103,48 +106,53 @@ public:
 		m_kbspecial(*this, "KBSPECIAL")
 	{ }
 
-	required_device<cpu_device> m_maincpu;
-	required_device<pia6821_device> m_pia;
-	required_device<ram_device> m_ram;
-	required_shared_ptr<UINT8> m_basicram;
-	required_ioport m_kb0, m_kb1, m_kb2, m_kb3, m_kbspecial;
+	void apple1(machine_config &config);
 
+protected:
 	virtual void machine_start() override;
 	virtual void machine_reset() override;
 
-	DECLARE_PALETTE_INIT(apple2);
-	UINT32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
-
-	DECLARE_READ8_MEMBER(ram_r);
-	DECLARE_WRITE8_MEMBER(ram_w);
-	DECLARE_READ8_MEMBER(pia_keyboard_r);
-	DECLARE_WRITE8_MEMBER(pia_display_w);
-	DECLARE_WRITE_LINE_MEMBER(pia_display_gate_w);
-	DECLARE_SNAPSHOT_LOAD_MEMBER( apple1 );
-	TIMER_CALLBACK_MEMBER(ready_start_cb);
-	TIMER_CALLBACK_MEMBER(ready_end_cb);
-	TIMER_CALLBACK_MEMBER(keyboard_strobe_cb);
-
 private:
-	UINT8 *m_ram_ptr, *m_char_ptr;
+	required_device<cpu_device> m_maincpu;
+	required_device<pia6821_device> m_pia;
+	required_device<ram_device> m_ram;
+	required_device<screen_device> m_screen;
+	required_shared_ptr<uint8_t> m_basicram;
+	required_ioport m_kb0, m_kb1, m_kb2, m_kb3, m_kbspecial;
+
+	uint8_t *m_ram_ptr, *m_char_ptr;
 	int m_ram_size, m_char_size;
 
-	UINT8 m_vram[40*24];
+	uint8_t m_vram[40*24];
 	int m_cursx, m_cursy;
 
 	bool m_reset_down;
 	bool m_clear_down;
 
-	UINT8 m_transchar;
-	UINT16 m_lastports[4];
-
-	void plot_text_character(bitmap_ind16 &bitmap, int xpos, int ypos, int xscale, UINT32 code, const UINT8 *textgfx_data, UINT32 textgfx_datalen);
-	void poll_keyboard();
+	uint8_t m_transchar;
+	uint16_t m_lastports[4];
 
 	emu_timer *m_ready_start_timer, *m_ready_end_timer, *m_kbd_strobe_timer;
+
+	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+
+	uint8_t ram_r(offs_t offset);
+	void ram_w(offs_t offset, uint8_t data);
+	uint8_t pia_keyboard_r();
+	void pia_display_w(uint8_t data);
+	DECLARE_WRITE_LINE_MEMBER(pia_display_gate_w);
+	DECLARE_SNAPSHOT_LOAD_MEMBER(snapshot_cb);
+	TIMER_CALLBACK_MEMBER(ready_start_cb);
+	TIMER_CALLBACK_MEMBER(ready_end_cb);
+	TIMER_CALLBACK_MEMBER(keyboard_strobe_cb);
+
+	void apple1_map(address_map &map);
+
+	void plot_text_character(bitmap_ind16 &bitmap, int xpos, int ypos, int xscale, uint32_t code, const uint8_t *textgfx_data, uint32_t textgfx_datalen);
+	void poll_keyboard();
 };
 
-static const UINT8 apple1_keymap[] =
+static const uint8_t apple1_keymap[] =
 {
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '[', ']', ';', '\'',    // KEY0
 	',', '.', '/', '\\', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',    // KEY1
@@ -164,51 +172,48 @@ static const UINT8 apple1_keymap[] =
 };
 
 // header is "LOAD:abcdDATA:" where abcd is the starting address
-SNAPSHOT_LOAD_MEMBER( apple1_state, apple1 )
+SNAPSHOT_LOAD_MEMBER(apple1_state::snapshot_cb)
 {
-	UINT64 snapsize;
-	UINT8 *data;
-	UINT16 start, end;
 	static const char hd1[6] = "LOAD:";
 	static const char hd2[6] = "DATA:";
 
 	// get the snapshot's size
-	snapsize = image.length();
+	uint64_t snapsize = image.length();
 
 	if (snapsize < 12)
 	{
 		logerror("Snapshot is too short\n");
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
 	if ((snapsize - 12) > 65535)
 	{
 		logerror("Snapshot is too long\n");
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
-	data = (UINT8 *)image.ptr();
-	if (!data)
+	auto data = std::make_unique<uint8_t []>(snapsize);
+	if (image.fread(data.get(), snapsize) != snapsize)
 	{
 		logerror("Internal error loading snapshot\n");
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
-	if ((memcmp(hd1, data, 5)) || (memcmp(hd2, &data[7], 5)))
+	if ((memcmp(hd1, &data[0], 5)) || (memcmp(hd2, &data[7], 5)))
 	{
 		logerror("Snapshot is invalid\n");
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
-	start = (data[5]<<8) | data[6];
-	end = (snapsize - 12) + start;
+	uint16_t start = (data[5]<<8) | data[6];
+	uint16_t end = (snapsize - 12) + start;
 
 	// check if this fits in RAM; load below 0xe000 must fit in RAMSIZE,
 	// load at 0xe000 must fit in 4K
 	if (((start < 0xe000) && (end > (m_ram_size - 1))) || (end > 0xefff))
 	{
 		logerror("Snapshot can't fit in RAM\n");
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
 	if (start < 0xe000)
@@ -222,16 +227,16 @@ SNAPSHOT_LOAD_MEMBER( apple1_state, apple1 )
 	else
 	{
 		logerror("Snapshot has invalid load address %04x\n", start);
-		return IMAGE_INIT_FAIL;
+		return image_init_result::FAIL;
 	}
 
-	return IMAGE_INIT_PASS;
+	return image_init_result::PASS;
 }
 
 void apple1_state::poll_keyboard()
 {
-	UINT8 special = m_kbspecial->read();
-	UINT16 ports[4];
+	uint8_t special = m_kbspecial->read();
+	uint16_t ports[4];
 	int rawkey = 0;
 	bool bKeypress = false;
 
@@ -270,7 +275,7 @@ void apple1_state::poll_keyboard()
 
 	for (int port = 0; port < 4; port++)
 	{
-		UINT16 ptread = ports[port] ^ m_lastports[port];
+		uint16_t ptread = ports[port] ^ m_lastports[port];
 
 		for (int bit = 0; bit < 16; bit++)
 		{
@@ -313,50 +318,47 @@ void apple1_state::poll_keyboard()
 	}
 }
 
-void apple1_state::plot_text_character(bitmap_ind16 &bitmap, int xpos, int ypos, int xscale, UINT32 code,
-	const UINT8 *textgfx_data, UINT32 textgfx_datalen)
+void apple1_state::plot_text_character(bitmap_ind16 &bitmap, int xpos, int ypos, int xscale, uint32_t code,
+	const uint8_t *textgfx_data, uint32_t textgfx_datalen)
 {
-	int x, y, i;
-	const UINT8 *chardata;
-	UINT16 color;
 	int fg = 1, bg = 0;
-	int charcode = (code & 0x1f) | (((code ^ 0x40) & 0x40) >> 1);
+	int const charcode = (code & 0x1f) | (((code ^ 0x40) & 0x40) >> 1);
 
 	/* look up the character data */
-	chardata = &textgfx_data[(charcode * 8)];
+	uint8_t const *const chardata = &textgfx_data[(charcode * 8)];
 
-	for (y = 0; y < 8; y++)
+	for (int y = 0; y < 8; y++)
 	{
-		for (x = 0; x < 7; x++)
+		for (int x = 0; x < 7; x++)
 		{
-			color = (chardata[y] & (1 << (6-x))) ? fg : bg;
+			uint16_t const color = (chardata[y] & (1 << (6-x))) ? fg : bg;
 
-			for (i = 0; i < xscale; i++)
+			for (int i = 0; i < xscale; i++)
 			{
-				bitmap.pix16(ypos + y, xpos + (x * xscale) + i) = color;
+				bitmap.pix(ypos + y, xpos + (x * xscale) + i) = color;
 			}
 		}
 	}
 }
 
-UINT32 apple1_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t apple1_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	int vramad;
 	int cursor_blink = 0;
-	UINT8 curs_save = 0;
+	uint8_t curs_save = 0;
 
 	poll_keyboard();
 
 	// the cursor 555 timer counts 0.52 of a second; the cursor is ON for
 	// 2 of those counts and OFF for the last one.
-	if (((int)(machine().time().as_double() / (0.52 / 3.0)) % 3) < 2)
+	if ((int(machine().time().as_double() / (0.52 / 3.0)) % 3) < 2)
 	{
 		curs_save = m_vram[(m_cursy * 40) + m_cursx];
 		m_vram[(m_cursy * 40) + m_cursx] = 0x40;
 		cursor_blink = 1;
 	}
 
-	for (int row = 0; row < cliprect.max_y; row += 8)
+	for (int row = 0; row < cliprect.bottom(); row += 8)
 	{
 		for (int col = 0; col < 40; col++)
 		{
@@ -406,7 +408,7 @@ void apple1_state::machine_reset()
 	m_lastports[0] = m_lastports[1] = m_lastports[2] = m_lastports[3] = 0;
 }
 
-READ8_MEMBER(apple1_state::ram_r)
+uint8_t apple1_state::ram_r(offs_t offset)
 {
 	if (offset < m_ram_size)
 	{
@@ -416,7 +418,7 @@ READ8_MEMBER(apple1_state::ram_r)
 	return 0xff;
 }
 
-WRITE8_MEMBER(apple1_state::ram_w)
+void apple1_state::ram_w(offs_t offset, uint8_t data)
 {
 	if (offset < m_ram_size)
 	{
@@ -424,19 +426,20 @@ WRITE8_MEMBER(apple1_state::ram_w)
 	}
 }
 
-static ADDRESS_MAP_START( apple1_map, AS_PROGRAM, 8, apple1_state )
-	AM_RANGE(0x0000, 0xbfff) AM_READWRITE(ram_r, ram_w)
-	AM_RANGE(0xd010, 0xd013) AM_MIRROR(0x0fec) AM_DEVREADWRITE(A1_PIA_TAG, pia6821_device, read, write)
-	AM_RANGE(0xe000, 0xefff) AM_RAM AM_SHARE(A1_BASICRAM_TAG)
-	AM_RANGE(0xff00, 0xffff) AM_ROM AM_REGION(A1_CPU_TAG, 0)
-ADDRESS_MAP_END
+void apple1_state::apple1_map(address_map &map)
+{
+	map(0x0000, 0xbfff).rw(FUNC(apple1_state::ram_r), FUNC(apple1_state::ram_w));
+	map(0xd010, 0xd013).mirror(0x0fec).rw(m_pia, FUNC(pia6821_device::read), FUNC(pia6821_device::write));
+	map(0xe000, 0xefff).ram().share(A1_BASICRAM_TAG);
+	map(0xff00, 0xffff).rom().region(A1_CPU_TAG, 0);
+}
 
-READ8_MEMBER(apple1_state::pia_keyboard_r)
+uint8_t apple1_state::pia_keyboard_r()
 {
 	return m_transchar | 0x80;  // bit 7 is wired high, similar-ish to the Apple II
 }
 
-WRITE8_MEMBER(apple1_state::pia_display_w)
+void apple1_state::pia_display_w(uint8_t data)
 {
 	data &= 0x7f;   // D7 is ignored by the video h/w
 
@@ -490,7 +493,7 @@ WRITE_LINE_MEMBER(apple1_state::pia_display_gate_w)
 	// falling edge means start the display timer
 	if (state == CLEAR_LINE)
 	{
-		m_ready_start_timer->adjust(machine().first_screen()->time_until_pos(m_cursy, m_cursx));
+		m_ready_start_timer->adjust(m_screen->time_until_pos(m_cursy, m_cursx));
 	}
 }
 
@@ -579,40 +582,39 @@ static INPUT_PORTS_START( apple1 )
 	PORT_BIT( 0x0020, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_NAME("Clear") PORT_CODE(KEYCODE_F2) PORT_CHAR(UCHAR_MAMEKEY(F2))
 INPUT_PORTS_END
 
-static SLOT_INTERFACE_START(apple1_cards)
-	SLOT_INTERFACE("cassette", A1BUS_CASSETTE)
-	SLOT_INTERFACE("cffa", A1BUS_CFFA)
-SLOT_INTERFACE_END
+static void apple1_cards(device_slot_interface &device)
+{
+	device.option_add("cassette", A1BUS_CASSETTE);
+	device.option_add("cffa", A1BUS_CFFA);
+}
 
-static MACHINE_CONFIG_START( apple1, apple1_state )
-	MCFG_CPU_ADD(A1_CPU_TAG, M6502, 960000)        // effective CPU speed
-	MCFG_CPU_PROGRAM_MAP(apple1_map)
+void apple1_state::apple1(machine_config &config)
+{
+	M6502(config, m_maincpu, 960000);        // effective CPU speed
+	m_maincpu->set_addrmap(AS_PROGRAM, &apple1_state::apple1_map);
 
 	// video timings are identical to the Apple II, unsurprisingly
-	MCFG_SCREEN_ADD("screen", RASTER)
-	MCFG_SCREEN_RAW_PARAMS(XTAL_14_31818MHz, (65*7)*2, 0, (40*7)*2, 262, 0, 192)
-	MCFG_SCREEN_UPDATE_DRIVER(apple1_state, screen_update)
-	MCFG_SCREEN_PALETTE("palette")
+	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+	m_screen->set_raw(XTAL(14'318'181), (65*7)*2, 0, (40*7)*2, 262, 0, 192);
+	m_screen->set_screen_update(FUNC(apple1_state::screen_update));
+	m_screen->set_palette("palette");
 
-	MCFG_PALETTE_ADD_MONOCHROME("palette")
+	PALETTE(config, "palette", palette_device::MONOCHROME);
 
-	MCFG_DEVICE_ADD( A1_PIA_TAG, PIA6821, 0)
-	MCFG_PIA_READPA_HANDLER(READ8(apple1_state, pia_keyboard_r))
-	MCFG_PIA_WRITEPB_HANDLER(WRITE8(apple1_state, pia_display_w))
-	MCFG_PIA_CB2_HANDLER(WRITELINE(apple1_state, pia_display_gate_w))
+	PIA6821(config, m_pia, 0);
+	m_pia->readpa_handler().set(FUNC(apple1_state::pia_keyboard_r));
+	m_pia->writepb_handler().set(FUNC(apple1_state::pia_display_w));
+	m_pia->cb2_handler().set(FUNC(apple1_state::pia_display_gate_w));
 
-	MCFG_DEVICE_ADD(A1_BUS_TAG, A1BUS, 0)
-	MCFG_A1BUS_CPU("maincpu")
-	MCFG_A1BUS_SLOT_ADD(A1_BUS_TAG, "exp", apple1_cards, "cassette")
+	A1BUS(config, A1_BUS_TAG, 0).set_space(m_maincpu, AS_PROGRAM);
+	A1BUS_SLOT(config, "exp", 0, A1_BUS_TAG, apple1_cards, "cassette");
 
-	MCFG_SNAPSHOT_ADD("snapshot", apple1_state, apple1, "snp", 0)
+	SNAPSHOT(config, "snapshot", "snp").set_load_callback(FUNC(apple1_state::snapshot_cb));
 
-	MCFG_SOFTWARE_LIST_ADD("cass_list", "apple1")
+	SOFTWARE_LIST(config, "cass_list").set_original("apple1");
 
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("48K")
-	MCFG_RAM_EXTRA_OPTIONS("4K,8K,12K,16K,20K,24K,28K,32K,36K,40K,44K")
-MACHINE_CONFIG_END
+	RAM(config, RAM_TAG).set_default_size("48K").set_extra_options("4K,8K,12K,16K,20K,24K,28K,32K,36K,40K,44K");
+}
 
 ROM_START(apple1)
 	ROM_REGION(0x100, A1_CPU_TAG, 0)
@@ -622,5 +624,5 @@ ROM_START(apple1)
 	ROM_LOAD("s2513.d2", 0x0000, 0x0200, CRC(a7e567fc) SHA1(b18aae0a2d4f92f5a7e22640719bbc4652f3f4ee)) // apple1.vid
 ROM_END
 
-/*    YEAR  NAME    PARENT  COMPAT  MACHINE     INPUT   STATE         INIT     COMPANY            FULLNAME */
-COMP( 1976, apple1,  0,     0,      apple1,     apple1, driver_device,  0,        "Apple Computer",    "Apple I", MACHINE_NO_SOUND_HW | MACHINE_SUPPORTS_SAVE )
+/*    YEAR  NAME    PARENT  COMPAT  MACHINE  INPUT   CLASS         INIT        COMPANY           FULLNAME */
+COMP( 1976, apple1, 0,      0,      apple1,  apple1, apple1_state, empty_init, "Apple Computer", "Apple I", MACHINE_NO_SOUND_HW | MACHINE_SUPPORTS_SAVE )

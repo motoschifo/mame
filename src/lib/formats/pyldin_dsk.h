@@ -7,13 +7,15 @@
     pyldin format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_PYLDIN_DSK_H
+#define MAME_FORMATS_PYLDIN_DSK_H
 
-#ifndef PYLDIN_DSK_H_
-#define PYLDIN_DSK_H_
+#pragma once
 
 #include "upd765_dsk.h"
 
-class pyldin_format : public upd765_format {
+class pyldin_format : public upd765_format
+{
 public:
 	pyldin_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_PYLDIN_FORMAT;
+extern const pyldin_format FLOPPY_PYLDIN_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_PYLDIN_DSK_H

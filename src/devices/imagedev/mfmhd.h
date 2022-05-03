@@ -11,12 +11,17 @@
 
 *****************************************************************************/
 
-#ifndef __MFMHD__
-#define __MFMHD__
+#ifndef MAME_DEVICES_IMAGEDEV_MFMHD_H
+#define MAME_DEVICES_IMAGEDEV_MFMHD_H
 
-#include "emu.h"
+#pragma once
+
 #include "imagedev/harddriv.h"
+
 #include "formats/mfm_hd.h"
+
+#include <system_error>
+
 
 class mfm_harddisk_device;
 
@@ -26,7 +31,7 @@ public:
 	bool    dirty;
 	int     cylinder;
 	int     head;
-	UINT16* encdata;            // MFM encoding per byte
+	std::unique_ptr<uint16_t []> encdata;            // MFM encoding per byte
 	mfmhd_trackimage* next;
 };
 
@@ -36,7 +41,7 @@ public:
 	mfmhd_trackimage_cache(running_machine &machine);
 	~mfmhd_trackimage_cache();
 	void        init(mfm_harddisk_device* mfmhd, int tracksize, int trackslots);
-	UINT16*     get_trackimage(int cylinder, int head);
+	uint16_t*     get_trackimage(int cylinder, int head);
 	void        mark_current_as_dirty();
 	void        cleanup();
 	void        write_back_one();
@@ -47,16 +52,22 @@ private:
 	running_machine &           m_machine;
 };
 
-class mfm_harddisk_device : public harddisk_image_device,
-							public device_slot_card_interface
+class mfm_harddisk_device : public device_t, public device_image_interface
 {
 public:
-	mfm_harddisk_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source);
 	~mfm_harddisk_device();
 
 	typedef delegate<void (mfm_harddisk_device*, int)> index_pulse_cb;
 	typedef delegate<void (mfm_harddisk_device*, int)> ready_cb;
 	typedef delegate<void (mfm_harddisk_device*, int)> seek_complete_cb;
+
+	virtual bool is_readable()  const noexcept override { return true; }
+	virtual bool is_writeable() const noexcept override { return true; }
+	virtual bool is_creatable() const noexcept override { return false; }
+	virtual bool is_reset_on_load() const noexcept override { return false; }
+	virtual const char *image_type_name() const noexcept override { return "harddisk"; }
+	virtual const char *image_brief_type_name() const noexcept override { return "hard"; }
+	virtual const char *file_extensions() const noexcept override { return "chd"; }
 
 	void setup_index_pulse_cb(index_pulse_cb cb);
 	void setup_ready_cb(ready_cb cb);
@@ -76,10 +87,10 @@ public:
 	line_state      trk00_r() { return m_current_cylinder==0? ASSERT_LINE : CLEAR_LINE; }
 
 	// Data output towards controller
-	bool            read(attotime &from_when, const attotime &limit, UINT16 &data);
+	bool            read(attotime &from_when, const attotime &limit, uint16_t &data);
 
 	// Data input from controller
-	bool            write(attotime &from_when, const attotime &limit, UINT16 cdata, bool wpcom=false, bool reduced_wc=false);
+	bool            write(attotime &from_when, const attotime &limit, uint16_t cdata, bool wpcom=false, bool reduced_wc=false);
 
 	// Step
 	void            step_w(line_state line);
@@ -88,26 +99,26 @@ public:
 	// Head select
 	void            headsel_w(int head) { m_current_head = head & 0x0f; }
 
-	bool            call_load() override;
+	image_init_result            call_load() override;
 	void            call_unload() override;
 
 	// Tells us the time when the track ends (next index pulse). Needed by the controller.
 	attotime        track_end_time();
 
 	// Access the tracks on the image. Used as a callback from the cache.
-	chd_error       load_track(UINT16* data, int cylinder, int head);
-	void            write_track(UINT16* data, int cylinder, int head);
+	std::error_condition load_track(uint16_t* data, int cylinder, int head);
+	void            write_track(uint16_t* data, int cylinder, int head);
 
 	// Delivers the number of heads according to the loaded image
 	int             get_actual_heads();
 
 protected:
-	void                device_start() override;
-	void                device_stop() override;
-	void                device_reset() override;
-	void                device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr) override;
+	mfm_harddisk_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
-	std::string         tts(const attotime &t);
+	virtual void        device_start() override;
+	virtual void        device_stop() override;
+	virtual void        device_reset() override;
+	virtual void        device_timer(emu_timer &timer, device_timer_id id, int param) override;
 
 	emu_timer           *m_index_timer, *m_spinup_timer, *m_seek_timer, *m_cache_timer;
 	index_pulse_cb      m_index_pulse_cb;
@@ -151,9 +162,9 @@ private:
 	attotime    m_settle_time;
 	attotime    m_step_time;
 
-	mfmhd_trackimage_cache* m_cache;
+	std::unique_ptr<mfmhd_trackimage_cache> m_cache;
 	mfmhd_image_format_t*   m_format;
-
+	chd_file   *m_chd;
 	void        head_move();
 	void        recalibrate();
 
@@ -174,50 +185,74 @@ private:
 class mfm_hd_generic_device : public mfm_harddisk_device
 {
 public:
-	mfm_hd_generic_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	mfm_hd_generic_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 };
 
-extern const device_type MFMHD_GENERIC;
+DECLARE_DEVICE_TYPE(MFMHD_GENERIC, mfm_hd_generic_device)
 
 class mfm_hd_st213_device : public mfm_harddisk_device
 {
 public:
-	mfm_hd_st213_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	mfm_hd_st213_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 };
 
-extern const device_type MFMHD_ST213;
+DECLARE_DEVICE_TYPE(MFMHD_ST213, mfm_hd_st213_device)
 
 class mfm_hd_st225_device : public mfm_harddisk_device
 {
 public:
-	mfm_hd_st225_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	mfm_hd_st225_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 };
 
-extern const device_type MFMHD_ST225;
+DECLARE_DEVICE_TYPE(MFMHD_ST225, mfm_hd_st225_device)
 
 class mfm_hd_st251_device : public mfm_harddisk_device
 {
 public:
-	mfm_hd_st251_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	mfm_hd_st251_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 };
 
-extern const device_type MFMHD_ST251;
+DECLARE_DEVICE_TYPE(MFMHD_ST251, mfm_hd_st251_device)
 
 
-/* Connector for a MFM hard disk. See also floppy.c */
+/*
+    Connector for a MFM hard disk. Similar concept as in floppy.cpp.
+*/
 class mfm_harddisk_connector : public device_t,
 								public device_slot_interface
 {
 public:
-	mfm_harddisk_connector(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	template <typename T>
+	mfm_harddisk_connector(const machine_config &mconfig, const char *tag, device_t *owner, T &&opts,
+		const char *dflt, mfmhd_enc_t enc, int spinup, int cache, const mfmhd_format_type format, bool fixed = false)
+		: mfm_harddisk_connector(mconfig, tag, owner, 0)
+	{
+		option_reset();
+		opts(*this);
+		set_default_option(dflt);
+		set_fixed(fixed);
+		configure(enc, spinup, cache, format);
+	}
+
+	mfm_harddisk_connector(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 	~mfm_harddisk_connector();
 
 	mfm_harddisk_device *get_device();
 
+	/*
+	    Configuration parameters:
+	    encoding = Encoding (see comments in mfm_hd.c)
+	    spinupms = Spinup time in milliseconds. Even though this is a property
+	        of the physical device, we need a way to configure it per system;
+	        some systems expect the hard disk to be turned on before the
+	        main system, and expect it to be ready when they try to access it
+	    cache = number of cached MFM tracks
+	    format = MFMHD_GEN_FORMAT (see formats/mfm_hd.h; currently the only value)
+	*/
 	void configure(mfmhd_enc_t encoding, int spinupms, int cache, mfmhd_format_type format);
 
 protected:
-	void device_start() override { };
+	void device_start() override;
 	void device_config_complete() override;
 
 private:
@@ -227,24 +262,6 @@ private:
 	mfmhd_image_format_t* m_format;
 };
 
-extern const device_type MFM_HD_CONNECTOR;
+DECLARE_DEVICE_TYPE(MFM_HD_CONNECTOR, mfm_harddisk_connector)
 
-/*
-    Add a harddisk connector.
-    Parameters:
-    _tag = Tag of the connector
-    _slot_intf = Selection of hard drives
-    _def_slot = Default hard drive
-    _enc = Encoding (see comments in mfm_hd.c)
-    _spinupms = Spinup time in milliseconds (some configurations assume that the
-    user has turned on the hard disk before turning on the system. We cannot
-    emulate this, so we allow for shorter times)
-    _cache = number of cached MFM tracks
-*/
-#define MCFG_MFM_HARDDISK_CONN_ADD(_tag, _slot_intf, _def_slot, _enc, _spinupms, _cache, _format)  \
-	MCFG_DEVICE_ADD(_tag, MFM_HD_CONNECTOR, 0) \
-	MCFG_DEVICE_SLOT_INTERFACE(_slot_intf, _def_slot, false) \
-	static_cast<mfm_harddisk_connector *>(device)->configure(_enc, _spinupms, _cache, _format);
-
-
-#endif
+#endif // MAME_DEVICES_IMAGEDEV_MFMHD_H

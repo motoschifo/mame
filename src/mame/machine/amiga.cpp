@@ -48,7 +48,7 @@
  *
  *************************************/
 
-const char *const amiga_custom_names[0x100] =
+const char *const amiga_state::s_custom_reg_names[0x100] =
 {
 	/* 0x000 */
 	"BLTDDAT",      "DMACONR",      "VPOSR",        "VHPOSR",
@@ -132,7 +132,15 @@ const char *const amiga_custom_names[0x100] =
 	"UNK1F8",       "UNK1FA",       "FMODE",        "UNK1FE"
 };
 
+constexpr XTAL amiga_state::CLK_28M_PAL;
+constexpr XTAL amiga_state::CLK_7M_PAL;
+constexpr XTAL amiga_state::CLK_C1_PAL;
+constexpr XTAL amiga_state::CLK_E_PAL;
 
+constexpr XTAL amiga_state::CLK_28M_NTSC;
+constexpr XTAL amiga_state::CLK_7M_NTSC;
+constexpr XTAL amiga_state::CLK_C1_NTSC;
+constexpr XTAL amiga_state::CLK_E_NTSC;
 
 /*************************************
  *
@@ -142,8 +150,10 @@ const char *const amiga_custom_names[0x100] =
 
 void amiga_state::machine_start()
 {
+	m_power_led.resolve();
+
 	// add callback for RESET instruction
-	m_maincpu->set_reset_callback(write_line_delegate(FUNC(amiga_state::m68k_reset), this));
+	m_maincpu->set_reset_callback(*this, FUNC(amiga_state::m68k_reset));
 
 	// set up chip RAM access
 	memory_share *share = memshare("chip_ram");
@@ -156,14 +166,15 @@ void amiga_state::machine_start()
 	m_irq_timer = timer_alloc(TIMER_AMIGA_IRQ);
 	m_blitter_timer = timer_alloc(TIMER_AMIGA_BLITTER);
 	m_serial_timer = timer_alloc(TIMER_SERIAL);
+	m_scanline_timer = timer_alloc(TIMER_SCANLINE);
 
 	// start the scanline timer
-	timer_set(m_screen->time_until_pos(0), TIMER_SCANLINE);
+	m_scanline_timer->adjust(m_screen->time_until_pos(0));
 }
 
 WRITE_LINE_MEMBER( amiga_state::m68k_reset )
 {
-	logerror("%s: Executed RESET\n", space().machine().describe_context());
+	logerror("%s: Executed RESET\n", machine().describe_context());
 	machine_reset();
 }
 
@@ -183,40 +194,50 @@ void amiga_state::machine_reset()
 	m_overlay->set_bank(1);
 }
 
+WRITE_LINE_MEMBER(amiga_state::fdc_dskblk_w)
+{
+	set_interrupt(INTENA_SETCLR | INTENA_DSKBLK);
+}
+
+WRITE_LINE_MEMBER(amiga_state::fdc_dsksyn_w)
+{
+	set_interrupt((state ? INTENA_SETCLR : 0) | INTENA_DSKSYN);
+}
+
 WRITE_LINE_MEMBER( amiga_state::kbreset_w )
 {
 	// this is connected to the gary chip, gary then resets the 68k, agnus, paula and the cias
 	if (!state)
 	{
-		m_sound->reset();
+		m_paula->reset();
 		machine_reset();
 		m_maincpu->reset();
 	}
 }
 
 // simple mirror of region 0xf80000 to 0xfbffff
-READ16_MEMBER( amiga_state::rom_mirror_r )
+uint16_t amiga_state::rom_mirror_r(offs_t offset, uint16_t mem_mask)
 {
 	return m_maincpu->space(AS_PROGRAM).read_word(offset + 0xf80000, mem_mask);
 }
 
-READ32_MEMBER( amiga_state::rom_mirror32_r )
+uint32_t amiga_state::rom_mirror32_r(offs_t offset, uint32_t mem_mask)
 {
 	return m_maincpu->space(AS_PROGRAM).read_dword(offset + 0xf80000, mem_mask);
 }
 
-void amiga_state::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void amiga_state::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch (id)
 	{
 	case TIMER_SCANLINE:
-		scanline_callback(ptr, param);
+		scanline_callback(param);
 		break;
 	case TIMER_AMIGA_IRQ:
-		amiga_irq_proc(ptr, param);
+		amiga_irq_proc(param);
 		break;
 	case TIMER_AMIGA_BLITTER:
-		amiga_blitter_proc(ptr, param);
+		amiga_blitter_proc(param);
 		break;
 	case TIMER_SERIAL:
 		serial_shift();
@@ -240,7 +261,6 @@ void amiga_state::vblank()
 // todo: cia a clock can be connected to either a fixed 50/60hz signal from the power supply, or the vblank
 TIMER_CALLBACK_MEMBER( amiga_state::scanline_callback )
 {
-	amiga_state *state = this;
 	int scanline = param;
 
 	// vblank start
@@ -257,12 +277,12 @@ TIMER_CALLBACK_MEMBER( amiga_state::scanline_callback )
 	}
 
 	// vblank end
-	if (scanline == m_screen->visible_area().min_y)
+	if (scanline == m_screen->visible_area().top())
 	{
 		m_cia_0->tod_w(0);
 	}
 
-	if (m_potgo_port)
+	if (m_potgo_port.found())
 	{
 		// pot counters (start counting at 7 (ntsc) or 8 (pal))
 		if (BIT(CUSTOM_REG(REG_POTGO), 0) && (scanline /2 ) > 7)
@@ -277,27 +297,22 @@ TIMER_CALLBACK_MEMBER( amiga_state::scanline_callback )
 	// render up to this scanline
 	if (!m_screen->update_partial(scanline))
 	{
-		if (IS_AGA(this))
-		{
-			bitmap_rgb32 dummy_bitmap;
+		bitmap_rgb32 dummy_bitmap;
+		if (IS_AGA())
 			aga_render_scanline(dummy_bitmap, scanline);
-		}
 		else
-		{
-			bitmap_ind16 dummy_bitmap;
 			render_scanline(dummy_bitmap, scanline);
-		}
 	}
 
 	// clock tod (if we actually render this scanline)
 	m_cia_1->tod_w((scanline & 1) ^ BIT(CUSTOM_REG(REG_VPOSR), 15));
 
 	// force a sound update
-	m_sound->update();
+	m_paula->update();
 
 	// set timer for next line
 	scanline = (scanline + 1) % m_screen->height();
-	timer_set(m_screen->time_until_pos(scanline), TIMER_SCANLINE, scanline);
+	m_scanline_timer->adjust(m_screen->time_until_pos(scanline), scanline);
 }
 
 
@@ -310,7 +325,7 @@ TIMER_CALLBACK_MEMBER( amiga_state::scanline_callback )
 
 void amiga_state::set_interrupt(int interrupt)
 {
-	custom_chip_w(m_maincpu->space(AS_PROGRAM), REG_INTREQ, interrupt, 0xffff);
+	custom_chip_w(REG_INTREQ, interrupt);
 }
 
 bool amiga_state::int2_pending()
@@ -335,8 +350,6 @@ void amiga_state::update_int6()
 
 void amiga_state::update_irqs()
 {
-	amiga_state *state = this;
-
 	// if the external interrupt line is still active, set the interrupt request bit
 	if (int2_pending())
 		CUSTOM_REG(REG_INTREQ) |= INTENA_PORTS;
@@ -373,50 +386,30 @@ TIMER_CALLBACK_MEMBER( amiga_state::amiga_irq_proc )
 	m_irq_timer->reset();
 }
 
+void amiga_state::paula_int_w (offs_t channel, u8 state)
+{
+	set_interrupt(INTENA_SETCLR | (0x80 << channel));
+}
+
 
 //**************************************************************************
 //  INPUTS
 //**************************************************************************
 
-UINT16 amiga_state::joy0dat_r()
+uint16_t amiga_state::joy0dat_r()
 {
-	if (m_input_device == nullptr)
-		return m_joy0dat_port ? m_joy0dat_port->read() : 0xffff;
-
-	if (m_input_device->read() & 0x10)
-		return m_joy0dat_port ? m_joy0dat_port->read() : 0xffff;
+	if (!m_input_device.found() || (m_input_device->read() & 0x10))
+		return m_joy0dat_port.read_safe(0xffff);
 	else
-		return ((m_p1_mouse_y ? m_p1_mouse_y->read() : 0xff) << 8) | (m_p1_mouse_x? m_p1_mouse_x->read() : 0xff);
+		return (m_p1_mouse_y.read_safe(0xff) << 8) | m_p1_mouse_x.read_safe(0xff);
 }
 
-UINT16 amiga_state::joy1dat_r()
+uint16_t amiga_state::joy1dat_r()
 {
-	if (m_input_device == nullptr)
-		return m_joy1dat_port ? m_joy1dat_port->read() : 0xffff;
-
-	if (m_input_device->read() & 0x20)
-		return m_joy1dat_port ? m_joy1dat_port->read() : 0xffff;
+	if (!m_input_device.found() || m_input_device->read() & 0x20)
+		return m_joy1dat_port.read_safe(0xffff);
 	else
-		return ((m_p2_mouse_y ? m_p2_mouse_y->read() : 0xff) << 8) | (m_p2_mouse_x ? m_p2_mouse_x->read() : 0xff);
-}
-
-CUSTOM_INPUT_MEMBER( amiga_state::amiga_joystick_convert )
-{
-	ioport_port *ports[2] = { m_p1joy_port, m_p2joy_port };
-	UINT8 bits = 0xff;
-
-	if (ports[(int)(FPTR)param])
-		bits = ports[(int)(FPTR)param]->read();
-
-	int up = (bits >> 0) & 1;
-	int down = (bits >> 1) & 1;
-	int left = (bits >> 2) & 1;
-	int right = (bits >> 3) & 1;
-
-	if (left) up ^= 1;
-	if (right) down ^= 1;
-
-	return down | (right << 1) | (up << 8) | (left << 9);
+		return (m_p2_mouse_y.read_safe(0xff) << 8) | m_p2_mouse_x.read_safe(0xff);
 }
 
 
@@ -427,15 +420,15 @@ CUSTOM_INPUT_MEMBER( amiga_state::amiga_joystick_convert )
  *
  *************************************/
 
-static UINT32 blit_ascending(amiga_state *state)
+uint32_t amiga_state::blit_ascending()
 {
-	UINT32 shifta = (CUSTOM_REG(REG_BLTCON0) >> 12) & 0xf;
-	UINT32 shiftb = (CUSTOM_REG(REG_BLTCON1) >> 12) & 0xf;
-	UINT32 height = CUSTOM_REG(REG_BLTSIZV);
-	UINT32 width = CUSTOM_REG(REG_BLTSIZH);
-	UINT32 acca = 0, accb = 0;
-	UINT32 blitsum = 0;
-	UINT32 x, y;
+	uint32_t shifta = (CUSTOM_REG(REG_BLTCON0) >> 12) & 0xf;
+	uint32_t shiftb = (CUSTOM_REG(REG_BLTCON1) >> 12) & 0xf;
+	uint32_t height = CUSTOM_REG(REG_BLTSIZV);
+	uint32_t width = CUSTOM_REG(REG_BLTSIZH);
+	uint32_t acca = 0, accb = 0;
+	uint32_t blitsum = 0;
+	uint32_t x, y;
 
 	/* iterate over the height */
 	for (y = 0; y < height; y++)
@@ -443,29 +436,28 @@ static UINT32 blit_ascending(amiga_state *state)
 		/* iterate over the width */
 		for (x = 0; x < width; x++)
 		{
-			UINT16 abc0, abc1, abc2, abc3;
-			UINT32 tempa, tempd = 0;
-			UINT32 b;
+			uint16_t abc0, abc1, abc2, abc3;
+			uint32_t tempa, tempd = 0;
+			uint32_t b;
 
 			/* fetch data for A */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0800)
 			{
-				//CUSTOM_REG(REG_BLTADAT) = state->m_maincpu->space(AS_PROGRAM).read_word(CUSTOM_REG_LONG(REG_BLTAPTH));
-				CUSTOM_REG(REG_BLTADAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTAPTH));
+				CUSTOM_REG(REG_BLTADAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTAPTH));
 				CUSTOM_REG_LONG(REG_BLTAPTH) += 2;
 			}
 
 			/* fetch data for B */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0400)
 			{
-				CUSTOM_REG(REG_BLTBDAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTBPTH));
+				CUSTOM_REG(REG_BLTBDAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTBPTH));
 				CUSTOM_REG_LONG(REG_BLTBPTH) += 2;
 			}
 
 			/* fetch data for C */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0200)
 			{
-				CUSTOM_REG(REG_BLTCDAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTCPTH));
+				CUSTOM_REG(REG_BLTCDAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTCPTH));
 				CUSTOM_REG_LONG(REG_BLTCPTH) += 2;
 			}
 
@@ -489,7 +481,7 @@ static UINT32 blit_ascending(amiga_state *state)
 			/* now loop over bits and compute the destination value */
 			for (b = 0; b < 4; b++)
 			{
-				UINT32 bit;
+				uint32_t bit;
 
 				/* shift previous data up 4 bits */
 				tempd <<= 4;
@@ -521,7 +513,7 @@ static UINT32 blit_ascending(amiga_state *state)
 			/* write to the destination */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0100)
 			{
-				state->chip_ram_w(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
+				write_chip_ram(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
 				CUSTOM_REG_LONG(REG_BLTDPTH) += 2;
 			}
 		}
@@ -549,48 +541,48 @@ static UINT32 blit_ascending(amiga_state *state)
  *
  *************************************/
 
-static UINT32 blit_descending(amiga_state *state)
+uint32_t amiga_state::blit_descending()
 {
-	UINT32 fill_exclusive = (CUSTOM_REG(REG_BLTCON1) >> 4);
-	UINT32 fill_inclusive = (CUSTOM_REG(REG_BLTCON1) >> 3);
-	UINT32 shifta = (CUSTOM_REG(REG_BLTCON0) >> 12) & 0xf;
-	UINT32 shiftb = (CUSTOM_REG(REG_BLTCON1) >> 12) & 0xf;
-	UINT32 height = CUSTOM_REG(REG_BLTSIZV);
-	UINT32 width = CUSTOM_REG(REG_BLTSIZH);
-	UINT32 acca = 0, accb = 0;
-	UINT32 blitsum = 0;
-	UINT32 x, y;
+	uint32_t fill_exclusive = (CUSTOM_REG(REG_BLTCON1) >> 4);
+	uint32_t fill_inclusive = (CUSTOM_REG(REG_BLTCON1) >> 3);
+	uint32_t shifta = (CUSTOM_REG(REG_BLTCON0) >> 12) & 0xf;
+	uint32_t shiftb = (CUSTOM_REG(REG_BLTCON1) >> 12) & 0xf;
+	uint32_t height = CUSTOM_REG(REG_BLTSIZV);
+	uint32_t width = CUSTOM_REG(REG_BLTSIZH);
+	uint32_t acca = 0, accb = 0;
+	uint32_t blitsum = 0;
+	uint32_t x, y;
 
 	/* iterate over the height */
 	for (y = 0; y < height; y++)
 	{
-		UINT32 fill_state = (CUSTOM_REG(REG_BLTCON1) >> 2) & 1;
+		uint32_t fill_state = (CUSTOM_REG(REG_BLTCON1) >> 2) & 1;
 
 		/* iterate over the width */
 		for (x = 0; x < width; x++)
 		{
-			UINT16 abc0, abc1, abc2, abc3;
-			UINT32 tempa, tempd = 0;
-			UINT32 b;
+			uint16_t abc0, abc1, abc2, abc3;
+			uint32_t tempa, tempd = 0;
+			uint32_t b;
 
 			/* fetch data for A */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0800)
 			{
-				CUSTOM_REG(REG_BLTADAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTAPTH));
+				CUSTOM_REG(REG_BLTADAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTAPTH));
 				CUSTOM_REG_LONG(REG_BLTAPTH) -= 2;
 			}
 
 			/* fetch data for B */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0400)
 			{
-				CUSTOM_REG(REG_BLTBDAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTBPTH));
+				CUSTOM_REG(REG_BLTBDAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTBPTH));
 				CUSTOM_REG_LONG(REG_BLTBPTH) -= 2;
 			}
 
 			/* fetch data for C */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0200)
 			{
-				CUSTOM_REG(REG_BLTCDAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTCPTH));
+				CUSTOM_REG(REG_BLTCDAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTCPTH));
 				CUSTOM_REG_LONG(REG_BLTCPTH) -= 2;
 			}
 
@@ -614,8 +606,8 @@ static UINT32 blit_descending(amiga_state *state)
 			/* now loop over bits and compute the destination value */
 			for (b = 0; b < 4; b++)
 			{
-				UINT32 prev_fill_state;
-				UINT32 bit;
+				uint32_t prev_fill_state;
+				uint32_t bit;
 
 				/* shift previous data up 4 bits */
 				tempd >>= 4;
@@ -663,7 +655,7 @@ static UINT32 blit_descending(amiga_state *state)
 			/* write to the destination */
 			if (CUSTOM_REG(REG_BLTCON0) & 0x0100)
 			{
-				state->chip_ram_w(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
+				write_chip_ram(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
 				CUSTOM_REG_LONG(REG_BLTDPTH) -= 2;
 			}
 		}
@@ -730,18 +722,18 @@ static UINT32 blit_descending(amiga_state *state)
     BLTAMOD = 4 * (dy - dx) and BLTBMOD = 4 * dy.
 */
 
-static UINT32 blit_line(amiga_state *state)
+uint32_t amiga_state::blit_line()
 {
-	UINT32 singlemode = (CUSTOM_REG(REG_BLTCON1) & 0x0002) ? 0x0000 : 0xffff;
-	UINT32 singlemask = 0xffff;
-	UINT32 blitsum = 0;
-	UINT32 height;
+	uint32_t singlemode = (CUSTOM_REG(REG_BLTCON1) & 0x0002) ? 0x0000 : 0xffff;
+	uint32_t singlemask = 0xffff;
+	uint32_t blitsum = 0;
+	uint32_t height;
 
 	/* see if folks are breaking the rules */
 	if (CUSTOM_REG(REG_BLTSIZH) != 0x0002)
-		state->logerror("Blitter: Blit width != 2 in line mode!\n");
+		logerror("Blitter: Blit width != 2 in line mode!\n");
 	if ((CUSTOM_REG(REG_BLTCON0) & 0x0a00) != 0x0a00)
-		state->logerror("Blitter: Channel selection incorrect in line mode!\n" );
+		logerror("Blitter: Channel selection incorrect in line mode!\n" );
 
 	/* extract the length of the line */
 	height = CUSTOM_REG(REG_BLTSIZV);
@@ -749,13 +741,13 @@ static UINT32 blit_line(amiga_state *state)
 	/* iterate over the line height */
 	while (height--)
 	{
-		UINT16 abc0, abc1, abc2, abc3;
-		UINT32 tempa, tempb, tempd = 0;
+		uint16_t abc0, abc1, abc2, abc3;
+		uint32_t tempa, tempb, tempd = 0;
 		int b, dx, dy;
 
 		/* fetch data for C */
 		if (CUSTOM_REG(REG_BLTCON0) & 0x0200)
-			CUSTOM_REG(REG_BLTCDAT) = state->chip_ram_r(CUSTOM_REG_LONG(REG_BLTCPTH));
+			CUSTOM_REG(REG_BLTCDAT) = read_chip_ram(CUSTOM_REG_LONG(REG_BLTCPTH));
 
 		/* rotate the A data according to the shift */
 		tempa = CUSTOM_REG(REG_BLTADAT) >> (CUSTOM_REG(REG_BLTCON0) >> 12);
@@ -776,7 +768,7 @@ static UINT32 blit_line(amiga_state *state)
 		/* now loop over bits and compute the destination value */
 		for (b = 0; b < 4; b++)
 		{
-			UINT32 bit;
+			uint32_t bit;
 
 			/* shift previous data up 4 bits */
 			tempd <<= 4;
@@ -806,7 +798,7 @@ static UINT32 blit_line(amiga_state *state)
 		blitsum |= tempd;
 
 		/* write to the destination */
-		state->chip_ram_w(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
+		write_chip_ram(CUSTOM_REG_LONG(REG_BLTDPTH), tempd);
 
 		/* always increment along the major axis */
 		if (CUSTOM_REG(REG_BLTCON1) & 0x0010)
@@ -841,7 +833,7 @@ static UINT32 blit_line(amiga_state *state)
 		if (dx)
 		{
 			/* adjust the A shift value */
-			UINT32 temp = CUSTOM_REG(REG_BLTCON0) + (INT32)(dx << 12);
+			uint32_t temp = CUSTOM_REG(REG_BLTCON0) + (int32_t)(dx << 12);
 			CUSTOM_REG(REG_BLTCON0) = temp;
 
 			/* if we went from 0xf to 0x0 or vice-versa, adjust the actual pointers */
@@ -856,8 +848,8 @@ static UINT32 blit_line(amiga_state *state)
 		if (dy)
 		{
 			/* BLTCMOD seems to be used for both C and D pointers */
-			CUSTOM_REG_LONG(REG_BLTCPTH) += dy * (INT16)(CUSTOM_REG_SIGNED(REG_BLTCMOD) & ~1);
-			CUSTOM_REG_LONG(REG_BLTDPTH) += dy * (INT16)(CUSTOM_REG_SIGNED(REG_BLTCMOD) & ~1);
+			CUSTOM_REG_LONG(REG_BLTCPTH) += dy * (int16_t)(CUSTOM_REG_SIGNED(REG_BLTCMOD) & ~1);
+			CUSTOM_REG_LONG(REG_BLTDPTH) += dy * (int16_t)(CUSTOM_REG_SIGNED(REG_BLTCMOD) & ~1);
 
 			/* reset the single mask since we're on a new line */
 			singlemask = 0xffff;
@@ -883,8 +875,7 @@ static UINT32 blit_line(amiga_state *state)
 
 TIMER_CALLBACK_MEMBER( amiga_state::amiga_blitter_proc )
 {
-	amiga_state *state = machine().driver_data<amiga_state>();
-	UINT32 blitsum = 0;
+	uint32_t blitsum = 0;
 
 	/* logging */
 	if (LOG_BLITS)
@@ -908,28 +899,30 @@ TIMER_CALLBACK_MEMBER( amiga_state::amiga_blitter_proc )
 	switch (CUSTOM_REG(REG_BLTCON1) & 0x0003)
 	{
 		case 0: /* ascending */
-			blitsum = blit_ascending(this);
+			blitsum = blit_ascending();
 			break;
 
 		case 2: /* descending */
-			blitsum = blit_descending(this);
+			blitsum = blit_descending();
 			break;
 
 		case 1: /* line */
 		case 3:
-			blitsum = blit_line(this);
+			blitsum = blit_line();
 			break;
 	}
 
 	/* clear the zero flag if we actually wrote data */
 	if (blitsum)
 		CUSTOM_REG(REG_DMACON) &= ~0x2000;
+	if (LOG_BLITS)
+		logerror("%04x ZF=%d\n", blitsum, bool(BIT(CUSTOM_REG(REG_DMACON), 13)));
 
 	/* no longer busy */
 	CUSTOM_REG(REG_DMACON) &= ~0x4000;
 
 	// signal an interrupt
-	set_interrupt(0x8000 | INTENA_BLIT);
+	set_interrupt(INTENA_SETCLR | INTENA_BLIT);
 
 	/* reset the blitter timer */
 	m_blitter_timer->reset();
@@ -943,15 +936,14 @@ TIMER_CALLBACK_MEMBER( amiga_state::amiga_blitter_proc )
  *
  *************************************/
 
-static void blitter_setup(address_space &space)
+void amiga_state::blitter_setup()
 {
-	amiga_state *state = space.machine().driver_data<amiga_state>();
 	int ticks, width, height, blittime;
 
 	/* is there another blitting in progress? */
 	if (CUSTOM_REG(REG_DMACON) & 0x4000)
 	{
-		state->logerror("%s - This program is playing tricks with the blitter\n", space.machine().describe_context() );
+		logerror("%s - This program is playing tricks with the blitter\n", machine().describe_context() );
 		return;
 	}
 
@@ -978,26 +970,32 @@ static void blitter_setup(address_space &space)
 	height = CUSTOM_REG(REG_BLTSIZV);
 
 	/* compute the blit time */
+	// TODO: verify timings
+	// According to https://github.com/alpine9000/amiga_examples test 010,
+	// blitting is currently taking half the time than necessary.
+	// Is it expecting to account for RAM access waitstates or ...?
 	blittime = ticks * height * width;
 
 	/* if 'blitter-nasty' is set, then the blitter takes over the bus. Make the blit semi-immediate */
+	// TODO: blitter nasty doesn't seem to work as intended.
+	// cfr. spinwrld
 	if ( CUSTOM_REG(REG_DMACON) & 0x0400 )
 	{
 		/* simulate the 68k not running while the blit is going */
-		space.device().execute().adjust_icount(-(blittime/2) );
+		m_maincpu->adjust_icount(-(blittime/2) );
 
 		blittime = BLITTER_NASTY_DELAY;
 	}
 
 	/* AGA has twice the bus bandwidth, so blits take half the time */
-	if (IS_AGA(state))
+	if (IS_AGA())
 		blittime /= 2;
 
 	/* signal blitter busy */
 	CUSTOM_REG(REG_DMACON) |= 0x4000;
 
 	/* set a timer */
-	state->m_blitter_timer->adjust( downcast<cpu_device *>(&space.device())->cycles_to_attotime( blittime ));
+	m_blitter_timer->adjust( m_maincpu->cycles_to_attotime( blittime ));
 }
 
 
@@ -1035,35 +1033,35 @@ WRITE_LINE_MEMBER( amiga_state::centronics_select_w )
 // CIA-A access: 101x xxxx xxx0 oooo xxxx xxx1
 // CIA-B access: 101x xxxx xx0x oooo xxxx xxx0
 
-READ16_MEMBER( amiga_state::cia_r )
+uint16_t amiga_state::cia_r(offs_t offset, uint16_t mem_mask)
 {
-	UINT16 data = 0;
+	uint16_t data = 0;
 
 	if ((offset & 0x1000/2) == 0 && ACCESSING_BITS_0_7)
-		data |= m_cia_0->read(space, offset >> 7);
+		data |= m_cia_0->read(offset >> 7);
 
 	if ((offset & 0x2000/2) == 0 && ACCESSING_BITS_8_15)
-		data |= m_cia_1->read(space, offset >> 7) << 8;
+		data |= m_cia_1->read(offset >> 7) << 8;
 
 	if (LOG_CIA)
-		logerror("%s: cia_r(%06x) = %04x & %04x\n", space.machine().describe_context(), offset, data, mem_mask);
+		logerror("%s: cia_r(%06x) = %04x & %04x\n", machine().describe_context(), offset, data, mem_mask);
 
 	return data;
 }
 
-WRITE16_MEMBER( amiga_state::cia_w )
+void amiga_state::cia_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
 	if (LOG_CIA)
-		logerror("%s: cia_w(%06x) = %04x & %04x\n", space.machine().describe_context(), offset, data, mem_mask);
+		logerror("%s: cia_w(%06x) = %04x & %04x\n", machine().describe_context(), offset, data, mem_mask);
 
 	if ((offset & 0x1000/2) == 0 && ACCESSING_BITS_0_7)
-		m_cia_0->write(space, offset >> 7, data & 0xff);
+		m_cia_0->write(offset >> 7, data & 0xff);
 
 	if ((offset & 0x2000/2) == 0 && ACCESSING_BITS_8_15)
-		m_cia_1->write(space, offset >> 7, data >> 8);
+		m_cia_1->write(offset >> 7, data >> 8);
 }
 
-WRITE16_MEMBER( amiga_state::gayle_cia_w )
+void amiga_state::gayle_cia_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
 	// the first write to cia 0 after a reset switches in chip ram
 	if (m_gayle_reset && (offset & 0x1000/2) == 0 && ACCESSING_BITS_0_7)
@@ -1073,7 +1071,7 @@ WRITE16_MEMBER( amiga_state::gayle_cia_w )
 	}
 
 	// hand down to the standard cia handler
-	cia_w(space, offset, data, mem_mask);
+	cia_w(offset, data, mem_mask);
 }
 
 CUSTOM_INPUT_MEMBER( amiga_state::floppy_drive_status )
@@ -1081,14 +1079,13 @@ CUSTOM_INPUT_MEMBER( amiga_state::floppy_drive_status )
 	return m_fdc->ciaapra_r();
 }
 
-WRITE8_MEMBER( amiga_state::cia_0_port_a_write )
+void amiga_state::cia_0_port_a_write(uint8_t data)
 {
 	// bit 0, kickstart overlay
 	m_overlay->set_bank(BIT(data, 0));
 
 	// bit 1, power led
-	output().set_led_value(0, !BIT(data, 1));
-	output().set_value("power_led", !BIT(data, 1));
+	m_power_led = BIT(~data, 1);
 }
 
 WRITE_LINE_MEMBER( amiga_state::cia_0_irq )
@@ -1100,9 +1097,9 @@ WRITE_LINE_MEMBER( amiga_state::cia_0_irq )
 	update_int2();
 }
 
-READ8_MEMBER( amiga_state::cia_1_port_a_read )
+uint8_t amiga_state::cia_1_port_a_read()
 {
-	UINT8 data = 0;
+	uint8_t data = 0;
 
 	// bit 0 to 2, centronics
 	data |= m_centronics_busy << 0;
@@ -1118,7 +1115,7 @@ READ8_MEMBER( amiga_state::cia_1_port_a_read )
 	return data;
 }
 
-WRITE8_MEMBER( amiga_state::cia_1_port_a_write )
+void amiga_state::cia_1_port_a_write(uint8_t data)
 {
 	if (m_rs232)
 	{
@@ -1141,10 +1138,143 @@ WRITE_LINE_MEMBER( amiga_state::cia_1_irq )
 //  CUSTOM CHIPS
 //**************************************************************************
 
+void amiga_state::ocs_map(address_map &map)
+{
+	// In progress: remove this catch-all trampoline, move almost everything into devices
+	map(0x000, 0x1ff).rw(FUNC(amiga_state::custom_chip_r), FUNC(amiga_state::custom_chip_w));
+
+	// Reading state section
+//  map(0x000, 0x001).r(FUNC(amiga_state::bltddat_r));
+//  map(0x002, 0x003).r(FUNC(amiga_state::dmaconr_r));
+	map(0x004, 0x005).r(FUNC(amiga_state::vposr_r));
+//  map(0x006, 0x007).r(FUNC(amiga_state::vhposr_r));
+//  map(0x008, 0x009).r(FUNC(amiga_state::dskdatr_r));
+	// TODO: verify if JOYxDAT really belongs to Denise (???)
+//  map(0x00a, 0x00b).r(FUNC(amiga_state::joydat_r<0>));
+//  map(0x00c, 0x00d).r(FUNC(amiga_state::joydat_r<1>));
+//  map(0x00e, 0x00f).r(FUNC(amiga_state::clxdat_r));
+	map(0x010, 0x011).r(m_fdc, FUNC(amiga_fdc_device::adkcon_r));
+//  map(0x012, 0x013).r(FUNC(amiga_state::potdat_r<0>)); // POT0DAT
+//  map(0x014, 0x015).r(FUNC(amiga_state::potdat_r<1>));
+//  map(0x016, 0x017).r(FUNC(amiga_state::potgor_r)); // a.k.a. POTINP
+//  map(0x018, 0x019).r(FUNC(amiga_state::serdat_r));
+	map(0x01a, 0x01b).r(m_fdc, FUNC(amiga_fdc_device::dskbytr_r));
+//  map(0x01c, 0x01d).r(m_paula, FUNC(paula_8364_device::intenar_r));
+//  map(0x01e, 0x01f).r(m_paula, FUNC(paula_8364_device::intreqr_r));
+
+	// FDC writes
+	// FIXME: these two belongs to Agnus, also shouldn't be readable
+	map(0x020, 0x021).rw(m_fdc, FUNC(amiga_fdc_device::dskpth_r), FUNC(amiga_fdc_device::dskpth_w));
+	map(0x022, 0x023).rw(m_fdc, FUNC(amiga_fdc_device::dskptl_r), FUNC(amiga_fdc_device::dskptl_w));
+	map(0x024, 0x025).w(m_fdc, FUNC(amiga_fdc_device::dsklen_w));
+//  map(0x026, 0x027).w(m_fdc, FUNC(amiga_fdc_device::dskdat_w));
+
+//  map(0x028, 0x029).w(FUNC(amiga_state::refptr_w));
+	map(0x02a, 0x02b).w(FUNC(amiga_state::vposw_w));
+//  map(0x02c, 0x02d).w(FUNC(amiga_state::vhposw_w));
+	map(0x02e, 0x02f).w(m_copper, FUNC(amiga_copper_device::copcon_w));
+
+	// input strobes
+//  map(0x030, 0x031).w(FUNC(amiga_state::serdat_w));
+//  map(0x032, 0x033).w(FUNC(amiga_state::serper_w));
+//  map(0x034, 0x035).w(FUNC(amiga_state::potgo_w));
+//  map(0x036, 0x037).w(FUNC(amiga_state::joytest_w));
+
+	// video beam strobes
+//  map(0x038, 0x039).w(FUNC(amiga_state::strequ_w));
+//  map(0x03a, 0x03b).w(FUNC(amiga_state::strvbl_w));
+//  map(0x03c, 0x03d).w(FUNC(amiga_state::strhor_w));
+
+//  map(0x040, 0x075).m(m_blitter, FUNC(amiga_blitter_device::regs_map));
+//  map(0x07c, 0x07d).r <open bus for OCS>
+	map(0x07e, 0x07f).w(m_fdc, FUNC(amiga_fdc_device::dsksync_w));
+
+	// Copper
+	map(0x080, 0x08b).m(m_copper, FUNC(amiga_copper_device::regs_map));
+	map(0x08c, 0x08d).w(m_copper, FUNC(amiga_copper_device::copins_w));
+	// Display window
+//  map(0x08e, 0x08f).w(FUNC(amiga_state::diwstrt_w));
+//  map(0x090, 0x091).w(FUNC(amiga_state::diwstop_w));
+	// Display horizontal fetch
+//  map(0x092, 0x093).w(FUNC(amiga_state::ddfstrt_w));
+//  map(0x094, 0x095).w(FUNC(amiga_state::ddfstop_w));
+
+//  map(0x096, 0x097).w(FUNC(amiga_state::dmacon_w));
+//  map(0x098, 0x099).w(FUNC(amiga_state::clxcon_w));
+//  map(0x09a, 0x09b).w(m_paula, FUNC(paula_8364_device::intena_w));
+//  map(0x09c, 0x09d).w(m_paula, FUNC(paula_8364_device::intreq_w));
+//  map(0x09e, 0x09f).w(m_paula, FUNC(paula_8364_device::adkcon_w));
+	// Audio section
+	map(0x0a0, 0x0ab).m(m_paula, FUNC(paula_8364_device::audio_channel_map<0>));
+	map(0x0b0, 0x0bb).m(m_paula, FUNC(paula_8364_device::audio_channel_map<1>));
+	map(0x0c0, 0x0cb).m(m_paula, FUNC(paula_8364_device::audio_channel_map<2>));
+	map(0x0d0, 0x0db).m(m_paula, FUNC(paula_8364_device::audio_channel_map<3>));
+
+	// Bitplane pointer section
+//  map(0x0e0, 0x0ff).m(amiga_state::bplxptr_map));
+
+	// Video bitplane registers
+	map(0x100, 0x101).w(FUNC(amiga_state::bplcon0_w));
+//  map(0x102, 0x103).w(FUNC(amiga_state::bplcon1_w));
+//  map(0x104, 0x105).w(FUNC(amiga_state::bplcon2_w));
+
+//  map(0x108, 0x109).w(FUNC(amiga_state::bpl1mod_w));
+//  map(0x10a, 0x10b).w(FUNC(amiga_state::bpl2mod_w));
+
+//  map(0x110, 0x11f).m(amiga_state::bplxdat_map));
+	// Sprite section
+//  map(0x120, 0x17f).m(amiga_state::sprxpt_map));
+	// Color section
+//  map(0x180, 0x1bf).m(amiga_state::colorxx_map));
+}
+
+void amiga_state::ecs_map(address_map &map)
+{
+	ocs_map(map);
+//  map(0x03e, 0x03f).w(FUNC(amiga_state::strlong_w));
+//  map(0x078, 0x079).w(FUNC(amiga_state::sprhdat_w));
+//  map(0x07c, 0x07d).r(FUNC(amiga_state::deniseid_r));
+
+//  map(0x106, 0x107).w(FUNC(amiga_state::bplcon3_w));
+
+	// Extended ECS registers
+	// video geometry regs
+//  map(0x1c0, 0x1c7).m(FUNC(amiga_state::horz_screen_map));
+//  map(0x1c8, 0x1cf).m(FUNC(amiga_state::vert_screen_map));
+//  map(0x1dc, 0x1dd).w(FUNC(amiga_state::beamcon0_w));
+	// Screen sync regs, VARHSY / VARVSY
+//  map(0x1de, 0x1df).w(FUNC(amiga_state::hsstrt_w));
+//  map(0x1e0, 0x1e1).w(FUNC(amiga_state::vsstrt_w));
+
+//  map(0x1e2, 0x1e3).w(FUNC(amiga_state::hcenter_w));
+//  map(0x1e4, 0x1e5).w(FUNC(amiga_state::diwhigh_w));
+
+	// dummy, either related to copper lockup restart or "last N refresh cycles"
+//  map(0x1fe, 0x1ff).?(FUNC(amiga_state::no_op_*));
+}
+
+void amiga_state::aga_map(address_map &map)
+{
+	ecs_map(map);
+
+//  map(0x078, 0x079).w(FUNC(amiga_state::sprhdat_w));
+
+	map(0x100, 0x101).w(FUNC(amiga_state::aga_bplcon0_w));
+
+	// UHRES regs
+	// TODO: may be shared with ECS?
+//  map(0x1e6, 0x1e7).w(FUNC(amiga_state::bplhmod_w));
+//  map(0x1e8, 0x1e9).w(FUNC(amiga_state::sprhpth_w));
+//  map(0x1ea, 0x1eb).w(FUNC(amiga_state::sprhptl_w));
+//  map(0x1ec, 0x1ed).w(FUNC(amiga_state::bplhpth_w));
+//  map(0x1ed, 0x1ef).w(FUNC(amiga_state::bplhptl_w));
+
+//  map(0x1fc, 0x1fd).w(FUNC(amiga_state::fmode_w));
+}
+
+
 void amiga_state::custom_chip_reset()
 {
-	amiga_state *state = this;
-
 	CUSTOM_REG(REG_DENISEID) = m_denise_id;
 	CUSTOM_REG(REG_VPOSR) = m_agnus_id << 8;
 	CUSTOM_REG(REG_DDFSTRT) = 0x18;
@@ -1154,13 +1284,48 @@ void amiga_state::custom_chip_reset()
 	CUSTOM_REG(REG_BEAMCON0) = (m_agnus_id & 0x10) ? 0x0000 : 0x0020;
 }
 
-READ16_MEMBER( amiga_state::custom_chip_r )
+u16 amiga_state::vposr_r()
 {
-	amiga_state *state = this;
-	UINT16 temp;
+	u16 res = CUSTOM_REG(REG_VPOSR) & VPOSR_LOF;
+	res |= m_agnus_id << 8;
+	res |= ((amiga_gethvpos() >> 16) & 0xff);
+	return res;
+}
+
+void amiga_state::vposw_w(u16 data)
+{
+	// TODO: data actually resync the screen?
+	// TODO: ECS always resets the LOF no matter the setting
+	CUSTOM_REG(REG_VPOSR) = (data & VPOSR_LOF) | (data & 7);
+	// TODO: high bits of screen height
+//  if (data & 7)
+//      popmessage("Upper VPOSW set %02x", data);
+}
+
+void amiga_state::bplcon0_w(u16 data)
+{
+	// FIXME: verify OCS / ECS games trying to set this up
+	if ((data & (BPLCON0_BPU0 | BPLCON0_BPU1 | BPLCON0_BPU2)) == (BPLCON0_BPU0 | BPLCON0_BPU1 | BPLCON0_BPU2))
+	{
+		/* planes go from 0 to 6, inclusive */
+		popmessage( "This game is doing funky planes stuff. (planes > 6, %04x)", data );
+		data &= ~BPLCON0_BPU0;
+	}
+	CUSTOM_REG(REG_BPLCON0) = data;
+}
+
+void amiga_state::aga_bplcon0_w(u16 data)
+{
+	// just allow all (AGA surfninj title screen relies on this)
+	CUSTOM_REG(REG_BPLCON0) = data;
+}
+
+uint16_t amiga_state::custom_chip_r(offs_t offset)
+{
+	uint16_t temp;
 
 	if (LOG_CUSTOM)
-		logerror("%06X:read from custom %s\n", space.device().safe_pc(), amiga_custom_names[offset & 0xff]);
+		logerror("%06X:read from custom %s\n", m_maincpu->pc(), s_custom_reg_names[offset & 0xff]);
 
 	switch (offset & 0xff)
 	{
@@ -1169,12 +1334,6 @@ READ16_MEMBER( amiga_state::custom_chip_r )
 
 		case REG_DMACONR:
 			return CUSTOM_REG(REG_DMACON);
-
-		case REG_VPOSR:
-			CUSTOM_REG(REG_VPOSR) &= 0xff00;
-			CUSTOM_REG(REG_VPOSR) |= amiga_gethvpos() >> 16;
-
-			return CUSTOM_REG(REG_VPOSR);
 
 		case REG_VHPOSR:
 			return amiga_gethvpos() & 0xffff;
@@ -1186,21 +1345,18 @@ READ16_MEMBER( amiga_state::custom_chip_r )
 			return CUSTOM_REG(REG_SERDATR);
 
 		case REG_JOY0DAT:
-			if (m_joy0dat_port)
+			if (m_joy0dat_port.found())
 				return joy0dat_r();
-
+			[[fallthrough]]; // FIXME: Really?  Fall through to potentially reading the other joystick?
 		case REG_JOY1DAT:
-			if (m_joy1dat_port)
+			if (m_joy1dat_port.found())
 				return joy1dat_r();
-
+			[[fallthrough]]; // TODO: check that this is correct
 		case REG_POTGOR:
-			if (m_potgo_port)
-				return m_potgo_port->read();
-			else
-				return 0x5500;
+			return m_potgo_port.read_safe(0x5500);
 
 		case REG_POT0DAT:
-			if (m_pot0dat_port)
+			if (m_pot0dat_port.found())
 			{
 				return m_pot0dat_port->read();
 			}
@@ -1215,7 +1371,7 @@ READ16_MEMBER( amiga_state::custom_chip_r )
 			}
 
 		case REG_POT1DAT:
-			if (m_pot1dat_port)
+			if (m_pot1dat_port.found())
 			{
 				return m_pot1dat_port->read();
 			}
@@ -1238,14 +1394,6 @@ READ16_MEMBER( amiga_state::custom_chip_r )
 		case REG_INTREQR:
 			return CUSTOM_REG(REG_INTREQ);
 
-		case REG_COPJMP1:
-			amiga_copper_setpc(space.machine(), CUSTOM_REG_LONG(REG_COP1LCH));
-			break;
-
-		case REG_COPJMP2:
-			amiga_copper_setpc(space.machine(), CUSTOM_REG_LONG(REG_COP2LCH));
-			break;
-
 		case REG_CLXDAT:
 			temp = CUSTOM_REG(REG_CLXDAT);
 			CUSTOM_REG(REG_CLXDAT) = 0;
@@ -1264,21 +1412,20 @@ READ16_MEMBER( amiga_state::custom_chip_r )
 			return m_fdc->adkcon_r();
 
 		case REG_DSKDATR:
-			popmessage("DSKDAT R, contact MESSdev");
+			popmessage("DSKDAT R, contact MAMEdev");
 			break;
 	}
 
 	return 0xffff;
 }
 
-WRITE16_MEMBER( amiga_state::custom_chip_w )
+void amiga_state::custom_chip_w(offs_t offset, uint16_t data)
 {
-	amiga_state *state = space.machine().driver_data<amiga_state>();
-	UINT16 temp;
+	uint16_t temp;
 	offset &= 0xff;
 
 	if (LOG_CUSTOM)
-		logerror("%06X:write to custom %s = %04X\n", space.device().safe_pc(), amiga_custom_names[offset & 0xff], data);
+		logerror("%06X:write to custom %s = %04X\n", m_maincpu->pc(), s_custom_reg_names[offset & 0xff], data);
 
 	switch (offset)
 	{
@@ -1290,7 +1437,7 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			return;
 
 		case REG_DSKDAT:
-			popmessage("DSKDAT W %04x, contact MESSdev",data);
+			popmessage("DSKDAT W %04x, contact MAMEdev",data);
 			break;
 
 		case REG_DSKSYNC:
@@ -1362,11 +1509,11 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			CUSTOM_REG(REG_BLTSIZH) = data & 0x3f;
 			if ( CUSTOM_REG(REG_BLTSIZV) == 0 ) CUSTOM_REG(REG_BLTSIZV) = 0x400;
 			if ( CUSTOM_REG(REG_BLTSIZH) == 0 ) CUSTOM_REG(REG_BLTSIZH) = 0x40;
-			blitter_setup(m_maincpu->space(AS_PROGRAM));
+			blitter_setup();
 			break;
 
 		case REG_BLTSIZV:
-			if (IS_ECS(state) || IS_AGA(state))
+			if (IS_ECS() || IS_AGA())
 			{
 				CUSTOM_REG(REG_BLTSIZV) = data & 0x7fff;
 				if ( CUSTOM_REG(REG_BLTSIZV) == 0 ) CUSTOM_REG(REG_BLTSIZV) = 0x8000;
@@ -1374,20 +1521,27 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			break;
 
 		case REG_BLTSIZH:
-			if (IS_ECS(state) || IS_AGA(state))
+			if (IS_ECS() || IS_AGA())
 			{
 				CUSTOM_REG(REG_BLTSIZH) = data & 0x7ff;
 				if ( CUSTOM_REG(REG_BLTSIZH) == 0 ) CUSTOM_REG(REG_BLTSIZH) = 0x800;
-				blitter_setup(m_maincpu->space(AS_PROGRAM));
+				blitter_setup();
 			}
 			break;
 
 		case REG_BLTCON0L:
-			if (IS_ECS(state) || IS_AGA(state))
+			if (IS_ECS() || IS_AGA())
 			{
 				CUSTOM_REG(REG_BLTCON0) &= 0xff00;
 				CUSTOM_REG(REG_BLTCON0) |= data & 0xff;
 			}
+			break;
+
+		// OCS and AGA versions of Soccer Kid explicitly writes blitter addresses way beyond chip RAM
+		// This is clearly deterministic: it draws an individual empty tile scattered across playfield
+		// (which also collides on top of it)
+		case REG_BLTAPTH:   case REG_BLTBPTH:   case REG_BLTCPTH:   case REG_BLTDPTH:
+			data &= ( m_chip_ram_mask >> 16 );
 			break;
 
 		case REG_SPR0PTH:   case REG_SPR1PTH:   case REG_SPR2PTH:   case REG_SPR3PTH:
@@ -1397,55 +1551,48 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 
 		case REG_SPR0PTL:   case REG_SPR1PTL:   case REG_SPR2PTL:   case REG_SPR3PTL:
 		case REG_SPR4PTL:   case REG_SPR5PTL:   case REG_SPR6PTL:   case REG_SPR7PTL:
-			amiga_sprite_dma_reset(space.machine(), (offset - REG_SPR0PTL) / 2);
+			sprite_dma_reset((offset - REG_SPR0PTL) / 2);
 			break;
 
 		case REG_SPR0CTL:   case REG_SPR1CTL:   case REG_SPR2CTL:   case REG_SPR3CTL:
 		case REG_SPR4CTL:   case REG_SPR5CTL:   case REG_SPR6CTL:   case REG_SPR7CTL:
 			/* disable comparitor on writes here */
-			amiga_sprite_enable_comparitor(space.machine(), (offset - REG_SPR0CTL) / 4, FALSE);
+			sprite_enable_comparitor((offset - REG_SPR0CTL) / 4, false);
 			break;
 
 		case REG_SPR0DATA:  case REG_SPR1DATA:  case REG_SPR2DATA:  case REG_SPR3DATA:
 		case REG_SPR4DATA:  case REG_SPR5DATA:  case REG_SPR6DATA:  case REG_SPR7DATA:
 			/* enable comparitor on writes here */
-			amiga_sprite_enable_comparitor(space.machine(), (offset - REG_SPR0DATA) / 4, TRUE);
-			break;
-
-		case REG_COP1LCH:
-		case REG_COP2LCH:
-			data &= ( m_chip_ram_mask >> 16 );
-			break;
-
-		case REG_COPJMP1:
-			amiga_copper_setpc(space.machine(), CUSTOM_REG_LONG(REG_COP1LCH));
-			break;
-
-		case REG_COPJMP2:
-			amiga_copper_setpc(space.machine(), CUSTOM_REG_LONG(REG_COP2LCH));
+			sprite_enable_comparitor((offset - REG_SPR0DATA) / 4, true);
 			break;
 
 		case REG_DDFSTRT:
 			/* impose hardware limits ( HRM, page 75 ) */
-			data &= 0xfe;
+			data &= (IS_AGA() || IS_ECS()) ? 0xfe : 0xfc;
 			if (data < 0x18)
+			{
+				logerror("%s: Attempt to underrun DDFSTRT with %04x\n", machine().describe_context(), data);
 				data = 0x18;
+			}
 			break;
 
 		case REG_DDFSTOP:
 			/* impose hardware limits ( HRM, page 75 ) */
-			data &= 0xfe;
+			data &= (IS_AGA() || IS_ECS()) ? 0xfe : 0xfc;
 			if (data > 0xd8)
+			{
+				logerror("%s: Attempt to overrun DDFSTOP with %04x\n", machine().describe_context(), data);
 				data = 0xd8;
+			}
 			break;
 
 		case REG_DMACON:
-			m_sound->update();
-
 			/* bits BBUSY (14) and BZERO (13) are read-only */
 			data &= 0x9fff;
 			data = (data & 0x8000) ? (CUSTOM_REG(offset) | (data & 0x7fff)) : (CUSTOM_REG(offset) & ~(data & 0x7fff));
 			m_fdc->dmacon_set(data);
+			m_paula->dmacon_set(data);
+			m_copper->dmacon_set(data);
 
 			/* if 'blitter-nasty' has been turned on and we have a blit pending, reschedule it */
 			if ( ( data & 0x400 ) && ( CUSTOM_REG(REG_DMACON) & 0x4000 ) )
@@ -1458,7 +1605,6 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 
 			data = (data & INTENA_SETCLR) ? (CUSTOM_REG(offset) | (data & 0x7fff)) : (CUSTOM_REG(offset) & ~(data & 0x7fff));
 			CUSTOM_REG(offset) = data;
-
 			if (temp & INTENA_SETCLR)
 				// if we're enabling irq's, delay a bit
 				m_irq_timer->adjust(m_maincpu->cycles_to_attotime(AMIGA_IRQ_DELAY_CYCLES));
@@ -1493,20 +1639,9 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			break;
 
 		case REG_ADKCON:
-			m_sound->update();
 			data = (data & 0x8000) ? (CUSTOM_REG(offset) | (data & 0x7fff)) : (CUSTOM_REG(offset) & ~(data & 0x7fff));
 			m_fdc->adkcon_set(data);
-			break;
-
-		case REG_AUD0LCL:   case REG_AUD0LCH:   case REG_AUD0LEN:   case REG_AUD0PER:   case REG_AUD0VOL:
-		case REG_AUD1LCL:   case REG_AUD1LCH:   case REG_AUD1LEN:   case REG_AUD1PER:   case REG_AUD1VOL:
-		case REG_AUD2LCL:   case REG_AUD2LCH:   case REG_AUD2LEN:   case REG_AUD2PER:   case REG_AUD2VOL:
-		case REG_AUD3LCL:   case REG_AUD3LCH:   case REG_AUD3LEN:   case REG_AUD3PER:   case REG_AUD3VOL:
-			m_sound->update();
-			break;
-
-		case REG_AUD0DAT:   case REG_AUD1DAT:   case REG_AUD2DAT:   case REG_AUD3DAT:
-			m_sound->data_w((offset - REG_AUD0DAT) / 8, data);
+			m_paula->adkcon_set(data);
 			break;
 
 		case REG_BPL1PTH:   case REG_BPL2PTH:   case REG_BPL3PTH:   case REG_BPL4PTH:
@@ -1514,14 +1649,11 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			data &= ( m_chip_ram_mask >> 16 );
 			break;
 
-		case REG_BPLCON0:
-			if ((data & (BPLCON0_BPU0 | BPLCON0_BPU1 | BPLCON0_BPU2)) == (BPLCON0_BPU0 | BPLCON0_BPU1 | BPLCON0_BPU2))
-			{
-				/* planes go from 0 to 6, inclusive */
-				logerror( "This game is doing funky planes stuff. (planes > 6)\n" );
-				data &= ~BPLCON0_BPU0;
-			}
-			CUSTOM_REG(offset) = data;
+		case REG_BPL1MOD:   case REG_BPL2MOD:
+			// bit 0 is implicitly ignored on writes,
+			// and wouldn't otherwise make sense with 68k inability of word reading with odd addresses.
+			// hpoker/hpokera would otherwise draw misaligned bottom GFX area without this (writes 0x27)
+			data &= ~1;
 			break;
 
 		case REG_COLOR00:   case REG_COLOR01:   case REG_COLOR02:   case REG_COLOR03:
@@ -1532,13 +1664,14 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 		case REG_COLOR20:   case REG_COLOR21:   case REG_COLOR22:   case REG_COLOR23:
 		case REG_COLOR24:   case REG_COLOR25:   case REG_COLOR26:   case REG_COLOR27:
 		case REG_COLOR28:   case REG_COLOR29:   case REG_COLOR30:   case REG_COLOR31:
-			if (IS_AGA(state))
+			if (IS_AGA())
 			{
-				amiga_aga_palette_write(space.machine(), offset - REG_COLOR00, data);
+				aga_palette_write(offset - REG_COLOR00, data);
 			}
 			else
 			{
 				data &= 0xfff;
+				// Extra Half-Brite
 				CUSTOM_REG(offset + 32) = (data >> 1) & 0x777;
 			}
 			break;
@@ -1551,7 +1684,7 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 
 		// display window high
 		case REG_DIWHIGH:
-			if (IS_ECS(state) || IS_AGA(state))
+			if (IS_ECS() || IS_AGA())
 			{
 				m_diwhigh_valid = true;
 				CUSTOM_REG(REG_DIWHIGH) = data;
@@ -1571,7 +1704,8 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 			break;
 	}
 
-	if (IS_AGA(state))
+	// FIXME: no ECS?
+	if (IS_AGA())
 		CUSTOM_REG(offset) = data;
 	else
 		if (offset <= REG_COLOR31)
@@ -1585,18 +1719,14 @@ WRITE16_MEMBER( amiga_state::custom_chip_w )
 
 void amiga_state::serial_adjust()
 {
-	amiga_state *state = this;
-
-	UINT32 divisor = (CUSTOM_REG(REG_SERPER) & 0x7fff) + 1;
-	UINT32 baud = m_sound->clock() / divisor;
+	uint32_t divisor = (CUSTOM_REG(REG_SERPER) & 0x7fff) + 1;
+	uint32_t baud = m_paula->clock() / divisor;
 
 	m_serial_timer->adjust(attotime::from_hz(baud) / 2, 0, attotime::from_hz(baud));
 }
 
 void amiga_state::serial_shift()
 {
-	amiga_state *state = this;
-
 	if (CUSTOM_REG(REG_ADKCON) & ADKCON_UARTBRK)
 	{
 		// break active, force low
@@ -1706,7 +1836,7 @@ void amiga_state::rs232_tx(int state)
 		m_rs232->write_txd(state);
 }
 
-void amiga_state::rx_write(amiga_state *state, int level)
+void amiga_state::rx_write(int level)
 {
 	m_rx_previous = BIT(CUSTOM_REG(REG_SERDATR), 11);
 	CUSTOM_REG(REG_SERDATR) &= ~SERDATR_RXD;
@@ -1715,7 +1845,7 @@ void amiga_state::rx_write(amiga_state *state, int level)
 
 WRITE_LINE_MEMBER( amiga_state::rs232_rx_w )
 {
-	rx_write(this, state);
+	rx_write(state);
 
 	// start bit received?
 	if (m_rx_state == 1)

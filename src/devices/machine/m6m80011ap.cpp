@@ -1,10 +1,5 @@
 // license:BSD-3-Clause
 // copyright-holders:Angelo Salese
-/***************************************************************************
-
-Template for skeleton device
-
-***************************************************************************/
 
 #include "emu.h"
 #include "machine/m6m80011ap.h"
@@ -16,7 +11,7 @@ Template for skeleton device
 //**************************************************************************
 
 // device type definition
-const device_type M6M80011AP = &device_creator<m6m80011ap_device>;
+DEFINE_DEVICE_TYPE(M6M80011AP, m6m80011ap_device, "m6m80011ap", "M6M80011AP EEPROM")
 
 
 //**************************************************************************
@@ -27,9 +22,10 @@ const device_type M6M80011AP = &device_creator<m6m80011ap_device>;
 //  m6m80011ap_device - constructor
 //-------------------------------------------------
 
-m6m80011ap_device::m6m80011ap_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, M6M80011AP, "M6M80011AP EEPROM", tag, owner, clock, "m6m80011ap", __FILE__),
-		device_nvram_interface(mconfig, *this), m_latch(0), m_reset_line(0), m_cmd_stream_pos(0), m_current_cmd(0), m_read_latch(0), m_current_addr(0), m_eeprom_we(0), m_eeprom_state()
+m6m80011ap_device::m6m80011ap_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, M6M80011AP, tag, owner, clock)
+	, device_nvram_interface(mconfig, *this)
+	, m_latch(0), m_reset_line(0), m_cmd_stream_pos(0), m_current_cmd(0), m_read_latch(0), m_current_addr(0), m_eeprom_we(0), m_eeprom_state()
 {
 }
 
@@ -80,9 +76,10 @@ void m6m80011ap_device::nvram_default()
 //  .nv file
 //-------------------------------------------------
 
-void m6m80011ap_device::nvram_read(emu_file &file)
+bool m6m80011ap_device::nvram_read(util::read_stream &file)
 {
-	file.read(m_eeprom_data, 0x100);
+	size_t actual;
+	return !file.read(m_eeprom_data, 0x100, actual) && actual == 0x100;
 }
 
 
@@ -91,9 +88,10 @@ void m6m80011ap_device::nvram_read(emu_file &file)
 //  .nv file
 //-------------------------------------------------
 
-void m6m80011ap_device::nvram_write(emu_file &file)
+bool m6m80011ap_device::nvram_write(util::write_stream &file)
 {
-	file.write(m_eeprom_data, 0x100);
+	size_t actual;
+	return !file.write(m_eeprom_data, 0x100, actual) && actual == 0x100;
 }
 
 //**************************************************************************

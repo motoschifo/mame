@@ -6,14 +6,13 @@
 
 **********************************************************************/
 
+#ifndef MAME_BUS_NES_CTRL_4SCORE_H
+#define MAME_BUS_NES_CTRL_4SCORE_H
+
 #pragma once
 
-#ifndef __NES_FOURSCORE__
-#define __NES_FOURSCORE__
-
-
-#include "emu.h"
 #include "ctrl.h"
+
 
 //**************************************************************************
 //  TYPE DEFINITIONS
@@ -25,18 +24,17 @@ class nes_4score_device : public device_t,
 							public device_nes_control_port_interface
 {
 public:
-	// construction/destruction
-	nes_4score_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source);
+	virtual uint8_t read_bit0() override;
 
 protected:
+	// construction/destruction
+	nes_4score_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
+
 	// device-level overrides
 	virtual void device_start() override;
 	virtual void device_reset() override;
 
-	virtual UINT8 read_bit0() override;
-
-protected:
-	UINT32 m_latch;
+	uint32_t m_latch;
 };
 
 // ======================> nes_4score_p1p3_device
@@ -45,12 +43,13 @@ class nes_4score_p1p3_device : public nes_4score_device
 {
 public:
 	// construction/destruction
-	nes_4score_p1p3_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_4score_p1p3_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	virtual ioport_constructor device_input_ports() const override;
+	virtual void write(uint8_t data) override;
 
 protected:
-	virtual void write(UINT8 data) override;
+	// device-level overrides
+	virtual ioport_constructor device_input_ports() const override;
 
 private:
 	required_ioport m_joypad1;
@@ -63,12 +62,13 @@ class nes_4score_p2p4_device : public nes_4score_device
 {
 public:
 	// construction/destruction
-	nes_4score_p2p4_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
+	nes_4score_p2p4_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	virtual ioport_constructor device_input_ports() const override;
+	virtual void write(uint8_t data) override;
 
 protected:
-	virtual void write(UINT8 data) override;
+	// device-level overrides
+	virtual ioport_constructor device_input_ports() const override;
 
 private:
 	required_ioport m_joypad2;
@@ -77,8 +77,7 @@ private:
 
 
 // device type definition
-extern const device_type NES_4SCORE_P1P3;
-extern const device_type NES_4SCORE_P2P4;
+DECLARE_DEVICE_TYPE(NES_4SCORE_P1P3, nes_4score_p1p3_device)
+DECLARE_DEVICE_TYPE(NES_4SCORE_P2P4, nes_4score_p2p4_device)
 
-
-#endif
+#endif // MAME_BUS_NES_CTRL_4SCORE_H

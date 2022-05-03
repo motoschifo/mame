@@ -20,7 +20,6 @@
 
  * 004 Mendel Palace has never worked properly
  * 004 Ninja Gaiden 2 has flashing bg graphics in the second level
- * 119 Pin Bot has glitches when the ball is in the upper half of the screen
 
  ***********************************************************************************************************/
 
@@ -28,8 +27,7 @@
 #include "emu.h"
 #include "mmc3.h"
 
-#include "cpu/m6502/m6502.h"
-#include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access PPU_BOTTOM_VISIBLE_SCANLINE
+#include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 
 #ifdef NES_PCB_DEBUG
@@ -45,48 +43,57 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_TXROM = &device_creator<nes_txrom_device>;
-const device_type NES_HKROM = &device_creator<nes_hkrom_device>;
-const device_type NES_TXSROM = &device_creator<nes_txsrom_device>;
-const device_type NES_TQROM = &device_creator<nes_tqrom_device>;
-const device_type NES_QJ_PCB = &device_creator<nes_qj_device>;
-const device_type NES_ZZ_PCB = &device_creator<nes_zz_device>;
+DEFINE_DEVICE_TYPE(NES_TXROM,  nes_txrom_device,  "nes_txrom",  "NES Cart TxROM (MMC-3) PCB")
+DEFINE_DEVICE_TYPE(NES_HKROM,  nes_hkrom_device,  "nes_hkrom",  "NES Cart HKROM (MMC-6) PCB")
+DEFINE_DEVICE_TYPE(NES_TXSROM, nes_txsrom_device, "nes_txsrom", "NES Cart TxSROM PCB")
+DEFINE_DEVICE_TYPE(NES_TQROM,  nes_tqrom_device,  "nes_tqrom",  "NES Cart TQROM PCB")
+DEFINE_DEVICE_TYPE(NES_QJ_PCB, nes_qj_device,     "nes_qj",     "NES Cart NES-QJ PCB")
+DEFINE_DEVICE_TYPE(NES_ZZ_PCB, nes_zz_device,     "nes_zz",     "NES Cart PAL-ZZ PCB")
 
 
-nes_txrom_device::nes_txrom_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-					: nes_nrom_device(mconfig, type, name, tag, owner, clock, shortname, source), m_prg_base(0), m_prg_mask(0), m_chr_base(0), m_chr_mask(0),
-	m_latch(0), m_wram_protect(0), m_alt_irq(0), m_irq_count(0), m_irq_count_latch(0), m_irq_clear(0), m_irq_enable(0)
-				{
-}
-
-nes_txrom_device::nes_txrom_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_nrom_device(mconfig, NES_TXROM, "NES Cart TxROM (MMC-3) PCB", tag, owner, clock, "nes_txrom", __FILE__), m_prg_base(0), m_prg_mask(0), m_chr_base(0), m_chr_mask(0),
-	m_latch(0), m_wram_protect(0), m_alt_irq(0), m_irq_count(0), m_irq_count_latch(0), m_irq_clear(0), m_irq_enable(0)
-				{
-}
-
-nes_hkrom_device::nes_hkrom_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txrom_device(mconfig, NES_HKROM, "NES Cart HKROM (MMC-6) PCB", tag, owner, clock, "nes_hkrom", __FILE__), m_wram_enable(0), m_mmc6_reg(0)
-				{
-}
-
-nes_txsrom_device::nes_txsrom_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txrom_device(mconfig, NES_TXSROM, "NES Cart TxSROM PCB", tag, owner, clock, "nes_txsrom", __FILE__)
+nes_txrom_device::nes_txrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
+	: nes_nrom_device(mconfig, type, tag, owner, clock), m_mmc_mirror(0), m_prg_base(0), m_prg_mask(0), m_chr_base(0), m_chr_mask(0)
+	, m_latch(0), m_wram_protect(0), m_alt_irq(0), m_irq_count(0), m_irq_count_latch(0), m_irq_clear(0), m_irq_enable(0)
 {
 }
 
-nes_tqrom_device::nes_tqrom_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txrom_device(mconfig, NES_TQROM, "NES Cart TQROM PCB", tag, owner, clock, "nes_tqrom", __FILE__)
+nes_txrom_device::nes_txrom_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_txrom_device(mconfig, NES_TXROM, tag, owner, clock)
 {
 }
 
-nes_qj_device::nes_qj_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txrom_device(mconfig, NES_QJ_PCB, "NES Cart NES-QJ PCB", tag, owner, clock, "nes_qj", __FILE__)
+nes_hkrom_device::nes_hkrom_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: nes_txrom_device(mconfig, NES_HKROM, tag, owner, clock), m_wram_enable(0), m_mmc6_reg(0)
 {
 }
 
-nes_zz_device::nes_zz_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_txrom_device(mconfig, NES_ZZ_PCB, "NES Cart PAL-ZZ PCB", tag, owner, clock, "nes_zz", __FILE__)
+nes_txsrom_device::nes_txsrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
+	: nes_txrom_device(mconfig, type, tag, owner, clock)
+{
+}
+
+nes_txsrom_device::nes_txsrom_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_txsrom_device(mconfig, NES_TXSROM, tag, owner, clock)
+{
+}
+
+nes_tqrom_device::nes_tqrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
+	: nes_txrom_device(mconfig, type, tag, owner, clock)
+{
+}
+
+nes_tqrom_device::nes_tqrom_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_tqrom_device(mconfig, NES_TQROM, tag, owner, clock)
+{
+}
+
+nes_qj_device::nes_qj_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_txrom_device(mconfig, NES_QJ_PCB, tag, owner, clock)
+{
+}
+
+nes_zz_device::nes_zz_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_txrom_device(mconfig, NES_ZZ_PCB, tag, owner, clock)
 {
 }
 
@@ -97,6 +104,7 @@ void nes_txrom_device::mmc3_start()
 	common_start();
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));
+	save_item(NAME(m_mmc_mirror));
 	save_item(NAME(m_latch));
 	save_item(NAME(m_wram_protect));
 	save_item(NAME(m_prg_base));
@@ -114,8 +122,19 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int i
 {
 	m_mmc_prg_bank[0] = m_mmc_prg_bank[2] = 0xffe; // m_mmc_prg_bank[2] & m_mmc_prg_bank[3] remain always the same in most MMC3 variants
 	m_mmc_prg_bank[1] = m_mmc_prg_bank[3] = 0xfff; // but some pirate clone mappers change them after writing certain registers
-	memset(m_mmc_vrom_bank, 0, sizeof(m_mmc_vrom_bank));
 
+	// Point CHR banks to the first 8K of memory. This is needed for a few unlicensed carts that use VRAM and don't init banks properly.
+	// This includes at least some Waixing games, EverQuest and Sanguozhi, and some multicarts, New Star 6 in 1 and Famicom Yarou Vol 1.
+	m_mmc_vrom_bank[0] = 0;
+	m_mmc_vrom_bank[1] = 2;
+	m_mmc_vrom_bank[2] = 4;
+	m_mmc_vrom_bank[3] = 5;
+	m_mmc_vrom_bank[4] = 6;
+	m_mmc_vrom_bank[5] = 7;
+	m_mmc_vrom_bank[6] = 0;  // extension reg used by clone boards
+	m_mmc_vrom_bank[7] = 0;  // extension reg used by clone boards
+
+	m_mmc_mirror = 0;
 	m_latch = 0;
 	m_wram_protect = 0x80;
 
@@ -164,14 +183,12 @@ void nes_hkrom_device::pcb_reset()
 
 void nes_qj_device::pcb_reset()
 {
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
 	mmc3_common_initialize(0x0f, 0x7f, 0);
 }
 
 
 void nes_zz_device::pcb_reset()
 {
-	m_chr_source = m_vrom_chunks ? CHRROM : CHRRAM;
 	mmc3_common_initialize(0x07, 0x7f, 0);
 }
 
@@ -191,7 +208,7 @@ void nes_zz_device::pcb_reset()
 /* Here, IRQ counter decrements every scanline. */
 void nes_txrom_device::hblank_irq(int scanline, int vblank, int blanked)
 {
-	if (scanline < PPU_BOTTOM_VISIBLE_SCANLINE)
+	if (scanline < ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE)
 	{
 		int prior_count = m_irq_count;
 		if ((m_irq_count == 0) || m_irq_clear)
@@ -201,9 +218,8 @@ void nes_txrom_device::hblank_irq(int scanline, int vblank, int blanked)
 
 		if (m_irq_enable && !blanked && (m_irq_count == 0) && (prior_count || m_irq_clear /*|| !m_mmc3_alt_irq*/)) // according to blargg the latter should be present as well, but it breaks Rampart and Joe & Mac US: they probably use the alt irq!
 		{
-			LOG_MMC(("irq fired, scanline: %d (MAME %d, beam pos: %d)\n", scanline,
-						machine().first_screen()->vpos(), machine().first_screen()->hpos()));
-			m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
+			LOG_MMC(("irq fired, scanline: %d\n", scanline));
+			set_irq_line(ASSERT_LINE);
 		}
 	}
 	m_irq_clear = 0;
@@ -224,7 +240,7 @@ void nes_txrom_device::chr_cb( int start, int bank, int source )
 
 void nes_txrom_device::set_prg( int prg_base, int prg_mask )
 {
-	UINT8 prg_flip = (m_latch & 0x40) ? 2 : 0;
+	uint8_t prg_flip = (m_latch & 0x40) ? 2 : 0;
 
 	prg_cb(0, prg_base | (m_mmc_prg_bank[0 ^ prg_flip] & prg_mask));
 	prg_cb(1, prg_base | (m_mmc_prg_bank[1] & prg_mask));
@@ -232,9 +248,9 @@ void nes_txrom_device::set_prg( int prg_base, int prg_mask )
 	prg_cb(3, prg_base | (m_mmc_prg_bank[3] & prg_mask));
 }
 
-void nes_txrom_device::set_chr( UINT8 chr, int chr_base, int chr_mask )
+void nes_txrom_device::set_chr( uint8_t chr, int chr_base, int chr_mask )
 {
-	UINT8 chr_page = (m_latch & 0x80) >> 5;
+	uint8_t chr_page = (m_latch & 0x80) >> 5;
 
 	chr_cb(chr_page ^ 0, chr_base | ((m_mmc_vrom_bank[0] & ~0x01) & chr_mask), chr);
 	chr_cb(chr_page ^ 1, chr_base | ((m_mmc_vrom_bank[0] |  0x01) & chr_mask), chr);
@@ -246,9 +262,9 @@ void nes_txrom_device::set_chr( UINT8 chr, int chr_base, int chr_mask )
 	chr_cb(chr_page ^ 7, chr_base | (m_mmc_vrom_bank[5] & chr_mask), chr);
 }
 
-WRITE8_MEMBER(nes_txrom_device::txrom_write)
+void nes_txrom_device::txrom_write(offs_t offset, uint8_t data)
 {
-	UINT8 mmc_helper, cmd;
+	uint8_t mmc_helper, cmd;
 
 	LOG_MMC(("txrom_write, offset: %04x, data: %02x\n", offset, data));
 
@@ -285,7 +301,9 @@ WRITE8_MEMBER(nes_txrom_device::txrom_write)
 			break;
 
 		case 0x2000:
-			set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+			m_mmc_mirror = data;
+			if (m_mirroring != PPU_MIRROR_4SCREEN)
+				set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 			break;
 
 		case 0x2001:
@@ -302,7 +320,7 @@ WRITE8_MEMBER(nes_txrom_device::txrom_write)
 
 		case 0x6000:
 			m_irq_enable = 0;
-			m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+			set_irq_line(CLEAR_LINE);
 			break;
 
 		case 0x6001:
@@ -315,7 +333,7 @@ WRITE8_MEMBER(nes_txrom_device::txrom_write)
 	}
 }
 
-WRITE8_MEMBER(nes_txrom_device::write_m)
+void nes_txrom_device::write_m(offs_t offset, uint8_t data)
 {
 	LOG_MMC(("txrom write_m, offset: %04x, data: %02x\n", offset, data));
 
@@ -323,12 +341,12 @@ WRITE8_MEMBER(nes_txrom_device::write_m)
 	{
 		if (!m_battery.empty())
 			m_battery[offset & (m_battery.size() - 1)] = data;
-		if (!m_prgram.empty())
+		else if (!m_prgram.empty())
 			m_prgram[offset & (m_prgram.size() - 1)] = data;
 	}
 }
 
-READ8_MEMBER(nes_txrom_device::read_m)
+uint8_t nes_txrom_device::read_m(offs_t offset)
 {
 	LOG_MMC(("txrom read_m, offset: %04x\n", offset));
 
@@ -340,7 +358,7 @@ READ8_MEMBER(nes_txrom_device::read_m)
 			return m_prgram[offset & (m_prgram.size() - 1)];
 	}
 
-	return m_open_bus;   // open bus
+	return get_open_bus();
 }
 
 
@@ -352,9 +370,9 @@ READ8_MEMBER(nes_txrom_device::read_m)
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_hkrom_device::write_m)
+void nes_hkrom_device::write_m(offs_t offset, uint8_t data)
 {
-	UINT8 write_hi, write_lo;
+	uint8_t write_hi, write_lo;
 	LOG_MMC(("hkrom write_m, offset: %04x, data: %02x\n", offset, data));
 
 	if (offset < 0x1000)
@@ -371,15 +389,15 @@ WRITE8_MEMBER(nes_hkrom_device::write_m)
 		m_mmc6_ram[offset & 0x3ff] = data;
 }
 
-READ8_MEMBER(nes_hkrom_device::read_m)
+uint8_t nes_hkrom_device::read_m(offs_t offset)
 {
 	LOG_MMC(("hkrom read_m, offset: %04x\n", offset));
 
 	if (offset < 0x1000)
-		return m_open_bus;    // open bus
+		return get_open_bus();
 
 	if (!(m_mmc6_reg & 0xa0))
-		return m_open_bus;    // open bus
+		return get_open_bus();
 
 	if (BIT(offset, 9) && BIT(m_mmc6_reg, 7))   // access to upper half of 1k when upper read is enabled
 		return m_mmc6_ram[offset & 0x3ff];
@@ -391,9 +409,9 @@ READ8_MEMBER(nes_hkrom_device::read_m)
 	return 0x00;
 }
 
-WRITE8_MEMBER(nes_hkrom_device::write_h)
+void nes_hkrom_device::write_h(offs_t offset, uint8_t data)
 {
-	UINT8 mmc6_helper;
+	uint8_t mmc6_helper;
 	LOG_MMC(("hkrom write_h, offset: %04x, data: %02x\n", offset, data));
 
 	switch (offset & 0x6001)
@@ -425,7 +443,7 @@ WRITE8_MEMBER(nes_hkrom_device::write_h)
 			break;
 
 		default:
-			txrom_write(space, offset, data, mem_mask);
+			txrom_write(offset, data);
 			break;
 	}
 }
@@ -439,35 +457,23 @@ WRITE8_MEMBER(nes_hkrom_device::write_h)
 
  iNES: mapper 118
 
- In MESS: Supported. It also uses mmc3_irq.
+ In MAME: Supported. It also uses mmc3_irq.
 
  -------------------------------------------------*/
 
-void nes_txsrom_device::set_mirror()
+void nes_txsrom_device::set_chr(u8 chr, int chr_base, int chr_mask)
 {
-	if (m_latch & 0x80)
-	{
-		set_nt_page(0, CIRAM, BIT(m_mmc_vrom_bank[2],7), 1);
-		set_nt_page(1, CIRAM, BIT(m_mmc_vrom_bank[3],7), 1);
-		set_nt_page(2, CIRAM, BIT(m_mmc_vrom_bank[4],7), 1);
-		set_nt_page(3, CIRAM, BIT(m_mmc_vrom_bank[5],7), 1);
-	}
-	else
-	{
-		set_nt_page(0, CIRAM, BIT(m_mmc_vrom_bank[0],7), 1);
-		set_nt_page(1, CIRAM, BIT(m_mmc_vrom_bank[0],7), 1);
-		set_nt_page(2, CIRAM, BIT(m_mmc_vrom_bank[1],7), 1);
-		set_nt_page(3, CIRAM, BIT(m_mmc_vrom_bank[1],7), 1);
-	}
+	nes_txrom_device::set_chr(chr, chr_base, chr_mask);
+
+	// do nametables
+	static constexpr u8 bank[8] = { 0, 0, 1, 1, 2, 3, 4, 5 };
+	int start = (m_latch & 0x80) >> 5;
+
+	for (int i = 0; i < 4; i++)
+		set_nt_page(i, CIRAM, BIT(m_mmc_vrom_bank[bank[start + i]], 7), 1);
 }
 
-void nes_txsrom_device::chr_cb( int start, int bank, int source )
-{
-	set_mirror();   // we could probably update only for one (e.g. the first) call, to slightly optimize the code
-	chr1_x(start, bank, source);
-}
-
-WRITE8_MEMBER(nes_txsrom_device::write_h)
+void nes_txsrom_device::write_h(offs_t offset, u8 data)
 {
 	LOG_MMC(("txsrom write_h, offset: %04x, data: %02x\n", offset, data));
 
@@ -475,9 +481,8 @@ WRITE8_MEMBER(nes_txsrom_device::write_h)
 	{
 		case 0x2000:
 			break;
-
 		default:
-			txrom_write(space, offset, data, mem_mask);
+			txrom_write(offset, data);
 			break;
 	}
 }
@@ -490,32 +495,17 @@ WRITE8_MEMBER(nes_txsrom_device::write_h)
 
  iNES: mapper 119
 
- In MESS: Supported. It also uses mmc3_irq.
+ In MAME: Supported. It also uses mmc3_irq.
 
  -------------------------------------------------*/
 
-void nes_tqrom_device::set_chr( UINT8 chr, int chr_base, int chr_mask )
+void nes_tqrom_device::chr_cb(int start, int bank, int source)
 {
-	UINT8 chr_page = (m_latch & 0x80) >> 5;
-	UINT8 src[6], mask[6];
-
-	// TQROM ignores the source, base and mask set by the MMC3 and determines them based on vrom bank bits
-	for (int i = 0; i < 6; i++)
-	{
-		src[i] = (m_mmc_vrom_bank[i] & 0x40) ? CHRRAM : CHRROM;
-		mask[i] =  (m_mmc_vrom_bank[i] & 0x40) ? 0x07 : 0x3f;
-	}
-
-	chr1_x(chr_page ^ 0, ((m_mmc_vrom_bank[0] & ~0x01) & mask[0]), src[0]);
-	chr1_x(chr_page ^ 1, ((m_mmc_vrom_bank[0] |  0x01) & mask[0]), src[0]);
-	chr1_x(chr_page ^ 2, ((m_mmc_vrom_bank[1] & ~0x01) & mask[1]), src[1]);
-	chr1_x(chr_page ^ 3, ((m_mmc_vrom_bank[1] |  0x01) & mask[1]), src[1]);
-	chr1_x(chr_page ^ 4, (m_mmc_vrom_bank[2] & mask[2]), src[2]);
-	chr1_x(chr_page ^ 5, (m_mmc_vrom_bank[3] & mask[3]), src[3]);
-	chr1_x(chr_page ^ 6, (m_mmc_vrom_bank[4] & mask[4]), src[4]);
-	chr1_x(chr_page ^ 7, (m_mmc_vrom_bank[5] & mask[5]), src[5]);
+	if (BIT(bank, 6))
+		chr1_x(start, bank & 0x07, CHRRAM);
+	else
+		chr1_x(start, bank & 0x3f, CHRROM);
 }
-
 
 /*-------------------------------------------------
 
@@ -526,18 +516,18 @@ void nes_tqrom_device::set_chr( UINT8 chr, int chr_base, int chr_mask )
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_qj_device::write_m)
+void nes_qj_device::write_m(offs_t offset, u8 data)
 {
 	LOG_MMC(("qj write_m, offset: %04x, data: %02x\n", offset, data));
 
-	m_prg_base = BIT(data, 0) << 4;
-	m_prg_mask = 0x0f;
-	m_chr_base = BIT(data, 0) << 7;
-	m_chr_mask = 0x7f;
-	set_prg(m_prg_base, m_prg_mask);
-	set_chr(m_chr_source, m_chr_base, m_chr_mask);
+	if (BIT(m_wram_protect, 7) && !BIT(m_wram_protect, 6))
+	{
+		m_prg_base = BIT(data, 0) << 4;
+		m_chr_base = BIT(data, 0) << 7;
+		set_prg(m_prg_base, m_prg_mask);
+		set_chr(m_chr_source, m_chr_base, m_chr_mask);
+	}
 }
-
 
 /*-------------------------------------------------
 
@@ -546,17 +536,22 @@ WRITE8_MEMBER(nes_qj_device::write_m)
 
  iNES: mapper 37
 
+ TODO: this board apparently only resets to the menu
+ screen on systems with a CIC (the outer PRG lines
+ are somehow tied to the CIC's reset line).
+
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_zz_device::write_m)
+void nes_zz_device::write_m(offs_t offset, u8 data)
 {
-	UINT8 mmc_helper = data & 0x07;
 	LOG_MMC(("zz write_m, offset: %04x, data: %02x\n", offset, data));
 
-	m_prg_base = (BIT(mmc_helper, 2) << 4) | (((mmc_helper & 0x03) == 0x03) ? 0x08 : 0);
-	m_prg_mask = (mmc_helper << 1) | 0x07;
-	m_chr_base = BIT(mmc_helper, 2) << 7;
-	m_chr_mask = 0x7f;
-	set_prg(m_prg_base, m_prg_mask);
-	set_chr(m_chr_source, m_chr_base, m_chr_mask);
+	if (BIT(m_wram_protect, 7) && !BIT(m_wram_protect, 6))
+	{
+		m_prg_base = ((data & 0x04) | (data & (data << 1) & 0x02)) << 2;
+		m_prg_mask = (m_prg_mask == 0x10) ? 0x0f : 0x07;
+		m_chr_base = BIT(data, 2) << 7;
+		set_prg(m_prg_base, m_prg_mask);
+		set_chr(m_chr_source, m_chr_base, m_chr_mask);
+	}
 }

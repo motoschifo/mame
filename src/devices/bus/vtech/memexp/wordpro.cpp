@@ -6,6 +6,7 @@
 
 ***************************************************************************/
 
+#include "emu.h"
 #include "wordpro.h"
 
 
@@ -13,7 +14,18 @@
 //  DEVICE DEFINITIONS
 //**************************************************************************
 
-const device_type WORDPRO = &device_creator<wordpro_device>;
+DEFINE_DEVICE_TYPE(VTECH_WORDPRO, vtech_wordpro_device, "vtech_wordpro", "DSE VZ-300 WordPro")
+
+//-------------------------------------------------
+//  mem_map - memory space address map
+//-------------------------------------------------
+
+void vtech_wordpro_device::mem_map(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x6000, 0x67ff).rom().region("software", 0);
+	map(0xd000, 0xffff).rom().region("software", 0);
+}
 
 //-------------------------------------------------
 //  rom_region - device-specific ROM region
@@ -26,7 +38,7 @@ ROM_START( wordpro )
 	ROM_LOAD("wordpro.u5", 0x2000, 0x1000, CRC(2a336802) SHA1(b4de50f943243f18a2bfabef354b76d77178c189))
 ROM_END
 
-const rom_entry *wordpro_device::device_rom_region() const
+const tiny_rom_entry *vtech_wordpro_device::device_rom_region() const
 {
 	return ROM_NAME( wordpro );
 }
@@ -37,12 +49,11 @@ const rom_entry *wordpro_device::device_rom_region() const
 //**************************************************************************
 
 //-------------------------------------------------
-//  wordpro_device - constructor
+//  vtech_wordpro_device - constructor
 //-------------------------------------------------
 
-wordpro_device::wordpro_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-	device_t(mconfig, WORDPRO, "DSE VZ-300 WordPro", tag, owner, clock, "wordpro", __FILE__),
-	device_memexp_interface(mconfig, *this)
+vtech_wordpro_device::vtech_wordpro_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	vtech_memexp_device(mconfig, VTECH_WORDPRO, tag, owner, clock)
 {
 }
 
@@ -50,16 +61,7 @@ wordpro_device::wordpro_device(const machine_config &mconfig, const char *tag, d
 //  device_start - device-specific startup
 //-------------------------------------------------
 
-void wordpro_device::device_start()
+void vtech_wordpro_device::device_start()
 {
-}
-
-//-------------------------------------------------
-//  device_reset - device-specific reset
-//-------------------------------------------------
-
-void wordpro_device::device_reset()
-{
-	m_slot->m_program->install_rom(0x6000, 0x67ff, memregion("software")->base());
-	m_slot->m_program->install_rom(0xd000, 0xffff, memregion("software")->base());
+	vtech_memexp_device::device_start();
 }

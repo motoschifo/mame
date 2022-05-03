@@ -59,6 +59,7 @@
 /* Effective-address based memory access macros */
 #define read_8_NORM(A)      g65816i_read_8_normal(A)
 #define read_8_IMM(A)       g65816i_read_8_immediate(A)
+#define read_8_OP(A)        g65816i_read_8_opcode(A)
 #define read_8_D(A)         g65816i_read_8_direct(A)
 #define read_8_A(A)         g65816i_read_8_normal(A)
 #define read_8_AL(A)        g65816i_read_8_normal(A)
@@ -74,7 +75,6 @@
 #define read_8_DXI(A)       g65816i_read_8_normal(A)
 #define read_8_DIY(A)       g65816i_read_8_normal(A)
 #define read_8_DLIY(A)      g65816i_read_8_normal(A)
-#define read_8_AXI(A)       g65816i_read_8_normal(A)
 #define read_8_S(A)         g65816i_read_8_normal(A)
 #define read_8_SIY(A)       g65816i_read_8_normal(A)
 
@@ -95,7 +95,7 @@
 #define read_16_DXI(A)      g65816i_read_16_normal(A)
 #define read_16_DIY(A)      g65816i_read_16_normal(A)
 #define read_16_DLIY(A)     g65816i_read_16_normal(A)
-#define read_16_AXI(A)      g65816i_read_16_normal(A)
+#define read_16_AXI(A)      g65816i_read_16_immediate(A)
 #define read_16_S(A)        g65816i_read_16_normal(A)
 #define read_16_SIY(A)      g65816i_read_16_normal(A)
 
@@ -116,7 +116,6 @@
 #define read_24_DXI(A)      g65816i_read_24_normal(A)
 #define read_24_DIY(A)      g65816i_read_24_normal(A)
 #define read_24_DLIY(A)     g65816i_read_24_normal(A)
-#define read_24_AXI(A)      g65816i_read_24_normal(A)
 #define read_24_S(A)        g65816i_read_24_normal(A)
 #define read_24_SIY(A)      g65816i_read_24_normal(A)
 
@@ -136,7 +135,6 @@
 #define write_8_DXI(A, V)   g65816i_write_8_normal(A, V)
 #define write_8_DIY(A, V)   g65816i_write_8_normal(A, V)
 #define write_8_DLIY(A, V)  g65816i_write_8_normal(A, V)
-#define write_8_AXI(A, V)   g65816i_write_8_normal(A, V)
 #define write_8_S(A, V)     g65816i_write_8_normal(A, V)
 #define write_8_SIY(A, V)   g65816i_write_8_normal(A, V)
 
@@ -156,7 +154,6 @@
 #define write_16_DXI(A, V)  g65816i_write_16_normal(A, V)
 #define write_16_DIY(A, V)  g65816i_write_16_normal(A, V)
 #define write_16_DLIY(A, V) g65816i_write_16_normal(A, V)
-#define write_16_AXI(A, V)  g65816i_write_16_normal(A, V)
 #define write_16_S(A, V)    g65816i_write_16_normal(A, V)
 #define write_16_SIY(A, V)  g65816i_write_16_normal(A, V)
 
@@ -177,7 +174,6 @@
 #define OPER_8_DXI()        read_8_DXI(EA_DXI())
 #define OPER_8_DIY()        read_8_DIY(EA_DIY())
 #define OPER_8_DLIY()       read_8_DLIY(EA_DLIY())
-#define OPER_8_AXI()        read_8_AXI(EA_AXI())
 #define OPER_8_S()          read_8_S(EA_S())
 #define OPER_8_SIY()        read_8_SIY(EA_SIY())
 
@@ -197,7 +193,6 @@
 #define OPER_16_DXI()       read_16_DXI(EA_DXI())
 #define OPER_16_DIY()       read_16_DIY(EA_DIY())
 #define OPER_16_DLIY()      read_16_DLIY(EA_DLIY())
-#define OPER_16_AXI()       read_16_AXI(EA_AXI())
 #define OPER_16_S()         read_16_S(EA_S())
 #define OPER_16_SIY()       read_16_SIY(EA_SIY())
 
@@ -217,7 +212,6 @@
 #define OPER_24_DXI()       read_24_DXI(EA_DXI())
 #define OPER_24_DIY()       read_24_DIY(EA_DIY())
 #define OPER_24_DLIY()      read_24_DLIY(EA_DLIY())
-#define OPER_24_AXI()       read_24_AXI(EA_AXI())
 #define OPER_24_S()         read_24_S(EA_S())
 #define OPER_24_SIY()       read_24_SIY(EA_SIY())
 
@@ -237,10 +231,10 @@
 			SRC    = OPER_8_##MODE();                                       \
 			if(FLAG_D)                                                      \
 			{                                                               \
-				INT32 result, r0, r1, carry;                                                    \
+				int32_t result, r0, r1, carry;                                                    \
 				r0 = REGISTER_A;    \
 				r1 = SRC;       \
-				carry = CFLAG_AS_1();   \
+				carry = CFLAG_1();   \
 				result = (r0 & 0x0f) + (r1 & 0x0f) + (carry << 0);                          \
 				if (result > 0x09) result += 0x06;                                      \
 				carry = result > 0x0f;                                              \
@@ -253,7 +247,7 @@
 			}                                                               \
 			else                                                            \
 			{                                                               \
-				FLAG_C = tmp16 = REGISTER_A + SRC + CFLAG_AS_1();           \
+				FLAG_C = tmp16 = REGISTER_A + SRC + CFLAG_1();           \
 				FLAG_V = VFLAG_ADD_8(SRC, REGISTER_A, FLAG_C);              \
 				FLAG_N = FLAG_Z = REGISTER_A = MAKE_UINT_8(tmp16);              \
 			}                                                               \
@@ -263,10 +257,10 @@
 #define OP_ADC(MODE)                                                        \
 			CLK(CLK_OP + CLK_R16 + CLK_##MODE);                             \
 			SRC    = OPER_16_##MODE();                                      \
-			INT32 result, r0, r1, carry;                                                    \
+			int32_t result, r0, r1, carry;                                                    \
 			r0 = REGISTER_A;    \
 			r1 = SRC;       \
-			carry = CFLAG_AS_1();   \
+			carry = CFLAG_1();   \
 			if (!FLAG_D)    \
 			{   \
 				result = r0 + r1 + carry;   \
@@ -602,7 +596,7 @@
 /* Unusual behavior: stacks PC-1 */
 #undef OP_JSR
 #define OP_JSR(MODE)                                                        \
-			CLK(CLK_OP + CLK_W16 + CLK_##MODE);                             \
+			CLK(6);                             \
 			DST = EA_##MODE();                                              \
 			g65816i_push_16(REGISTER_PC-1);                                       \
 			g65816i_jump_16(DST)
@@ -611,7 +605,7 @@
 /* Unusual behavior: stacks PC-1 */
 #undef OP_JSRAXI
 #define OP_JSRAXI()                                                         \
-			CLK(CLK_OP + CLK_W16 + CLK_AXI);                                \
+			CLK(8);                                \
 			DST = read_16_AXI(REGISTER_PB | (MAKE_UINT_16(OPER_16_IMM() + REGISTER_X))); \
 			g65816i_push_16(REGISTER_PC-1);                                       \
 			g65816i_jump_16(DST)
@@ -994,12 +988,12 @@
 #if FLAG_SET_M
 #define OP_ROL()                                                            \
 			CLK(CLK_OP + CLK_IMPLIED);                                      \
-			FLAG_C = (REGISTER_A<<1) | CFLAG_AS_1();                                \
+			FLAG_C = (REGISTER_A<<1) | CFLAG_1();                                \
 			FLAG_N = FLAG_Z = REGISTER_A = MAKE_UINT_8(FLAG_C)
 #else
 #define OP_ROL()                                                            \
 			CLK(CLK_OP + CLK_IMPLIED);                                      \
-			FLAG_C = (REGISTER_A<<1) | CFLAG_AS_1();                                \
+			FLAG_C = (REGISTER_A<<1) | CFLAG_1();                                \
 			FLAG_Z = REGISTER_A = MAKE_UINT_16(FLAG_C);                         \
 			FLAG_N = NFLAG_16(FLAG_C);                                      \
 			FLAG_C = CFLAG_16(FLAG_C)
@@ -1011,14 +1005,14 @@
 #define OP_ROLM(MODE)                                                       \
 			CLK(CLK_OP + CLK_RMW8 + CLK_W_##MODE);                          \
 			DST = EA_##MODE();                                              \
-			FLAG_C = (read_8_##MODE(DST)<<1) | CFLAG_AS_1();                \
+			FLAG_C = (read_8_##MODE(DST)<<1) | CFLAG_1();                \
 			FLAG_N = FLAG_Z = MAKE_UINT_8(FLAG_C);                          \
 			write_8_##MODE(DST, FLAG_Z)
 #else
 #define OP_ROLM(MODE)                                                       \
 			CLK(CLK_OP + CLK_RMW16 + CLK_W_##MODE);                         \
 			DST = EA_##MODE();                                              \
-			FLAG_C = (read_16_##MODE(DST)<<1) | CFLAG_AS_1();               \
+			FLAG_C = (read_16_##MODE(DST)<<1) | CFLAG_1();               \
 			FLAG_Z = MAKE_UINT_16(FLAG_C);                                  \
 			FLAG_N = NFLAG_16(FLAG_C);                                      \
 			FLAG_C = CFLAG_16(FLAG_C);                                      \
@@ -1102,7 +1096,7 @@
 			if(!FLAG_D)                                                     \
 			{                                                               \
 				FLAG_C = ~FLAG_C;                                               \
-				FLAG_C = REGISTER_A - SRC - CFLAG_AS_1();                   \
+				FLAG_C = REGISTER_A - SRC - CFLAG_1();                   \
 				FLAG_V = VFLAG_SUB_8(SRC, REGISTER_A, FLAG_C);              \
 				FLAG_N = FLAG_Z = REGISTER_A = MAKE_UINT_8(FLAG_C);         \
 				FLAG_C = ~FLAG_C;                                           \
@@ -1110,11 +1104,11 @@
 			}                                                               \
 			else                                                            \
 			{                                                               \
-				INT32 result, r0, r1, carry;                                                    \
+				int32_t result, r0, r1, carry;                                                    \
 				r0 = REGISTER_A;    \
 				r1 = SRC;       \
 				r1 ^= 0xff;     \
-				carry = CFLAG_AS_1();   \
+				carry = CFLAG_1();   \
 				result = (r0 & 0x0f) + (r1 & 0x0f) + (carry << 0);  \
 				if (result <= 0x0f) result -= 0x06; \
 				carry = result > 0x0f;  \
@@ -1129,11 +1123,11 @@
 #define OP_SBC(MODE)                                                        \
 			CLK(CLK_OP + CLK_R16 + CLK_##MODE);                             \
 			SRC    = OPER_16_##MODE();                                      \
-			INT32 result, r0, r1, carry;                                                    \
+			int32_t result, r0, r1, carry;                                                    \
 			r0 = REGISTER_A;    \
 			r1 = SRC;       \
 			r1 ^= 0xffff;       \
-			carry = CFLAG_AS_1();   \
+			carry = CFLAG_1();   \
 			if (!FLAG_D)    \
 			{   \
 				result = r0 + r1 + carry;   \
@@ -1427,7 +1421,8 @@
 #undef OP_WDM
 #define OP_WDM()                                                            \
 			CLK(CLK_OP + CLK_IMPLIED);                                      \
-			REGISTER_PC++
+			SRC = OPER_8_IMM();                                             \
+			m_wdm_w(SRC);
 
 /* G65816  Exchange accum high and low bytes */
 #undef OP_XBA
@@ -1450,7 +1445,7 @@
 #undef OP_XCE
 #define OP_XCE()                                                            \
 			CLK(CLK_OP + CLK_IMPLIED);                                      \
-			SRC = CFLAG_AS_1();                                             \
+			SRC = CFLAG_1();                                             \
 			FLAG_C = FLAG_E<<8;                                             \
 			g65816i_set_flag_e(SRC)
 
@@ -1852,20 +1847,19 @@ TABLE_FUNCTION(void, set_line, (int line, int state))
 			return;
 	}
 
-	LINE_IRQ=1;
+	LINE_IRQ=1; // FIXME: this can't be right!
 }
 
 
 
 /* Get a register from the CPU core */
-TABLE_FUNCTION(uint, get_reg, (int regnum))
+TABLE_FUNCTION(unsigned, get_reg, (int regnum))
 {
 	switch(regnum)
 	{
 		case G65816_A: return REGISTER_B | REGISTER_A;
 		case G65816_X: return REGISTER_X;
 		case G65816_Y: return REGISTER_Y;
-		case STATE_GENSP: return REGISTER_S;
 		case G65816_S: return REGISTER_S;
 		case STATE_GENPC: return REGISTER_PC;
 		case G65816_PC: return REGISTER_PC;
@@ -1883,15 +1877,15 @@ TABLE_FUNCTION(uint, get_reg, (int regnum))
 
 
 
-TABLE_FUNCTION(void, set_reg, (int regnum, uint val))
+TABLE_FUNCTION(void, set_reg, (int regnum, unsigned val))
 {
 	switch(regnum)
 	{
 		case STATE_GENPC: case G65816_PC: REGISTER_PC = MAKE_UINT_16(val); break;
 #if FLAG_SET_E
-		case STATE_GENSP: case G65816_S: REGISTER_S = MAKE_UINT_8(val) | 0x100; break;
+		case G65816_S: REGISTER_S = MAKE_UINT_8(val) | 0x100; break;
 #else
-		case STATE_GENSP: case G65816_S: REGISTER_S = MAKE_UINT_16(val); break;
+		case G65816_S: REGISTER_S = MAKE_UINT_16(val); break;
 #endif
 		case G65816_P: g65816i_set_reg_p(val); break;
 #if FLAG_SET_M
@@ -1952,7 +1946,7 @@ TABLE_FUNCTION(int, execute, (int clocks))
 			G65816_CALL_DEBUGGER(REGISTER_PB | REGISTER_PC);
 
 			REGISTER_PC++;
-			REGISTER_IR = read_8_IMM(REGISTER_PB | REGISTER_PPC);
+			REGISTER_IR = read_8_OP(REGISTER_PB | REGISTER_PPC);
 			(this->*FTABLE_OPCODES[REGISTER_IR])();
 		} while((CLOCKS > 0) && g65816i_correct_mode());
 		return clocks - CLOCKS;

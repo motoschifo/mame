@@ -14,19 +14,22 @@
 
 */
 
+#include "emu.h"
 #include "hd64610.h"
+
 #include "coreutil.h"
+
+#define VERBOSE 1
+#include "logmacro.h"
 
 
 // device type definition
-const device_type HD64610 = &device_creator<hd64610_device>;
+DEFINE_DEVICE_TYPE(HD64610, hd64610_device, "hd64610", "Hitachi HD64610 RTC")
 
 
 //**************************************************************************
 //  MACROS / CONSTANTS
 //**************************************************************************
-
-#define LOG 1
 
 // internal registers
 enum
@@ -86,7 +89,7 @@ inline void hd64610_device::set_irq_line()
 
 	if (m_irq_out != irq_out)
 	{
-		if (LOG) logerror("HD64610 '%s' IRQ %u\n", tag(), irq_out);
+		LOG("HD64610 IRQ %u\n", irq_out);
 
 		m_out_irq_cb(irq_out);
 		m_irq_out = irq_out;
@@ -98,7 +101,7 @@ inline void hd64610_device::set_irq_line()
 //  read_counter -
 //-------------------------------------------------
 
-inline UINT8 hd64610_device::read_counter(int counter)
+inline uint8_t hd64610_device::read_counter(int counter)
 {
 	return bcd_2_dec(m_regs[counter]);
 }
@@ -108,7 +111,7 @@ inline UINT8 hd64610_device::read_counter(int counter)
 //  write_counter -
 //-------------------------------------------------
 
-inline void hd64610_device::write_counter(int counter, UINT8 value)
+inline void hd64610_device::write_counter(int counter, uint8_t value)
 {
 	m_regs[counter] = dec_2_bcd(value);
 }
@@ -150,8 +153,8 @@ inline void hd64610_device::check_alarm()
 //  hd64610_device - constructor
 //-------------------------------------------------
 
-hd64610_device::hd64610_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, HD64610, "HD64610", tag, owner, clock, "hd64610", __FILE__),
+hd64610_device::hd64610_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, HD64610, tag, owner, clock),
 		device_rtc_interface(mconfig, *this),
 		device_nvram_interface(mconfig, *this),
 		m_out_irq_cb(*this),
@@ -183,20 +186,10 @@ void hd64610_device::device_start()
 
 
 //-------------------------------------------------
-//  device_start - device-specific reset
-//-------------------------------------------------
-
-void hd64610_device::device_reset()
-{
-	set_current_time(machine());
-}
-
-
-//-------------------------------------------------
 //  device_timer - handler timer events
 //-------------------------------------------------
 
-void hd64610_device::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void hd64610_device::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch (id)
 	{
@@ -263,9 +256,10 @@ void hd64610_device::nvram_default()
 //  .nv file
 //-------------------------------------------------
 
-void hd64610_device::nvram_read(emu_file &file)
+bool hd64610_device::nvram_read(util::read_stream &file)
 {
-	file.read(m_regs, 0x10);
+	size_t actual;
+	return !file.read(m_regs, 0x10, actual) && actual == 0x10;
 }
 
 
@@ -274,9 +268,10 @@ void hd64610_device::nvram_read(emu_file &file)
 //  .nv file
 //-------------------------------------------------
 
-void hd64610_device::nvram_write(emu_file &file)
+bool hd64610_device::nvram_write(util::write_stream &file)
 {
-	file.write(m_regs, 0x10);
+	size_t actual;
+	return !file.write(m_regs, 0x10, actual) && actual == 0x10;
 }
 
 
@@ -284,7 +279,7 @@ void hd64610_device::nvram_write(emu_file &file)
 //  hardware start/stop
 //-------------------------------------------------
 
-WRITE_LINE_MEMBER( hd64610_device::h_w )
+void hd64610_device::h_w(int state)
 {
 	m_hline_state = state;
 }
@@ -294,11 +289,11 @@ WRITE_LINE_MEMBER( hd64610_device::h_w )
 //  read -
 //-------------------------------------------------
 
-READ8_MEMBER( hd64610_device::read )
+uint8_t hd64610_device::read(offs_t offset)
 {
-	UINT8 data =  m_regs[offset & 0x0f];
+	uint8_t data =  m_regs[offset & 0x0f];
 
-	if (LOG) logerror("HD64610 '%s' Register %u Read %02x\n", tag(), offset, data);
+	LOG("HD64610 Register %u Read %02x\n", offset, data);
 
 	return data;
 }
@@ -308,7 +303,7 @@ READ8_MEMBER( hd64610_device::read )
 //  write -
 //-------------------------------------------------
 
-WRITE8_MEMBER( hd64610_device::write )
+void hd64610_device::write(offs_t offset, uint8_t data)
 {
 	switch (offset & 0x0f)
 	{
@@ -322,17 +317,17 @@ WRITE8_MEMBER( hd64610_device::write )
 
 		if ((data & CRA_CF) == 0)
 		{
-			if (LOG) logerror("HD64610 '%s' clear carry flag\n", tag());
+			LOG("HD64610 clear carry flag\n");
 			m_regs[REG_CRA] &= 0x7f;
 		}
 		if ((data & CRA_AF) == 0)
 		{
-			if (LOG) logerror("HD64610 '%s' clear alarm flag\n", tag());
+			LOG("HD64610 clear alarm flag\n");
 			m_regs[REG_CRA] &= 0xfe;
 		}
 
-		if (LOG) logerror("HD64610 '%s' set alarm IRQ %d\n", tag(), BIT(data, 3));
-		if (LOG) logerror("HD64610 '%s' set carry IRQ %d\n", tag(), BIT(data, 4));
+		LOG("HD64610 set alarm IRQ %d\n", BIT(data, 3));
+		LOG("HD64610 set carry IRQ %d\n", BIT(data, 4));
 		break;
 
 	case REG_CRB:
@@ -340,7 +335,7 @@ WRITE8_MEMBER( hd64610_device::write )
 
 		if (data & CRB_ADJ)
 		{
-			if (LOG) logerror("HD64610 '%s' 30-sec adjustament\n", tag());
+			LOG("HD64610 30-sec adjustament\n");
 			adjust_seconds();
 			m_regs[REG_64HZ] = 0;
 
@@ -349,18 +344,18 @@ WRITE8_MEMBER( hd64610_device::write )
 
 		if (data & CRB_RESET)
 		{
-			if (LOG) logerror("HD64610 '%s' CRB reset\n", tag());
+			LOG("HD64610 CRB reset\n");
 			m_regs[REG_64HZ] = 0;
 
 			m_regs[REG_CRB] &= ~CRB_RESET;
 		}
 
-		if (LOG) logerror("HD64610 '%s' set timer %d\n", tag(), BIT(data, 0));
+		LOG("HD64610 set timer %d\n", BIT(data, 0));
 		break;
 
 	default:
 		m_regs[offset & 0x0f] = data & REG_WRITE_MASK[offset & 0x0f];
-		if (LOG) logerror("HD64610 '%s' Register %u Write %02x\n", tag(), offset & 0x0f, data);
+		LOG("HD64610 Register %u Write %02x\n", offset & 0x0f, data);
 		break;
 	}
 }

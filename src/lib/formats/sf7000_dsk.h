@@ -7,13 +7,15 @@
     sf7000 format
 
 *********************************************************************/
+#ifndef MAME_FORMATS_SF7000_DSK_H
+#define MAME_FORMATS_SF7000_DSK_H
 
-#ifndef SF7000_DSK_H_
-#define SF7000_DSK_H_
+#pragma once
 
 #include "upd765_dsk.h"
 
-class sf7000_format : public upd765_format {
+class sf7000_format : public upd765_format
+{
 public:
 	sf7000_format();
 
@@ -25,6 +27,6 @@ private:
 	static const format formats[];
 };
 
-extern const floppy_format_type FLOPPY_SF7000_FORMAT;
+extern const sf7000_format FLOPPY_SF7000_FORMAT;
 
-#endif
+#endif // MAME_FORMATS_SF7000_DSK_H

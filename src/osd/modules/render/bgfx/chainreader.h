@@ -14,17 +14,15 @@
 #include "statereader.h"
 
 class bgfx_chain;
-class texture_manager;
-class target_manager;
-class effect_manager;
+class chain_manager;
 
 class chain_reader : public state_reader
 {
 public:
-	static bgfx_chain* read_from_value(const Value& value, texture_manager& textures, target_manager& targets, effect_manager& effects, uint32_t screen_width, uint32_t screen_height);
+	static bgfx_chain* read_from_value(const Value& value, std::string prefix, chain_manager& chains, uint32_t screen_index);
 
 private:
-	static void validate_parameters(const Value& value);
+	static bool validate_parameters(const Value& value, std::string prefix);
 };
 
 #endif // __DRAWBGFX_CHAIN_READER__

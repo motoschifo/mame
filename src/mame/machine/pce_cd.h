@@ -1,7 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Wilbert Pol
-#ifndef __PCE_CD_H
-#define __PCE_CD_H
+#ifndef MAME_MACHINE_PCE_CD_H
+#define MAME_MACHINE_PCE_CD_H
+
+#pragma once
 
 /***************************************************************************
  TYPE DEFINITIONS
@@ -38,36 +40,75 @@ enum {
 
 // ======================> pce_cd_device
 
-class pce_cd_device : public device_t
+class pce_cd_device : public device_t,
+					  public device_memory_interface
 {
 public:
 	// construction/destruction
-	pce_cd_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock);
-	virtual ~pce_cd_device() {}
-
-	// device-level overrides
-	virtual void device_start() override;
-	virtual machine_config_constructor device_mconfig_additions() const override;
-	virtual void device_reset() override;
+	pce_cd_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	void update();
 
 	void late_setup();
 
-	DECLARE_WRITE8_MEMBER(bram_w);
-	DECLARE_WRITE8_MEMBER(intf_w);
-	DECLARE_WRITE8_MEMBER(acard_w);
-	DECLARE_WRITE_LINE_MEMBER(msm5205_int);
-	DECLARE_READ8_MEMBER(bram_r);
-	DECLARE_READ8_MEMBER(intf_r);
-	DECLARE_READ8_MEMBER(acard_r);
+	void bram_w(offs_t offset, uint8_t data);
+	void intf_w(offs_t offset, uint8_t data);
+	void acard_w(offs_t offset, uint8_t data);
+	uint8_t bram_r(offs_t offset);
+	uint8_t intf_r(offs_t offset);
+	uint8_t acard_r(offs_t offset);
 
-	void nvram_init(nvram_device &nvram, void *data, size_t size);
+protected:
+	// device-level overrides
+	virtual void device_start() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+	virtual void device_reset() override;
+	virtual space_config_vector memory_space_config() const override;
 
 private:
-	void adpcm_stop(UINT8 irq_flag);
+	const address_space_config m_space_config;
+
+	uint8_t cdc_status_r();
+	void cdc_status_w(uint8_t data);
+	uint8_t cdc_reset_r();
+	void cdc_reset_w(uint8_t data);
+	uint8_t irq_mask_r();
+	void irq_mask_w(uint8_t data);
+	uint8_t irq_status_r();
+	uint8_t cdc_data_r();
+	void cdc_data_w(uint8_t data);
+	uint8_t bram_status_r();
+	void bram_unlock_w(uint8_t data);
+	uint8_t cdda_data_r(offs_t offset);
+	uint8_t cd_data_r();
+	uint8_t adpcm_dma_control_r();
+	void adpcm_dma_control_w(uint8_t data);
+	uint8_t adpcm_status_r();
+	uint8_t adpcm_data_r();
+	void adpcm_data_w(uint8_t data);
+	void adpcm_address_lo_w(uint8_t data);
+	void adpcm_address_hi_w(uint8_t data);
+	uint8_t adpcm_address_control_r();
+	void adpcm_address_control_w(uint8_t data);
+	void adpcm_playback_rate_w(uint8_t data);
+	void fade_register_w(uint8_t data);
+
+	uint8_t m_reset_reg = 0;
+	uint8_t m_irq_mask = 0;
+	uint8_t m_irq_status = 0;
+	uint8_t m_cdc_status = 0;
+	uint8_t m_cdc_data = 0;
+	uint8_t m_bram_status = 0;
+	uint8_t m_adpcm_status = 0;
+	uint16_t m_adpcm_latch_address = 0;
+	uint8_t m_adpcm_control = 0;
+	uint8_t m_adpcm_dma_reg = 0;
+	uint8_t m_fade_reg = 0;
+
+	void regs_map(address_map &map);
+	void adpcm_stop(uint8_t irq_flag);
 	void adpcm_play();
-	void reply_status_byte(UINT8 status);
+	void reply_status_byte(uint8_t status);
 	void test_unit_ready();
 	void read_6();
 	void nec_set_audio_start_position();
@@ -81,9 +122,9 @@ private:
 	void handle_message_output();
 	void handle_message_input();
 	void set_irq_line(int num, int state);
-	void set_adpcm_ram_byte(UINT8 val);
-	UINT8 get_cd_data_byte();
-	UINT8 get_adpcm_ram_byte();
+	void set_adpcm_ram_byte(uint8_t val);
+	uint8_t get_cd_data_byte();
+	uint8_t get_adpcm_ram_byte();
 
 	TIMER_CALLBACK_MEMBER(data_timer_callback);
 	TIMER_CALLBACK_MEMBER(cdda_fadeout_callback);
@@ -95,94 +136,87 @@ private:
 
 	required_device<cpu_device> m_maincpu;
 
-	UINT8   m_regs[16];
-	std::unique_ptr<UINT8[]>   m_bram;
-	std::unique_ptr<UINT8[]>   m_adpcm_ram;
-	int     m_bram_locked;
-	int     m_adpcm_read_ptr;
-	UINT8   m_adpcm_read_buf;
-	int     m_adpcm_write_ptr;
-	UINT8   m_adpcm_write_buf;
-	int     m_adpcm_length;
-	int     m_adpcm_clock_divider;
-	UINT32  m_msm_start_addr;
-	UINT32  m_msm_end_addr;
-	UINT32  m_msm_half_addr;
-	UINT8   m_msm_nibble;
-	UINT8   m_msm_idle;
-	UINT8   m_msm_repeat;
+	std::unique_ptr<uint8_t[]>   m_bram;
+	std::unique_ptr<uint8_t[]>   m_adpcm_ram;
+	int     m_bram_locked = 0;
+	int     m_adpcm_read_ptr = 0;
+	uint8_t   m_adpcm_read_buf = 0;
+	int     m_adpcm_write_ptr = 0;
+	uint8_t   m_adpcm_write_buf = 0;
+	int     m_adpcm_length = 0;
+	int     m_adpcm_clock_divider = 0;
+	uint32_t  m_msm_start_addr = 0;
+	uint32_t  m_msm_end_addr = 0;
+	uint32_t  m_msm_half_addr = 0;
+	uint8_t   m_msm_nibble = 0;
+	uint8_t   m_msm_idle = 0;
+	uint8_t   m_msm_repeat = 0;
 
 	/* SCSI signals */
-	int     m_scsi_BSY;   /* Busy. Bus in use */
-	int     m_scsi_SEL;   /* Select. Initiator has won arbitration and has selected a target */
-	int     m_scsi_CD;    /* Control/Data. Target is sending control (data) information */
-	int     m_scsi_IO;    /* Input/Output. Target is sending (receiving) information */
-	int     m_scsi_MSG;   /* Message. Target is sending or receiving a message */
-	int     m_scsi_REQ;   /* Request. Target is requesting a data transfer */
-	int     m_scsi_ACK;   /* Acknowledge. Initiator acknowledges that it is ready for a data transfer */
-	int     m_scsi_ATN;   /* Attention. Initiator has a message ready for the target */
-	int     m_scsi_RST;   /* Reset. Initiator forces all targets and any other initiators to do a warm reset */
-	int     m_scsi_last_RST;  /* To catch setting of RST signal */
-	int     m_cd_motor_on;
-	int     m_selected;
-	std::unique_ptr<UINT8[]>  m_command_buffer;
-	int     m_command_buffer_index;
-	int     m_status_sent;
-	int     m_message_after_status;
-	int     m_message_sent;
-	std::unique_ptr<UINT8[]> m_data_buffer;
-	int     m_data_buffer_size;
-	int     m_data_buffer_index;
-	int     m_data_transferred;
+	int     m_scsi_BSY = 0;   /* Busy. Bus in use */
+	int     m_scsi_SEL = 0;   /* Select. Initiator has won arbitration and has selected a target */
+	int     m_scsi_CD = 0;    /* Control/Data. Target is sending control (data) information */
+	int     m_scsi_IO = 0;    /* Input/Output. Target is sending (receiving) information */
+	int     m_scsi_MSG = 0;   /* Message. Target is sending or receiving a message */
+	int     m_scsi_REQ = 0;   /* Request. Target is requesting a data transfer */
+	int     m_scsi_ACK = 0;   /* Acknowledge. Initiator acknowledges that it is ready for a data transfer */
+	int     m_scsi_ATN = 0;   /* Attention. Initiator has a message ready for the target */
+	int     m_scsi_RST = 0;   /* Reset. Initiator forces all targets and any other initiators to do a warm reset */
+	int     m_scsi_last_RST = 0;  /* To catch setting of RST signal */
+	int     m_cd_motor_on = 0;
+	int     m_selected = 0;
+	std::unique_ptr<uint8_t[]>  m_command_buffer;
+	int     m_command_buffer_index = 0;
+	int     m_status_sent = 0;
+	int     m_message_after_status = 0;
+	int     m_message_sent = 0;
+	std::unique_ptr<uint8_t[]> m_data_buffer;
+	int     m_data_buffer_size = 0;
+	int     m_data_buffer_index = 0;
+	int     m_data_transferred = 0;
 
 	/* Arcade Card specific */
-	std::unique_ptr<UINT8[]>  m_acard_ram;
-	UINT8   m_acard_latch;
-	UINT8   m_acard_ctrl[4];
-	UINT32  m_acard_base_addr[4];
-	UINT16  m_acard_addr_offset[4];
-	UINT16  m_acard_addr_inc[4];
-	UINT32  m_acard_shift;
-	UINT8   m_acard_shift_reg;
+	std::unique_ptr<uint8_t[]>  m_acard_ram;
+	uint8_t   m_acard_latch = 0;
+	uint8_t   m_acard_ctrl[4];
+	uint32_t  m_acard_base_addr[4];
+	uint16_t  m_acard_addr_offset[4];
+	uint16_t  m_acard_addr_inc[4];
+	uint32_t  m_acard_shift = 0;
+	uint8_t   m_acard_shift_reg = 0;
 
-	UINT32  m_current_frame;
-	UINT32  m_end_frame;
-	UINT32  m_last_frame;
-	UINT8   m_cdda_status;
-	UINT8   m_cdda_play_mode;
-	std::unique_ptr<UINT8[]>   m_subcode_buffer;
-	UINT8   m_end_mark;
+	uint32_t  m_current_frame = 0;
+	uint32_t  m_end_frame = 0;
+	uint32_t  m_last_frame = 0;
+	uint8_t   m_cdda_status = 0;
+	uint8_t   m_cdda_play_mode = 0;
+	std::unique_ptr<uint8_t[]>   m_subcode_buffer;
+	uint8_t   m_end_mark = 0;
 
 	required_device<msm5205_device> m_msm;
 	required_device<cdda_device> m_cdda;
 	required_device<nvram_device> m_nvram;
 	required_device<cdrom_image_device> m_cdrom;
 
-	cdrom_file  *m_cd_file;
-	const cdrom_toc*    m_toc;
-	emu_timer   *m_data_timer;
-	emu_timer   *m_adpcm_dma_timer;
+	cdrom_file  *m_cd_file = nullptr;
+	const cdrom_file::toc*  m_toc = nullptr;
+	emu_timer   *m_data_timer = nullptr;
+	emu_timer   *m_adpcm_dma_timer = nullptr;
 
-	emu_timer   *m_cdda_fadeout_timer;
-	emu_timer   *m_cdda_fadein_timer;
-	double  m_cdda_volume;
-	emu_timer   *m_adpcm_fadeout_timer;
-	emu_timer   *m_adpcm_fadein_timer;
-	double  m_adpcm_volume;
+	emu_timer   *m_cdda_fadeout_timer = nullptr;
+	emu_timer   *m_cdda_fadein_timer = nullptr;
+	double  m_cdda_volume = 0;
+	emu_timer   *m_adpcm_fadeout_timer = nullptr;
+	emu_timer   *m_adpcm_fadein_timer = nullptr;
+	double  m_adpcm_volume = 0;
+
+	DECLARE_WRITE_LINE_MEMBER(msm5205_int);
+	void nvram_init(nvram_device &nvram, void *data, size_t size);
 };
 
 
 
 // device type definition
-extern const device_type PCE_CD;
+DECLARE_DEVICE_TYPE(PCE_CD, pce_cd_device)
 
-
-/***************************************************************************
- DEVICE CONFIGURATION MACROS
- ***************************************************************************/
-
-#define MCFG_PCE_CD_ADD(_tag) \
-	MCFG_DEVICE_ADD(_tag, PCE_CD, 0)
-
-
-#endif
+#endif // MAME_MACHINE_PCE_CD_H

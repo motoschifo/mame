@@ -8,14 +8,12 @@
 
  Here we emulate the following Bandai PT-554 PCB (a CNROM PCB + LPC / PARCOR speech synthesis chip)
 
- TODO:
- - emulate the mat controller
-
  ***********************************************************************************************************/
 
 
 #include "emu.h"
 #include "pt554.h"
+#include "speaker.h"
 
 
 #ifdef NES_PCB_DEBUG
@@ -31,12 +29,12 @@
 //  constructor
 //-------------------------------------------------
 
-const device_type NES_BANDAI_PT554 = &device_creator<nes_bandai_pt554_device>;
+DEFINE_DEVICE_TYPE(NES_BANDAI_PT554, nes_bandai_pt554_device, "nes_bandai_pt554", "NES Cart Bandai PT-554 PCB")
 
 
-nes_bandai_pt554_device::nes_bandai_pt554_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-					: nes_cnrom_device(mconfig, NES_BANDAI_PT554, "NES Cart Bandai PT-554 PCB", tag, owner, clock, "nes_bandai_pt554", __FILE__),
-						m_samples(*this, "samples")
+nes_bandai_pt554_device::nes_bandai_pt554_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: nes_cnrom_device(mconfig, NES_BANDAI_PT554, tag, owner, clock)
+	, m_samples(*this, "samples")
 {
 }
 
@@ -54,54 +52,45 @@ nes_bandai_pt554_device::nes_bandai_pt554_device(const machine_config &mconfig, 
  with an Mitsubishi M50805 LPC / PARCOR speech synthesis chip
  with internal tables stored in ROM which have not yet been dumped.
 
- iNES: mapper 3?
+ iNES: mapper 3
 
  -------------------------------------------------*/
 
-WRITE8_MEMBER(nes_bandai_pt554_device::write_m)
+void nes_bandai_pt554_device::write_m(offs_t offset, u8 data)
 {
 	LOG_MMC(("Bandai PT-554 Sound write, data: %02x\n", data));
 
+	// the actual chip starts speech synthesis when SYNC is held low >18µs
 	if (!BIT(data, 6))
 		m_samples->start(data & 0x07, data & 0x07);
-	else
-		m_samples->stop(data & 0x07);
 }
 
 static const char *const pt554_sample_names[] =
 {
 	"*ftaerobi",
-	"00",
-	"01",
-	"02",
-	"03",
-	"04",
-	"05",
-	"06",
-	"07",
+	"00",   // hello, let's go
+	"01",   // rest
+	"02",   // good
+	"03",   // hai
+	"04",   // four
+	"05",   // three
+	"06",   // two
+	"07",   // one
 	nullptr
 };
 
-//-------------------------------------------------
-//  MACHINE_DRIVER
-//-------------------------------------------------
-
-static MACHINE_CONFIG_FRAGMENT( pt554 )
-
-	// additional sound hardware
-	MCFG_SPEAKER_STANDARD_MONO("addon")
-
-	MCFG_SOUND_ADD("samples", SAMPLES, 0)
-	MCFG_SAMPLES_CHANNELS(8)
-	MCFG_SAMPLES_NAMES(pt554_sample_names)
-	MCFG_SOUND_ROUTE(ALL_OUTPUTS, "addon", 0.50)
-MACHINE_CONFIG_END
 
 //-------------------------------------------------
-//  machine_config_additions
+//  device_add_mconfig - add device configuration
 //-------------------------------------------------
 
-machine_config_constructor nes_bandai_pt554_device::device_mconfig_additions() const
+void nes_bandai_pt554_device::device_add_mconfig(machine_config &config)
 {
-	return MACHINE_CONFIG_NAME( pt554 );
+	// additional sound hardware
+	SPEAKER(config, "addon").front_center();
+
+	SAMPLES(config, m_samples);
+	m_samples->set_channels(8);
+	m_samples->set_samples_names(pt554_sample_names);
+	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }

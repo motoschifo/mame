@@ -20,33 +20,32 @@
 
 ***********************************************************************************************/
 
+#include "emu.h"
 #include "tms6100.h"
 
 
 // device definitions
 
-const device_type TMS6100 = &device_creator<tms6100_device>;
+DEFINE_DEVICE_TYPE(TMS6100, tms6100_device, "tms6100", "TMS6100 VSM")
+DEFINE_DEVICE_TYPE(M58819,  m58819_device,  "m58819s", "M68819S")
 
-tms6100_device::tms6100_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source)
-	: device_t(mconfig, type, name, tag, owner, clock, shortname, source),
-	m_rom(*this, DEVICE_SELF),
-	m_reverse_bits(false),
-	m_4bit_mode(false)
+
+tms6100_device::tms6100_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
+	: device_t(mconfig, type, tag, owner, clock)
+	, m_rom(*this, DEVICE_SELF)
+	, m_reverse_bits(false)
+	, m_4bit_mode(false)
 {
 }
 
-tms6100_device::tms6100_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: device_t(mconfig, TMS6100, "TMS6100", tag, owner, clock, "tms6100", __FILE__),
-	m_rom(*this, DEVICE_SELF),
-	m_reverse_bits(false),
-	m_4bit_mode(false)
+tms6100_device::tms6100_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: tms6100_device(mconfig, TMS6100, tag, owner, clock)
 {
 }
 
-const device_type M58819 = &device_creator<m58819_device>;
 
-m58819_device::m58819_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock)
-	: tms6100_device(mconfig, M58819, "M58819S", tag, owner, clock, "m58819s", __FILE__)
+m58819_device::m58819_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: tms6100_device(mconfig, M58819, tag, owner, clock)
 {
 }
 
@@ -98,45 +97,45 @@ void m58819_device::device_start()
 
 // external i/o
 
-WRITE_LINE_MEMBER(tms6100_device::m0_w)
+void tms6100_device::m0_w(int state)
 {
 	m_m0 = (state) ? 1 : 0;
 }
 
-WRITE_LINE_MEMBER(tms6100_device::m1_w)
+void tms6100_device::m1_w(int state)
 {
 	m_m1 = (state) ? 1 : 0;
 }
 
-WRITE_LINE_MEMBER(tms6100_device::cs_w)
+void tms6100_device::cs_w(int state)
 {
 	// chip select pin
 	m_cs = (state) ? 1 : 0;
 }
 
-WRITE_LINE_MEMBER(tms6100_device::rck_w)
+void tms6100_device::rck_w(int state)
 {
 	// gate/mask for clk
 	m_rck = (state) ? 1 : 0;
 }
 
-WRITE8_MEMBER(tms6100_device::add_w)
+void tms6100_device::add_w(u8 data)
 {
 	m_add = data & 0xf;
 }
 
-READ8_MEMBER(tms6100_device::data_r)
+u8 tms6100_device::data_r()
 {
 	return m_data & 0xf;
 }
 
-READ_LINE_MEMBER(tms6100_device::data_line_r)
+int tms6100_device::data_line_r()
 {
 	// DATA/ADD8
 	return (m_data & 8) ? 1 : 0;
 }
 
-WRITE_LINE_MEMBER(tms6100_device::clk_w)
+void tms6100_device::clk_w(int state)
 {
 	// process on falling edge
 	if (m_clk && !m_rck && !state)
@@ -144,7 +143,7 @@ WRITE_LINE_MEMBER(tms6100_device::clk_w)
 		if (m_cs)
 		{
 			// new command enabled on rising edge of m0/m1
-			UINT8 m = m_m1 << 1 | m_m0;
+			u8 m = m_m1 << 1 | m_m0;
 			if ((m & ~m_prev_m & 1) || (m & ~m_prev_m & 2))
 				handle_command(m);
 
@@ -158,7 +157,7 @@ WRITE_LINE_MEMBER(tms6100_device::clk_w)
 
 // m0/m1 commands
 
-void tms6100_device::handle_command(UINT8 cmd)
+void tms6100_device::handle_command(u8 cmd)
 {
 	enum
 	{
@@ -183,7 +182,7 @@ void tms6100_device::handle_command(UINT8 cmd)
 
 					// M58819S reads serial data reversed
 					if (m_reverse_bits)
-						m_sa = BITSWAP8(m_sa,0,1,2,3,4,5,6,7);
+						m_sa = bitswap<8>(m_sa,0,1,2,3,4,5,6,7);
 				}
 				else
 				{
@@ -229,7 +228,7 @@ void tms6100_device::handle_command(UINT8 cmd)
 				// the 8-step counter PLA is shared between LA and TB
 				if (m_count < 4)
 				{
-					const UINT8 shift = 4 * (m_count+1);
+					const u8 shift = 4 * (m_count+1);
 					m_address = (m_address & ~(0xf << shift)) | (m_add << shift);
 				}
 
@@ -245,7 +244,7 @@ void tms6100_device::handle_command(UINT8 cmd)
 				m_count = 0;
 
 				// load new address bits (14 bits on TMS6100)
-				UINT16 rb = m_rom[m_address & m_rommask];
+				u16 rb = m_rom[m_address & m_rommask];
 				m_address++;
 				rb |= (m_rom[m_address & m_rommask] << 8);
 				m_address = (m_address & ~0x3fff) | (rb & 0x3fff);

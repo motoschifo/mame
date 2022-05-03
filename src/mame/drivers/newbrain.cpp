@@ -31,14 +31,12 @@
 
     TODO:
 
-    - keyboard
-    	- only key 7 is recognized
-    	- escape key mapping
-    - VFD
-	- reset/powerup time constants
+    - COPINT @ 84Hz instead of 50Hz? (with clock 3240506 is 50Hz)
+    - CLKINT arrives too late and COP reads the VFD data before CPU writes it
+    - VFD does not receive data from main CPU
     - bitmapped video
     - accurate video timing
-    - cassette
+    - cassette motor control seems to have a COP cpu problem
     - EIM
     - floppy
     - CP/M 2.2 ROMs
@@ -50,8 +48,13 @@
 
 */
 
-
+#include "emu.h"
 #include "includes/newbrain.h"
+#include "speaker.h"
+#include "screen.h"
+
+#include "newbrain.lh"
+#include "newbraina.lh"
 
 
 
@@ -59,9 +62,10 @@
 //  MACROS / CONSTANTS
 //**************************************************************************
 
-#define LOG 0
-#define LOG_COP 0
-#define LOG_VFD 0
+#define LOG_COP (1 << 1U)
+#define LOG_VFD (1 << 2U)
+#define VERBOSE 0
+#include "logmacro.h"
 
 
 
@@ -75,7 +79,7 @@
 
 void newbrain_state::check_interrupt()
 {
-	int level = (!m_clkint || !m_copint) ? ASSERT_LINE : CLEAR_LINE;
+	int level = ((!m_clk && !m_clkint) || !m_copint) ? ASSERT_LINE : CLEAR_LINE;
 
 	m_maincpu->set_input_line(INPUT_LINE_IRQ0, level);
 }
@@ -85,11 +89,11 @@ void newbrain_state::check_interrupt()
 //  mreq_r - memory request read
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::mreq_r )
+uint8_t newbrain_state::mreq_r(offs_t offset)
 {
 	bool romov = 1, raminh = 0;
 	int exrm = 0;
-	UINT8 data = m_exp->mreq_r(space, offset, 0xff, romov, exrm, raminh);
+	uint8_t data = m_exp->mreq_r(offset, 0xff, romov, exrm, raminh);
 
 	int rom0 = 1, rom1 = 1, rom2 = 1;
 	int a15_14_13 = romov ? (offset >> 13) : exrm;
@@ -131,11 +135,11 @@ READ8_MEMBER( newbrain_state::mreq_r )
 //  mreq_w - memory request write
 //-------------------------------------------------
 
-WRITE8_MEMBER( newbrain_state::mreq_w )
+void newbrain_state::mreq_w(offs_t offset, uint8_t data)
 {
 	bool romov = 1, raminh = 0;
 	int exrm = 0;
-	m_exp->mreq_w(space, offset, data, romov, exrm, raminh);
+	m_exp->mreq_w(offset, data, romov, exrm, raminh);
 
 	int a15_14_13 = romov ? (offset >> 13) : exrm;
 	if (!m_pwrup) a15_14_13 = 7;
@@ -152,10 +156,10 @@ WRITE8_MEMBER( newbrain_state::mreq_w )
 //  iorq_r - I/O request read
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::iorq_r )
+uint8_t newbrain_state::iorq_r(offs_t offset)
 {
 	bool prtov = 0;
-	UINT8 data = m_exp->iorq_r(space, offset, 0xff, prtov);
+	uint8_t data = m_exp->iorq_r(offset, 0xff, prtov);
 
 	if (!prtov)
 	{
@@ -169,7 +173,7 @@ READ8_MEMBER( newbrain_state::iorq_r )
 				break;
 
 			case 2: // COP
-				data = m_cop->microbus_rd(space, 0);
+				data = m_cop->microbus_r();
 				break;
 			}
 			break;
@@ -177,11 +181,11 @@ READ8_MEMBER( newbrain_state::iorq_r )
 		case 5: // UST
 			if (BIT(offset, 1))
 			{
-				data = ust_b_r(space, offset, data);
+				data = ust_b_r();
 			}
 			else
 			{
-				data = ust_a_r(space, offset, data);
+				data = ust_a_r();
 			}
 			break;
 		}
@@ -195,10 +199,10 @@ READ8_MEMBER( newbrain_state::iorq_r )
 //  iorq_w - I/O request write
 //-------------------------------------------------
 
-WRITE8_MEMBER( newbrain_state::iorq_w )
+void newbrain_state::iorq_w(offs_t offset, uint8_t data)
 {
 	bool prtov = 0;
-	m_exp->iorq_w(space, offset, 0xff, prtov);
+	m_exp->iorq_w(offset, 0xff, prtov);
 
 	if (!prtov)
 	{
@@ -212,11 +216,11 @@ WRITE8_MEMBER( newbrain_state::iorq_w )
 				break;
 
 			case 2: // COP
-				m_cop->microbus_wr(space, offset, data);
+				m_cop->microbus_w(data);
 				break;
 
 			case 3: // ENRG1
-				enrg1_w(space, offset, data);
+				enrg_w(data);
 				break;
 			}
 			break;
@@ -226,7 +230,7 @@ WRITE8_MEMBER( newbrain_state::iorq_w )
 			break;
 
 		case 3: // TVTL
-			tvtl_w(space, offset, data);
+			tvtl_w(data);
 			break;
 		}
 	}
@@ -239,7 +243,7 @@ WRITE8_MEMBER( newbrain_state::iorq_w )
 
 void newbrain_state::clclk()
 {
-	if (LOG) logerror("%s %s CLCLK\n", machine().time().as_string(), machine().describe_context());
+	LOG("%s %s CLCLK\n", machine().time().as_string(), machine().describe_context());
 
 	m_clkint = 1;
 	check_interrupt();
@@ -247,10 +251,10 @@ void newbrain_state::clclk()
 
 
 //-------------------------------------------------
-//  enrg1_w -
+//  enrg_w -
 //-------------------------------------------------
 
-WRITE8_MEMBER( newbrain_state::enrg1_w )
+void newbrain_state::enrg_w(uint8_t data)
 {
 	/*
 
@@ -267,10 +271,15 @@ WRITE8_MEMBER( newbrain_state::enrg1_w )
 
 	*/
 
-	if (LOG) logerror("%s %s ENRG1 %02x\n", machine().time().as_string(), machine().describe_context(), data);
+	LOG("%s %s ENRG %02x\n", machine().time().as_string(), machine().describe_context(), data);
 
 	// clock enable
-	m_clk = BIT(data, 0);
+	int clk = BIT(data, 0);
+
+	if (m_clk != clk) {
+		m_clk = clk;
+		check_interrupt();
+	}
 
 	// TV enable
 	m_tvp = BIT(data, 2);
@@ -288,7 +297,7 @@ WRITE8_MEMBER( newbrain_state::enrg1_w )
 //  ust_r -
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::ust_a_r )
+uint8_t newbrain_state::ust_a_r()
 {
 	/*
 
@@ -305,7 +314,7 @@ READ8_MEMBER( newbrain_state::ust_a_r )
 
 	*/
 
-	UINT8 data = 0x5d;
+	uint8_t data = 0x5d;
 
 	// powered up
 	data |= m_pwrup << 1;
@@ -322,7 +331,7 @@ READ8_MEMBER( newbrain_state::ust_a_r )
 //  user_r -
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::ust_b_r )
+uint8_t newbrain_state::ust_b_r()
 {
 	/*
 
@@ -339,7 +348,7 @@ READ8_MEMBER( newbrain_state::ust_b_r )
 
 	*/
 
-	UINT8 data = 0x5c;
+	uint8_t data = 0x5c;
 
 	// V24
 	data |= m_rs232_v24->rxd_r();
@@ -359,7 +368,7 @@ READ8_MEMBER( newbrain_state::ust_b_r )
 //  cop_in_r -
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::cop_in_r )
+uint8_t newbrain_state::cop_in_r()
 {
 	/*
 
@@ -372,12 +381,12 @@ READ8_MEMBER( newbrain_state::cop_in_r )
 
 	*/
 
-	UINT8 data = 0xe;
+	uint8_t data = 0xe;
 
 	// keyboard
-	data |= BIT(m_keydata, 2);
+	data |= BIT(m_403_q, 2);
 
-	if (LOG_COP) logerror("%s %s IN %01x\n", machine().time().as_string(), machine().describe_context(), data);
+	LOGMASKED(LOG_COP, "%s %s IN %01x\n", machine().time().as_string(), machine().describe_context(), data);
 
 	return data;
 }
@@ -387,27 +396,27 @@ READ8_MEMBER( newbrain_state::cop_in_r )
 //  cop_g_r -
 //-------------------------------------------------
 
-READ8_MEMBER( newbrain_state::cop_g_r )
+uint8_t newbrain_state::cop_g_r()
 {
 	/*
 
 	    bit     description
 
-	    G0      +5V
+	    G0
 	    G1      K9 (CD4076 Q1)
 	    G2      K7 (CD4076 Q0)
 	    G3      K3 (CD4076 Q3)
 
 	*/
 
-	UINT8 data = 0x1;
+	uint8_t data = 0;
 
 	// keyboard
-	data |= BIT(m_keydata, 1) << 1;
-	data |= BIT(m_keydata, 0) << 2;
-	data |= BIT(m_keydata, 3) << 3;
+	data |= BIT(m_403_q, 1) << 1;
+	data |= BIT(m_403_q, 0) << 2;
+	data |= BIT(m_403_q, 3) << 3;
 
-	if (LOG_COP) logerror("%s %s G %01x\n", machine().time().as_string(), machine().describe_context(), data);
+	LOGMASKED(LOG_COP, "%s %s G %01x\n", machine().time().as_string(), machine().describe_context(), data);
 
 	return data;
 }
@@ -417,16 +426,20 @@ READ8_MEMBER( newbrain_state::cop_g_r )
 //  cop_g_w -
 //-------------------------------------------------
 
+// m_cop_g1 and m_cop_g3, when activated, have 20 zeros and a 1 in a continuous sequence.
+// m_cop_k6 randomly alternates between 0 and 1, spending more time at 1.
+// The outcome is the cassette is unreadable.
+// Therefore the motors are left permanently on until the above issues can be fixed.
 void newbrain_state::tm()
 {
-	cassette_state tm1 = (!m_cop_g3 && !m_cop_k6) ? CASSETTE_MOTOR_ENABLED : CASSETTE_MOTOR_DISABLED;
-	cassette_state tm2 = (!m_cop_g1 && !m_cop_k6) ? CASSETTE_MOTOR_ENABLED : CASSETTE_MOTOR_DISABLED;
+//  cassette_state tm1 = (!m_cop_g1 && !m_cop_k6) ? CASSETTE_MOTOR_ENABLED : CASSETTE_MOTOR_DISABLED;
+//  cassette_state tm2 = (!m_cop_g3 && !m_cop_k6) ? CASSETTE_MOTOR_ENABLED : CASSETTE_MOTOR_DISABLED;
 
-	m_cassette1->change_state(tm1, CASSETTE_MASK_MOTOR);
-	m_cassette2->change_state(tm2, CASSETTE_MASK_MOTOR);
+//  m_cassette1->change_state(tm1, CASSETTE_MASK_MOTOR);
+//  m_cassette2->change_state(tm2, CASSETTE_MASK_MOTOR);
 }
 
-WRITE8_MEMBER( newbrain_state::cop_g_w )
+void newbrain_state::cop_g_w(uint8_t data)
 {
 	/*
 
@@ -439,10 +452,15 @@ WRITE8_MEMBER( newbrain_state::cop_g_w )
 
 	*/
 
-	if (LOG_COP) logerror("%s %s COPINT %u TM1 %u TM2 %u\n", machine().time().as_string(), machine().describe_context(), BIT(data, 0), BIT(data, 1), BIT(data, 3));
+	int copint = !BIT(data, 0);
 
-	m_copint = !BIT(data, 0);
-	check_interrupt();
+	LOGMASKED(LOG_COP, "%s %s COPINT %u\n", machine().time().as_string(), machine().describe_context(), copint);
+
+	if (m_copint != copint)
+	{
+		m_copint = copint;
+		check_interrupt();
+	}
 
 	m_cop_g1 = BIT(data, 1);
 	m_cop_g3 = BIT(data, 3);
@@ -454,7 +472,7 @@ WRITE8_MEMBER( newbrain_state::cop_g_w )
 //  cop_d_w -
 //-------------------------------------------------
 
-WRITE8_MEMBER( newbrain_state::cop_d_w )
+void newbrain_state::cop_d_w(uint8_t data)
 {
 	/*
 	    bit     description
@@ -469,57 +487,42 @@ WRITE8_MEMBER( newbrain_state::cop_d_w )
 	int k4 = !BIT(data, 0);
 	int k6 = !BIT(data, 2);
 
-	if (LOG_COP) logerror("%s %s K4 %u K6 %u\n", machine().time().as_string(), machine().describe_context(), k4, k6);
+	LOGMASKED(LOG_COP, "%s %s K4 %u K6 %u\n", machine().time().as_string(), machine().describe_context(), k4, k6);
 
 	m_cop_tdo = BIT(data, 1);
 	m_cassette1->output(m_cop_tdo ? -1.0 : +1.0);
 	m_cassette2->output(m_cop_tdo ? -1.0 : +1.0);
 
 	if (k4) {
-		// CD4024 RST
-		m_keylatch = 0;
+		m_405_q = 0;
 
-		if (LOG_COP) logerror("%s %s keylatch reset\n", machine().time().as_string(), machine().describe_context());
+		LOGMASKED(LOG_COP, "%s %s keylatch reset\n", machine().time().as_string(), machine().describe_context());
 	} else if (m_cop_k6 && !k6) {
-		// CD4024 CLK
-		m_keylatch++;
-		m_keylatch &= 0x0f;
+		m_405_q++;
+		m_405_q &= 0x7f;
 
-		if (LOG_COP) logerror("%s %s keylatch %u\n", machine().time().as_string(), machine().describe_context(), m_keylatch);
+		LOGMASKED(LOG_COP, "%s %s keylatch %u\n", machine().time().as_string(), machine().describe_context(), m_405_q);
 	}
 
 	if (!m_cop_k6 && k6) {
-		//CD4076 CLK
-		switch (m_keylatch)
-		{
-		case 0: m_keydata = m_y0->read(); break;
-		case 1: m_keydata = m_y1->read(); break;
-		case 2: m_keydata = m_y2->read(); break;
-		case 3: m_keydata = m_y3->read(); break;
-		case 4: m_keydata = m_y4->read(); break;
-		case 5: m_keydata = m_y5->read(); break;
-		case 6: m_keydata = m_y6->read(); break;
-		case 7: m_keydata = m_y7->read(); break;
-		case 8: m_keydata = m_y8->read(); break;
-		case 9: m_keydata = m_y9->read(); break;
-		case 10: m_keydata = m_y10->read(); break;
-		case 11: m_keydata = m_y11->read(); break;
-		case 12: m_keydata = m_y12->read(); break;
-		case 13: m_keydata = m_y13->read(); break;
-		case 14: m_keydata = m_y14->read(); break;
-		case 15: m_keydata = m_y15->read(); break;
-		}
+		m_403_d = m_y[m_405_q & 0x0f]->read() & 0x0f;
 
-		if (LOG_COP) logerror("%s %s keydata %01x\n", machine().time().as_string(), machine().describe_context(), m_keydata);
-	} else if (m_cop_k6 && k6) {
-		m_keydata = 0;
-	} else if (!k6) {
-		m_keydata = 0x0f;
+		LOGMASKED(LOG_COP, "%s %s keydata %01x\n", machine().time().as_string(), machine().describe_context(), m_403_d);
+	}
 
-		if (LOG_COP) logerror("%s %s keydata disabled\n", machine().time().as_string(), machine().describe_context());
-
-		output().set_digit_value(m_keylatch, m_segment_data);
+	if (k6) {
+		m_403_q = m_403_d;
 	} else {
+		m_403_q = 0xf;
+
+		LOGMASKED(LOG_COP, "%s %s keydata disabled\n", machine().time().as_string(), machine().describe_context());
+
+		// COP to VFD serial format, bits 15..0
+		// A B J I x H G2 C x F G1 E K L M D
+		uint16_t value = bitswap<16>(m_402_q, 11, 7, 1, 13, 10, 3, 2, 12, 9, 5, 6, 4, 0, 8, 14, 15) & 0x3fff;
+		m_digits[m_405_q & 0x0f] = value;
+
+		LOGMASKED(LOG_VFD, "%s %s vfd segment %u 402.Q %04x data %04x\n", machine().time().as_string(), machine().describe_context(), m_405_q & 0x0f, m_402_q, value);
 	}
 
 	m_cop_k6 = k6;
@@ -533,7 +536,7 @@ WRITE8_MEMBER( newbrain_state::cop_d_w )
 
 WRITE_LINE_MEMBER( newbrain_state::k1_w )
 {
-	if (LOG_VFD) logerror("%s %s SO %u\n", machine().time().as_string(), machine().describe_context(), state);
+	LOGMASKED(LOG_VFD, "%s %s SO %u\n", machine().time().as_string(), machine().describe_context(), state);
 
 	m_cop_so = state;
 }
@@ -545,14 +548,12 @@ WRITE_LINE_MEMBER( newbrain_state::k1_w )
 
 WRITE_LINE_MEMBER( newbrain_state::k2_w )
 {
-	if (LOG_VFD) logerror("%s %s SK %u\n", machine().time().as_string(), machine().describe_context(), state);
+	LOGMASKED(LOG_VFD, "%s %s SK %u\n", machine().time().as_string(), machine().describe_context(), state);
 
 	if (state)
 	{
-		m_segment_data >>= 1;
-		m_segment_data = (m_cop_so << 15) | (m_segment_data & 0x7fff);
-
-		if (LOG_VFD) logerror("%s %s SEGMENT %04x\n", machine().time().as_string(), machine().describe_context(), m_segment_data);
+		m_402_q <<= 1;
+		m_402_q = (m_402_q & 0xfffe) | m_cop_so;
 	}
 }
 
@@ -563,7 +564,7 @@ WRITE_LINE_MEMBER( newbrain_state::k2_w )
 
 int newbrain_state::tpin()
 {
-	return (m_cassette1->input() > +1.0) || (m_cassette2->input() > +1.0);
+	return (m_cassette1->input() > +0.04) || (m_cassette2->input() > +0.04);
 }
 
 READ_LINE_MEMBER( newbrain_state::tdi_r )
@@ -581,20 +582,22 @@ READ_LINE_MEMBER( newbrain_state::tdi_r )
 //  ADDRESS_MAP( newbrain_mreq )
 //-------------------------------------------------
 
-static ADDRESS_MAP_START( newbrain_mreq, AS_PROGRAM, 8, newbrain_state )
-	ADDRESS_MAP_UNMAP_HIGH
-	AM_RANGE(0x0000, 0xffff) AM_READWRITE(mreq_r, mreq_w)
-ADDRESS_MAP_END
+void newbrain_state::newbrain_mreq(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x0000, 0xffff).rw(FUNC(newbrain_state::mreq_r), FUNC(newbrain_state::mreq_w));
+}
 
 
 //-------------------------------------------------
 //  ADDRESS_MAP( newbrain_iorq )
 //-------------------------------------------------
 
-static ADDRESS_MAP_START( newbrain_iorq, AS_IO, 8, newbrain_state )
-	ADDRESS_MAP_UNMAP_HIGH
-	AM_RANGE(0x0000, 0xffff) AM_READWRITE(iorq_r, iorq_w)
-ADDRESS_MAP_END
+void newbrain_state::newbrain_iorq(address_map &map)
+{
+	map.unmap_value_high();
+	map(0x0000, 0xffff).rw(FUNC(newbrain_state::iorq_r), FUNC(newbrain_state::iorq_w));
+}
 
 
 
@@ -609,7 +612,7 @@ ADDRESS_MAP_END
 static INPUT_PORTS_START( newbrain )
 	PORT_START("Y0")
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNUSED )
-	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD ) PORT_NAME("STOP") PORT_CODE(KEYCODE_END) PORT_CHAR(UCHAR_MAMEKEY(END))
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD ) PORT_NAME("STOP") PORT_CODE(KEYCODE_ESC) PORT_CHAR(UCHAR_MAMEKEY(ESC))
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNUSED )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_UNUSED )
 
@@ -720,15 +723,6 @@ int newbrain_state::get_pwrup_t()
 	return RES_K(560) * CAP_U(10) * 1000; // t = R129 * C127 = 5.6s
 }
 
-INTERRUPT_GEN_MEMBER(newbrain_state::newbrain_interrupt)
-{
-	if (!m_clk)
-	{
-		m_clkint = 0;
-		check_interrupt();
-	}
-}
-
 
 //-------------------------------------------------
 //  machine_start -
@@ -736,6 +730,8 @@ INTERRUPT_GEN_MEMBER(newbrain_state::newbrain_interrupt)
 
 void newbrain_state::machine_start()
 {
+	m_digits.resolve();
+
 	// set power up timer
 	timer_set(attotime::from_usec(get_pwrup_t()), TIMER_ID_PWRUP);
 
@@ -750,9 +746,12 @@ void newbrain_state::machine_start()
 	save_item(NAME(m_cop_g1));
 	save_item(NAME(m_cop_g3));
 	save_item(NAME(m_cop_k6));
-	save_item(NAME(m_keylatch));
-	save_item(NAME(m_keydata));
-	save_item(NAME(m_segment_data));
+	save_item(NAME(m_405_q));
+	save_item(NAME(m_403_q));
+	save_item(NAME(m_402_q));
+
+	// patch COP ROM to read VFD data
+	//memregion(COP420_TAG)->base()[0x20a] = 0xc6;
 }
 
 
@@ -762,8 +761,13 @@ void newbrain_state::machine_start()
 
 void newbrain_state::machine_reset()
 {
-	m_maincpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
-	m_cop->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
+	m_maincpu->reset();
+	m_cop->reset();
+
+	m_maincpu->set_input_line(INPUT_LINE_HALT, ASSERT_LINE);
+	m_cop->set_input_line(INPUT_LINE_HALT, ASSERT_LINE);
+
+	enrg_w(0);
 
 	timer_set(attotime::from_usec(get_reset_t()), TIMER_ID_RESET);
 }
@@ -773,21 +777,28 @@ void newbrain_state::machine_reset()
 //  device_timer - handler timer events
 //-------------------------------------------------
 
-void newbrain_state::device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr)
+void newbrain_state::device_timer(emu_timer &timer, device_timer_id id, int param)
 {
 	switch (id)
 	{
 	case TIMER_ID_RESET:
-		if (LOG) logerror("%s %s RESET 1\n", machine().time().as_string(), machine().describe_context());
+		LOG("%s %s RESET 1\n", machine().time().as_string(), machine().describe_context());
 
-		m_maincpu->set_input_line(INPUT_LINE_RESET, CLEAR_LINE);
-		m_cop->set_input_line(INPUT_LINE_RESET, CLEAR_LINE);
+		m_maincpu->set_input_line(INPUT_LINE_HALT, CLEAR_LINE);
+		m_cop->set_input_line(INPUT_LINE_HALT, CLEAR_LINE);
 		break;
 
 	case TIMER_ID_PWRUP:
-		if (LOG) logerror("%s %s PWRUP 1\n", machine().time().as_string(), machine().describe_context());
+		LOG("%s %s PWRUP 1\n", machine().time().as_string(), machine().describe_context());
 
 		m_pwrup = 1;
+		break;
+
+	case TIMER_ID_CLKINT:
+		LOG("%s CLKINT\n", machine().time().as_string());
+
+		m_clkint = 0;
+		check_interrupt();
 		break;
 	}
 }
@@ -799,45 +810,81 @@ void newbrain_state::device_timer(emu_timer &timer, device_timer_id id, int para
 //**************************************************************************
 
 //-------------------------------------------------
-//  MACHINE_CONFIG( newbrain )
+//  machine_config( newbrain )
 //-------------------------------------------------
 
-static MACHINE_CONFIG_START( newbrain, newbrain_state )
+void newbrain_state::newbrain(machine_config &config)
+{
 	// basic system hardware
-	MCFG_CPU_ADD(Z80_TAG, Z80, XTAL_16MHz/8)
-	MCFG_CPU_PROGRAM_MAP(newbrain_mreq)
-	MCFG_CPU_IO_MAP(newbrain_iorq)
-	MCFG_CPU_VBLANK_INT_DRIVER(SCREEN_TAG, newbrain_state, newbrain_interrupt) // TODO remove me
+	Z80(config, m_maincpu, XTAL(16'000'000)/4);
+	m_maincpu->set_addrmap(AS_PROGRAM, &newbrain_state::newbrain_mreq);
+	m_maincpu->set_addrmap(AS_IO, &newbrain_state::newbrain_iorq);
 
-	MCFG_CPU_ADD(COP420_TAG, COP420, XTAL_16MHz/8) // COP420-GUW/N
-	MCFG_COP400_CONFIG(COP400_CKI_DIVISOR_16, COP400_CKO_OSCILLATOR_OUTPUT, true)
-	MCFG_COP400_READ_G_CB(READ8(newbrain_state, cop_g_r))
-	MCFG_COP400_WRITE_G_CB(WRITE8(newbrain_state, cop_g_w))
-	MCFG_COP400_WRITE_D_CB(WRITE8(newbrain_state, cop_d_w))
-	MCFG_COP400_READ_IN_CB(READ8(newbrain_state, cop_in_r))
-	MCFG_COP400_WRITE_SO_CB(WRITELINE(newbrain_state, k1_w))
-	MCFG_COP400_WRITE_SK_CB(WRITELINE(newbrain_state, k2_w))
-	MCFG_COP400_READ_SI_CB(READLINE(newbrain_state, tdi_r))
+	COP420(config, m_cop, XTAL(16'000'000)/4);
+	m_cop->set_config(COP400_CKI_DIVISOR_16, COP400_CKO_OSCILLATOR_OUTPUT, true);
+	m_cop->read_g().set(FUNC(newbrain_state::cop_g_r));
+	m_cop->write_g().set(FUNC(newbrain_state::cop_g_w));
+	m_cop->write_d().set(FUNC(newbrain_state::cop_d_w));
+	m_cop->read_in().set(FUNC(newbrain_state::cop_in_r));
+	m_cop->write_so().set(FUNC(newbrain_state::k1_w));
+	m_cop->write_sk().set(FUNC(newbrain_state::k2_w));
+	m_cop->read_si().set(FUNC(newbrain_state::tdi_r));
 
 	// video hardware
-	MCFG_FRAGMENT_ADD(newbrain_video)
+	newbrain_video(config);
 
 	// devices
-	MCFG_NEWBRAIN_EXPANSION_SLOT_ADD(NEWBRAIN_EXPANSION_SLOT_TAG, XTAL_16MHz/8, newbrain_expansion_cards, "eim")
+	NEWBRAIN_EXPANSION_SLOT(config, m_exp, XTAL(16'000'000)/4, newbrain_expansion_cards, "eim");
 
-	MCFG_CASSETTE_ADD(CASSETTE_TAG)
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_MUTED)
+	SPEAKER(config, "mono").front_center();
 
-	MCFG_CASSETTE_ADD(CASSETTE2_TAG)
-	MCFG_CASSETTE_DEFAULT_STATE(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_MUTED)
+	CASSETTE(config, m_cassette1);
+	m_cassette1->set_default_state(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_ENABLED);
+	m_cassette1->add_route(ALL_OUTPUTS, "mono", 0.05);
 
-	MCFG_RS232_PORT_ADD(RS232_V24_TAG, default_rs232_devices, nullptr)
-	MCFG_RS232_PORT_ADD(RS232_PRN_TAG, default_rs232_devices, nullptr)
+	CASSETTE(config, m_cassette2);
+	m_cassette2->set_default_state(CASSETTE_STOPPED | CASSETTE_MOTOR_ENABLED | CASSETTE_SPEAKER_ENABLED);
+	m_cassette2->add_route(ALL_OUTPUTS, "mono", 0.05);
+
+	RS232_PORT(config, RS232_V24_TAG, default_rs232_devices, nullptr);
+	RS232_PORT(config, RS232_PRN_TAG, default_rs232_devices, nullptr);
 
 	// internal ram
-	MCFG_RAM_ADD(RAM_TAG)
-	MCFG_RAM_DEFAULT_SIZE("32K")
-MACHINE_CONFIG_END
+	RAM(config, RAM_TAG).set_default_size("32K");
+}
+
+
+//-------------------------------------------------
+//  machine_config( newbrain_ad )
+//-------------------------------------------------
+
+void newbrain_state::newbrain_ad(machine_config &config)
+{
+	newbrain(config);
+	config.set_default_layout(layout_newbrain);
+}
+
+
+//-------------------------------------------------
+//  machine_config( newbrain_a )
+//-------------------------------------------------
+
+void newbrain_state::newbrain_a(machine_config &config)
+{
+	newbrain(config);
+	config.set_default_layout(layout_newbraina);
+}
+
+
+//-------------------------------------------------
+//  machine_config( newbrain_md )
+//-------------------------------------------------
+
+void newbrain_state::newbrain_md(machine_config &config)
+{
+	newbrain(config);
+	config.set_default_layout(layout_newbrain);
+}
 
 
 
@@ -854,34 +901,34 @@ ROM_START( newbrain )
 	ROM_DEFAULT_BIOS( "rom20" )
 
 	ROM_SYSTEM_BIOS( 0, "issue1", "Issue 1 (v?)" )
-	ROMX_LOAD( "aben.ic6",     0x0000, 0x2000, CRC(308f1f72) SHA1(a6fd9945a3dca47636887da2125fde3f9b1d4e25), ROM_BIOS(1) )
-	ROMX_LOAD( "cd iss 1.ic7", 0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(1) )
-	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(1) )
+	ROMX_LOAD( "aben.ic6",     0x0000, 0x2000, CRC(308f1f72) SHA1(a6fd9945a3dca47636887da2125fde3f9b1d4e25), ROM_BIOS(0) )
+	ROMX_LOAD( "cd iss 1.ic7", 0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(0) )
+	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(0) )
 
 	ROM_SYSTEM_BIOS( 1, "issue2", "Issue 2 (v1.9)" )
-	ROMX_LOAD( "aben19.ic6",   0x0000, 0x2000, CRC(d0283eb1) SHA1(351d248e69a77fa552c2584049006911fb381ff0), ROM_BIOS(2) )
-	ROMX_LOAD( "cdi2.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(2) )
-	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(2) )
+	ROMX_LOAD( "aben19.ic6",   0x0000, 0x2000, CRC(d0283eb1) SHA1(351d248e69a77fa552c2584049006911fb381ff0), ROM_BIOS(1) )
+	ROMX_LOAD( "cdi2.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(1) )
+	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(1) )
 
 	ROM_SYSTEM_BIOS( 2, "issue3", "Issue 3 (v1.91)" )
-	ROMX_LOAD( "aben191.ic6",  0x0000, 0x2000, CRC(b7be8d89) SHA1(cce8d0ae7aa40245907ea38b7956c62d039d45b7), ROM_BIOS(3) )
-	ROMX_LOAD( "cdi3.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(3) )
-	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(3) )
+	ROMX_LOAD( "aben191.ic6",  0x0000, 0x2000, CRC(b7be8d89) SHA1(cce8d0ae7aa40245907ea38b7956c62d039d45b7), ROM_BIOS(2) )
+	ROMX_LOAD( "cdi3.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(2) )
+	ROMX_LOAD( "ef iss 1.ic8", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6), ROM_BIOS(2) )
 
 	ROM_SYSTEM_BIOS( 3, "series2", "Series 2 (v?)" )
-	ROMX_LOAD( "abs2.ic6",     0x0000, 0x2000, CRC(9a042acb) SHA1(80d83a2ea3089504aa68b6cf978d80d296cd9bda), ROM_BIOS(4) )
-	ROMX_LOAD( "cds2.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(4) )
-	ROMX_LOAD( "efs2.ic8",     0x4000, 0x2000, CRC(b222d798) SHA1(c0c816b4d4135b762f2c5f1b24209d0096f22e56), ROM_BIOS(4) )
+	ROMX_LOAD( "abs2.ic6",     0x0000, 0x2000, CRC(9a042acb) SHA1(80d83a2ea3089504aa68b6cf978d80d296cd9bda), ROM_BIOS(3) )
+	ROMX_LOAD( "cds2.ic7",     0x2000, 0x2000, CRC(6b4d9429) SHA1(ef688be4e75aced61f487c928258c8932a0ae00a), ROM_BIOS(3) )
+	ROMX_LOAD( "efs2.ic8",     0x4000, 0x2000, CRC(b222d798) SHA1(c0c816b4d4135b762f2c5f1b24209d0096f22e56), ROM_BIOS(3) )
 
 	ROM_SYSTEM_BIOS( 4, "rom20", "? (v2.0)" )
-	ROMX_LOAD( "aben20.rom",   0x0000, 0x2000, CRC(3d76d0c8) SHA1(753b4530a518ad832e4b81c4e5430355ba3f62e0), ROM_BIOS(5) )
-	ROMX_LOAD( "cd20tci.rom",  0x2000, 0x4000, CRC(f65b2350) SHA1(1ada7fbf207809537ec1ffb69808524300622ada), ROM_BIOS(5) )
+	ROMX_LOAD( "aben20.rom",   0x0000, 0x2000, CRC(3d76d0c8) SHA1(753b4530a518ad832e4b81c4e5430355ba3f62e0), ROM_BIOS(4) )
+	ROMX_LOAD( "cd20tci.rom",  0x2000, 0x4000, CRC(f65b2350) SHA1(1ada7fbf207809537ec1ffb69808524300622ada), ROM_BIOS(4) )
 
 	ROM_REGION( 0x400, COP420_TAG, 0 )
-	ROM_LOAD( "cop420.419", 0x000, 0x400, CRC(a1388ee7) SHA1(5822e16aa794545600bf7a9dbee2ef467ca2a3e0) )
+	ROM_LOAD( "cop420-guw.ic419", 0x000, 0x400, CRC(a1388ee7) SHA1(5822e16aa794545600bf7a9dbee2ef467ca2a3e0) ) // COP420-GUW/N
 
-	ROM_REGION( 0x1000, "chargen", ROMREGION_ERASE00 )
-	ROM_LOAD( "char eprom iss 1.ic453", 0x0000, 0x0a01, CRC(46ecbc65) SHA1(3fe064d49a4de5e3b7383752e98ad35a674e26dd) ) // 8248R7 bad dump!
+	ROM_REGION( 0x1000, "chargen", 0 )
+	ROM_LOAD( "char eprom iss 1.ic453", 0x0000, 0x1000, CRC(6a38b7a2) SHA1(29f3e672fc41792ac2f2b405e571d79235193561) ) // 8248R7
 ROM_END
 
 
@@ -902,10 +949,10 @@ ROM_START( newbrainmd )
 	ROM_LOAD( "efmd.rom", 0x4000, 0x2000, CRC(20dd0b49) SHA1(74b517ca223cefb588e9f49e72ff2d4f1627efc6) )
 
 	ROM_REGION( 0x400, COP420_TAG, 0 )
-	ROM_LOAD( "cop420.419", 0x000, 0x400, CRC(a1388ee7) SHA1(5822e16aa794545600bf7a9dbee2ef467ca2a3e0) )
+	ROM_LOAD( "cop420-guw.ic419", 0x000, 0x400, CRC(a1388ee7) SHA1(5822e16aa794545600bf7a9dbee2ef467ca2a3e0) ) // COP420-GUW/N
 
 	ROM_REGION( 0x1000, "chargen", 0 )
-	ROM_LOAD( "char eprom iss 1.ic453", 0x0000, 0x0a01, BAD_DUMP CRC(46ecbc65) SHA1(3fe064d49a4de5e3b7383752e98ad35a674e26dd) ) // 8248R7
+	ROM_LOAD( "char eprom iss 1.ic453", 0x0000, 0x1000, CRC(6a38b7a2) SHA1(29f3e672fc41792ac2f2b405e571d79235193561) ) // 8248R7
 ROM_END
 
 
@@ -914,7 +961,7 @@ ROM_END
 //  SYSTEM DRIVERS
 //**************************************************************************
 
-//    YEAR  NAME        PARENT      COMPAT  MACHINE         INPUT       INIT    COMPANY                         FULLNAME        FLAGS
-COMP( 1981, newbrain,   0,          0,      newbrain,     newbrain, driver_device,   0,      "Grundy Business Systems Ltd",   "NewBrain AD",  MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )
-COMP( 1981, newbraina,  newbrain,   0,      newbrain,     newbrain, driver_device,   0,      "Grundy Business Systems Ltd",   "NewBrain A",   MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )
-COMP( 1981, newbrainmd, newbrain,   0,      newbrain,     newbrain, driver_device,   0,      "Grundy Business Systems Ltd",   "NewBrain MD",  MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )
+//    YEAR  NAME        PARENT    COMPAT  MACHINE      INPUT     CLASS           INIT        COMPANY                        FULLNAME       FLAGS
+COMP( 1981, newbrain,   0,        0,      newbrain_ad, newbrain, newbrain_state, empty_init, "Grundy Business Systems Ltd", "NewBrain AD", MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )
+COMP( 1981, newbraina,  newbrain, 0,      newbrain_a,  newbrain, newbrain_state, empty_init, "Grundy Business Systems Ltd", "NewBrain A",  MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )
+COMP( 1981, newbrainmd, newbrain, 0,      newbrain_md, newbrain, newbrain_state, empty_init, "Grundy Business Systems Ltd", "NewBrain MD", MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE | MACHINE_NO_SOUND )

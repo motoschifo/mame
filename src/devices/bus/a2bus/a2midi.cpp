@@ -8,68 +8,91 @@
 
 *********************************************************************/
 
+#include "emu.h"
 #include "a2midi.h"
-#include "machine/clock.h"
-#include "bus/midi/midi.h"
 
+#include "bus/midi/midi.h"
+#include "machine/6840ptm.h"
+#include "machine/6850acia.h"
+#include "machine/clock.h"
+
+
+namespace {
 
 /***************************************************************************
     PARAMETERS
 ***************************************************************************/
 
-//**************************************************************************
-//  GLOBAL VARIABLES
-//**************************************************************************
-
-const device_type A2BUS_MIDI = &device_creator<a2bus_midi_device>;
-
 #define MIDI_PTM_TAG     "midi_ptm"
 #define MIDI_ACIA_TAG    "midi_acia"
 
-MACHINE_CONFIG_FRAGMENT( midi )
-	MCFG_DEVICE_ADD(MIDI_PTM_TAG, PTM6840, 0)
-	MCFG_PTM6840_INTERNAL_CLOCK(1021800.0f)
-	MCFG_PTM6840_EXTERNAL_CLOCKS(1021800.0f, 1021800.0f, 1021800.0f)
-	MCFG_PTM6840_IRQ_CB(WRITELINE(a2bus_midi_device, ptm_irq_w))
 
-	MCFG_DEVICE_ADD(MIDI_ACIA_TAG, ACIA6850, 0)
-	MCFG_ACIA6850_TXD_HANDLER(DEVWRITELINE("mdout", midi_port_device, write_txd))
-	MCFG_ACIA6850_IRQ_HANDLER(WRITELINE(a2bus_midi_device, acia_irq_w))
+//**************************************************************************
+//  TYPE DEFINITIONS
+//**************************************************************************
 
-	MCFG_MIDI_PORT_ADD("mdin", midiin_slot, "midiin")
-	MCFG_MIDI_RX_HANDLER(DEVWRITELINE(MIDI_ACIA_TAG, acia6850_device, write_rxd))
-
-	MCFG_MIDI_PORT_ADD("mdout", midiout_slot, "midiout")
-
-	MCFG_DEVICE_ADD("acia_clock", CLOCK, 31250*16)
-	MCFG_CLOCK_SIGNAL_HANDLER(WRITELINE(a2bus_midi_device, write_acia_clock))
-MACHINE_CONFIG_END
-
-//-------------------------------------------------
-//  machine_config_additions - device-specific
-//  machine configurations
-//-------------------------------------------------
-
-machine_config_constructor a2bus_midi_device::device_mconfig_additions() const
+class a2bus_midi_device:
+	public device_t,
+	public device_a2bus_card_interface
 {
-	return MACHINE_CONFIG_NAME( midi );
+public:
+	// construction/destruction
+	a2bus_midi_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+
+protected:
+	a2bus_midi_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
+
+	virtual void device_start() override;
+	virtual void device_reset() override;
+	virtual void device_add_mconfig(machine_config &config) override;
+
+	virtual uint8_t read_c0nx(uint8_t offset) override;
+	virtual void write_c0nx(uint8_t offset, uint8_t data) override;
+
+	required_device<ptm6840_device> m_ptm;
+	required_device<acia6850_device> m_acia;
+
+private:
+	DECLARE_WRITE_LINE_MEMBER( acia_irq_w );
+	DECLARE_WRITE_LINE_MEMBER( ptm_irq_w );
+	DECLARE_WRITE_LINE_MEMBER( write_acia_clock );
+
+	bool m_acia_irq, m_ptm_irq;
+};
+
+//-------------------------------------------------
+//  device_add_mconfig - add device configuration
+//-------------------------------------------------
+
+void a2bus_midi_device::device_add_mconfig(machine_config &config)
+{
+	PTM6840(config, m_ptm, 1021800);
+	m_ptm->set_external_clocks(1021800.0f, 1021800.0f, 1021800.0f);
+	m_ptm->irq_callback().set(FUNC(a2bus_midi_device::ptm_irq_w));
+
+	ACIA6850(config, m_acia, 0);
+	m_acia->txd_handler().set("mdout", FUNC(midi_port_device::write_txd));
+	m_acia->irq_handler().set(FUNC(a2bus_midi_device::acia_irq_w));
+
+	MIDI_PORT(config, "mdin", midiin_slot, "midiin").rxd_handler().set(m_acia, FUNC(acia6850_device::write_rxd));
+
+	MIDI_PORT(config, "mdout", midiout_slot, "midiout");
+
+	clock_device &acia_clock(CLOCK(config, "acia_clock", 31250*16));
+	acia_clock.signal_handler().set(FUNC(a2bus_midi_device::write_acia_clock));
 }
 
 //**************************************************************************
 //  LIVE DEVICE
 //**************************************************************************
 
-a2bus_midi_device::a2bus_midi_device(const machine_config &mconfig, const char *tag, device_t *owner, UINT32 clock) :
-		device_t(mconfig, A2BUS_MIDI, "6850 MIDI card", tag, owner, clock, "a2midi", __FILE__),
-		device_a2bus_card_interface(mconfig, *this),
-		m_ptm(*this, MIDI_PTM_TAG),
-		m_acia(*this, MIDI_ACIA_TAG), m_acia_irq(false),
-		m_ptm_irq(false)
+a2bus_midi_device::a2bus_midi_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+		a2bus_midi_device(mconfig, A2BUS_MIDI, tag, owner, clock)
 {
 }
 
-a2bus_midi_device::a2bus_midi_device(const machine_config &mconfig, device_type type, const char *name, const char *tag, device_t *owner, UINT32 clock, const char *shortname, const char *source) :
-		device_t(mconfig, type, name, tag, owner, clock, shortname, source),
+a2bus_midi_device::a2bus_midi_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
+		device_t(mconfig, type, tag, owner, clock),
 		device_a2bus_card_interface(mconfig, *this),
 		m_ptm(*this, MIDI_PTM_TAG),
 		m_acia(*this, MIDI_ACIA_TAG), m_acia_irq(false),
@@ -83,8 +106,6 @@ a2bus_midi_device::a2bus_midi_device(const machine_config &mconfig, device_type 
 
 void a2bus_midi_device::device_start()
 {
-	// set_a2bus_device makes m_slot valid
-	set_a2bus_device();
 }
 
 void a2bus_midi_device::device_reset()
@@ -96,22 +117,17 @@ void a2bus_midi_device::device_reset()
     read_c0nx - called for reads from this card's c0nx space
 -------------------------------------------------*/
 
-UINT8 a2bus_midi_device::read_c0nx(address_space &space, UINT8 offset)
+uint8_t a2bus_midi_device::read_c0nx(uint8_t offset)
 {
 	// PTM at C0n0-C0n7, ACIA at C0n8-C0n9, drum sync (?) at C0nA-C0nB
 
 	if (offset < 8)
 	{
-		return m_ptm->read(space, offset & 7);
+		return m_ptm->read(offset & 7);
 	}
-	else if (offset == 8)
+	else if (offset == 8 || offset == 9)
 	{
-		return m_acia->status_r(space, 0);
-	}
-	else if (offset == 9)
-	{
-		UINT8 ret = m_acia->data_r(space, 0);
-		return ret;
+		return m_acia->read(offset & 1);
 	}
 
 	return 0;
@@ -121,19 +137,15 @@ UINT8 a2bus_midi_device::read_c0nx(address_space &space, UINT8 offset)
     write_c0nx - called for writes to this card's c0nx space
 -------------------------------------------------*/
 
-void a2bus_midi_device::write_c0nx(address_space &space, UINT8 offset, UINT8 data)
+void a2bus_midi_device::write_c0nx(uint8_t offset, uint8_t data)
 {
 	if (offset < 8)
 	{
-		m_ptm->write(space, offset & 7, data);
+		m_ptm->write(offset & 7, data);
 	}
-	else if (offset == 8)
+	else if (offset == 8 || offset == 9)
 	{
-		m_acia->control_w(space, 0, data);
-	}
-	else if (offset == 9)
-	{
-		m_acia->data_w(space, 0, data);
+		m_acia->write(offset & 1, data);
 	}
 }
 
@@ -170,3 +182,12 @@ WRITE_LINE_MEMBER( a2bus_midi_device::write_acia_clock )
 	m_acia->write_txc(state);
 	m_acia->write_rxc(state);
 }
+
+} // anonymous namespace
+
+
+//**************************************************************************
+//  GLOBAL VARIABLES
+//**************************************************************************
+
+DEFINE_DEVICE_TYPE_PRIVATE(A2BUS_MIDI, device_a2bus_card_interface, a2bus_midi_device, "a2midi", "6850 MIDI card")

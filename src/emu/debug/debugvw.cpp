@@ -2,23 +2,28 @@
 // copyright-holders:Aaron Giles
 /*********************************************************************
 
-    debugvw.c
+    debugvw.cpp
 
     Debugger view engine.
 
 ***************************************************************************/
 
 #include "emu.h"
-#include "express.h"
 #include "debugvw.h"
-#include "dvtext.h"
-#include "dvstate.h"
+
+#include "debugcpu.h"
+#include "dvbpoints.h"
 #include "dvdisasm.h"
 #include "dvmemory.h"
-#include "dvbpoints.h"
+#include "dvrpoints.h"
+#include "dvstate.h"
+#include "dvtext.h"
 #include "dvwpoints.h"
-#include "debugcpu.h"
-#include <ctype.h>
+#include "express.h"
+
+#include "debugger.h"
+
+#include <cctype>
 
 
 
@@ -30,9 +35,8 @@
 //  debug_view_source - constructor
 //-------------------------------------------------
 
-debug_view_source::debug_view_source(const char *name, device_t *device)
-	: m_next(nullptr),
-		m_name(name),
+debug_view_source::debug_view_source(std::string &&name, device_t *device)
+	: m_name(std::move(name)),
 		m_device(device)
 {
 }
@@ -231,10 +235,10 @@ void debug_view::set_source(const debug_view_source &source)
 
 const debug_view_source *debug_view::source_for_device(device_t *device) const
 {
-	for (debug_view_source *source = m_source_list.first(); source != nullptr; source = source->next())
+	for (auto &source : m_source_list)
 		if (device == source->device())
-			return source;
-	return m_source_list.first();
+			return source.get();
+	return first_source();
 }
 
 
@@ -250,6 +254,7 @@ void debug_view::adjust_visible_x_for_cursor()
 		m_topleft.x = m_cursor.x;
 	else if (m_cursor.x >= m_topleft.x + m_visible.x - 1)
 		m_topleft.x = m_cursor.x - m_visible.x + 2;
+	m_topleft.x = (std::max)((std::min)(m_topleft.x, m_total.x - m_visible.x), 0);
 }
 
 
@@ -265,6 +270,7 @@ void debug_view::adjust_visible_y_for_cursor()
 		m_topleft.y = m_cursor.y;
 	else if (m_cursor.y >= m_topleft.y + m_visible.y - 1)
 		m_topleft.y = m_cursor.y - m_visible.y + 2;
+	m_topleft.y = (std::max)((std::min)(m_topleft.y, m_total.y - m_visible.y), 0);
 }
 
 
@@ -326,7 +332,7 @@ debug_view_manager::~debug_view_manager()
 	{
 		debug_view *oldhead = m_viewlist;
 		m_viewlist = oldhead->m_next;
-		global_free(oldhead);
+		delete oldhead;
 	}
 }
 
@@ -340,31 +346,28 @@ debug_view *debug_view_manager::alloc_view(debug_view_type type, debug_view_osd_
 	switch (type)
 	{
 		case DVT_CONSOLE:
-			return append(global_alloc(debug_view_console(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_console(machine(), osdupdate, osdprivate));
 
 		case DVT_STATE:
-			return append(global_alloc(debug_view_state(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_state(machine(), osdupdate, osdprivate));
 
 		case DVT_DISASSEMBLY:
-			return append(global_alloc(debug_view_disasm(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_disasm(machine(), osdupdate, osdprivate));
 
 		case DVT_MEMORY:
-			return append(global_alloc(debug_view_memory(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_memory(machine(), osdupdate, osdprivate));
 
 		case DVT_LOG:
-			return append(global_alloc(debug_view_log(machine(), osdupdate, osdprivate)));
-
-		case DVT_TIMERS:
-//          return append(global_alloc(debug_view_timers(machine(), osdupdate, osdprivate)));
-
-		case DVT_ALLOCS:
-//          return append(global_alloc(debug_view_allocs(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_log(machine(), osdupdate, osdprivate));
 
 		case DVT_BREAK_POINTS:
-			return append(global_alloc(debug_view_breakpoints(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_breakpoints(machine(), osdupdate, osdprivate));
 
 		case DVT_WATCH_POINTS:
-			return append(global_alloc(debug_view_watchpoints(machine(), osdupdate, osdprivate)));
+			return append(new debug_view_watchpoints(machine(), osdupdate, osdprivate));
+
+		case DVT_REGISTER_POINTS:
+			return append(new debug_view_registerpoints(machine(), osdupdate, osdprivate));
 
 		default:
 			fatalerror("Attempt to create invalid debug view type %d\n", type);
@@ -384,7 +387,7 @@ void debug_view_manager::free_view(debug_view &view)
 		if (*viewptr == &view)
 		{
 			*viewptr = view.m_next;
-			global_free(&view);
+			delete &view;
 			break;
 		}
 }
@@ -452,11 +455,11 @@ debug_view *debug_view_manager::append(debug_view *view)
 //-------------------------------------------------
 
 debug_view_expression::debug_view_expression(running_machine &machine)
-	: m_machine(machine),
-		m_dirty(true),
-		m_result(0),
-		m_parsed(debug_cpu_get_global_symtable(machine)),
-		m_string("0")
+	: m_machine(machine)
+	, m_dirty(true)
+	, m_result(0)
+	, m_parsed(machine.debugger().cpu().global_symtable())
+	, m_string("0")
 {
 }
 
@@ -477,7 +480,10 @@ debug_view_expression::~debug_view_expression()
 
 void debug_view_expression::set_context(symbol_table *context)
 {
-	m_parsed.set_symbols((context != nullptr) ? context : debug_cpu_get_global_symtable(machine()));
+	if (context != nullptr)
+		m_parsed.set_symbols(*context);
+	else
+		m_parsed.set_symbols(m_machine.debugger().cpu().global_symtable());
 	m_dirty = true;
 }
 
@@ -497,11 +503,11 @@ bool debug_view_expression::recompute()
 		std::string oldstring(m_parsed.original_string());
 		try
 		{
-			m_parsed.parse(m_string.c_str());
+			m_parsed.parse(m_string);
 		}
 		catch (expression_error &)
 		{
-			m_parsed.parse(oldstring.c_str());
+			m_parsed.parse(oldstring);
 		}
 	}
 
@@ -511,7 +517,7 @@ bool debug_view_expression::recompute()
 		// recompute the value of the expression
 		try
 		{
-			UINT64 newresult = m_parsed.execute();
+			u64 newresult = m_parsed.execute();
 			if (newresult != m_result)
 			{
 				m_result = newresult;

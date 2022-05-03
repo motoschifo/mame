@@ -1,17 +1,14 @@
 // license:BSD-3-Clause
-// copyright-holders:Wilbert Pol
+// copyright-holders:Wilbert Pol, Nigel Barnes
 /******************************************************************************
 
     Acorn Electron driver
-
-    MESS Driver By:
-
-    Wilbert Pol
 
 ******************************************************************************/
 
 #include "emu.h"
 #include "includes/electron.h"
+#include "screen.h"
 
 /*
   From the ElectrEm site:
@@ -63,33 +60,34 @@ take effect immediately. VSYNC is not signalled in any way.
 
 void electron_state::video_start()
 {
-	int i;
-	for( i = 0; i < 256; i++ ) {
+	for( int i = 0; i < 256; i++ ) {
 		m_map4[i] = ( ( i & 0x10 ) >> 3 ) | ( i & 0x01 );
 		m_map16[i] = ( ( i & 0x40 ) >> 3 ) | ( ( i & 0x10 ) >> 2 ) | ( ( i & 0x04 ) >> 1 ) | ( i & 0x01 );
 	}
 	m_scanline_timer = timer_alloc(TIMER_SCANLINE_INTERRUPT);
-	m_scanline_timer->adjust( machine().first_screen()->time_until_pos(0), 0, machine().first_screen()->scan_period() );
+	m_scanline_timer->adjust( m_screen->time_until_pos(0), 0, m_screen->scan_period() );
 }
 
-inline UINT8 electron_state::read_vram(  UINT16 addr )
+inline uint8_t electron_state::read_vram( uint16_t addr )
 {
-	return m_ula.vram[ addr % m_ula.screen_size ];
+	if ( addr & 0x8000 ) addr -= m_ula.screen_size;
+	return m_ram->read( addr );
 }
 
-inline void electron_state::electron_plot_pixel(bitmap_ind16 &bitmap, int x, int y, UINT32 color)
+inline void electron_state::electron_plot_pixel(bitmap_ind16 &bitmap, int x, int y, uint32_t color)
 {
-	bitmap.pix16(y, x) = (UINT16)color;
+	bitmap.pix(y, x) = (uint16_t)color;
 }
 
-UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t electron_state::screen_update_electron(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
-	int i;
-	int x = 0;
+	int min_x = screen.visible_area().left();
+	int min_y = screen.visible_area().top();
+	int x = min_x;
 	int pal[16];
 	int scanline = screen.vpos();
 	rectangle r = cliprect;
-	r.min_y = r.max_y = scanline;
+	r.sety(scanline, scanline);
 
 	/* set up palette */
 	switch( m_ula.screen_mode )
@@ -105,7 +103,7 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 		pal[3] = m_ula.current_pal[10];
 		break;
 	case 2: /* 16 colour mode */
-		for( i = 0; i < 16; i++ )
+		for( int i = 0; i < 16; i++ )
 			pal[i] = m_ula.current_pal[i];
 	}
 
@@ -113,9 +111,9 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 	switch( m_ula.screen_mode )
 	{
 	case 0:
-		for( i = 0; i < 80; i++ )
+		for( int i = 0; i < 80; i++ )
 		{
-			UINT8 pattern = read_vram( m_ula.screen_addr + (i << 3) );
+			uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)& 1] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>6)& 1] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>5)& 1] );
@@ -126,14 +124,14 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>0)& 1] );
 		}
 		m_ula.screen_addr++;
-		if ( ( scanline & 0x07 ) == 7 )
+		if ( ( ( scanline - min_y ) & 0x07 ) == 7 )
 			m_ula.screen_addr += 0x278;
 		break;
 
 	case 1:
-		for( i = 0; i < 80; i++ )
+		for( int i = 0; i < 80; i++ )
 		{
-			UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+			uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>3]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>3]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>2]] );
@@ -144,14 +142,14 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>0]] );
 		}
 		m_ula.screen_addr++;
-		if ( ( scanline & 0x07 ) == 7 )
+		if ( ( ( scanline - min_y ) & 0x07 ) == 7 )
 			m_ula.screen_addr += 0x278;
 		break;
 
 	case 2:
-		for( i = 0; i < 80; i++ )
+		for( int i = 0; i < 80; i++ )
 		{
-			UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+			uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map16[pattern>>1]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map16[pattern>>1]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map16[pattern>>1]] );
@@ -162,18 +160,18 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map16[pattern>>0]] );
 		}
 		m_ula.screen_addr++;
-		if ( ( scanline & 0x07 ) == 7 )
+		if ( ( ( scanline - min_y ) & 0x07 ) == 7 )
 			m_ula.screen_addr += 0x278;
 		break;
 
 	case 3:
-		if ( ( scanline > 249 ) || ( scanline % 10 >= 8 ) )
+		if ( ( ( scanline - min_y ) > 249 ) || ( ( scanline - min_y ) % 10 >= 8 ) )
 			bitmap.fill(7, r );
 		else
 		{
-			for( i = 0; i < 80; i++ )
+			for( int i = 0; i < 80; i++ )
 			{
-				UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+				uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)&1] );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>6)&1] );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>5)&1] );
@@ -185,15 +183,15 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			}
 			m_ula.screen_addr++;
 		}
-		if ( scanline % 10 == 9 )
+		if ( ( scanline - min_y ) % 10 == 9 )
 			m_ula.screen_addr += 0x278;
 		break;
 
 	case 4:
 	case 7:
-		for( i = 0; i < 40; i++ )
+		for( int i = 0; i < 40; i++ )
 		{
-			UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+			uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)&1] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)&1] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>6)&1] );
@@ -212,14 +210,14 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>0)&1] );
 		}
 		m_ula.screen_addr++;
-		if ( ( scanline & 0x07 ) == 7 )
+		if ( ( ( scanline - min_y ) & 0x07 ) == 7 )
 			m_ula.screen_addr += 0x138;
 		break;
 
 	case 5:
-		for( i = 0; i < 40; i++ )
+		for( int i = 0; i < 40; i++ )
 		{
-			UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+			uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>3]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>3]] );
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>3]] );
@@ -238,18 +236,18 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 			electron_plot_pixel( bitmap, x++, scanline, pal[m_map4[pattern>>0]] );
 		}
 		m_ula.screen_addr++;
-		if ( ( scanline & 0x07 ) == 7 )
+		if ( ( ( scanline - min_y ) & 0x07 ) == 7 )
 			m_ula.screen_addr += 0x138;
 		break;
 
 	case 6:
-		if ( ( scanline > 249 ) || ( scanline % 10 >= 8 ) )
+		if ( ( ( scanline - min_y ) > 249) || ( ( scanline - min_y ) % 10 >= 8 ) )
 			bitmap.fill(7, r );
 		else
 		{
-			for( i = 0; i < 40; i++ )
+			for( int i = 0; i < 40; i++ )
 			{
-				UINT8 pattern = read_vram( m_ula.screen_addr + i * 8 );
+				uint8_t pattern = read_vram( m_ula.screen_addr + i * 8 );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)&1] );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>7)&1] );
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>6)&1] );
@@ -268,27 +266,31 @@ UINT32 electron_state::screen_update_electron(screen_device &screen, bitmap_ind1
 				electron_plot_pixel( bitmap, x++, scanline, pal[(pattern>>0)&1] );
 			}
 			m_ula.screen_addr++;
-			if ( ( scanline % 10 ) == 7 )
+			if ( ( ( scanline - min_y ) % 10 ) == 7 )
 				m_ula.screen_addr += 0x138;
 		}
 		break;
 	}
+	if ( m_ula.screen_addr & 0x8000 )
+		m_ula.screen_addr -= m_ula.screen_size;
 
 	return 0;
 }
 
 TIMER_CALLBACK_MEMBER(electron_state::electron_scanline_interrupt)
 {
-	switch (machine().first_screen()->vpos())
+	switch (m_screen->vpos())
 	{
-	case 43:
+	case 99:
 		electron_interrupt_handler( INT_SET, INT_RTC );
 		break;
-	case 199:
-		electron_interrupt_handler( INT_SET, INT_DISPLAY_END );
+	case 249:
+	case 255:
+		if ( m_screen->vpos() == m_ula.screen_dispend )
+			electron_interrupt_handler( INT_SET, INT_DISPLAY_END );
 		break;
-	case 0:
-		m_ula.screen_addr = m_ula.screen_start - m_ula.screen_base;
+	case 311:
+		m_ula.screen_addr = m_ula.screen_start;
 		break;
 	}
 }
