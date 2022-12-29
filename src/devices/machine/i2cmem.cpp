@@ -25,6 +25,8 @@ there are two standard values.
 #include "emu.h"
 #include "machine/i2cmem.h"
 
+#include <cstdarg>
+
 constexpr int STATE_IDLE(0);
 constexpr int STATE_DEVSEL(1);
 constexpr int STATE_ADDRESSHIGH(2);
@@ -470,7 +472,7 @@ WRITE_LINE_MEMBER( i2cmem_device::write_scl )
 							}
 							break;
 						}
-						
+
 						if( m_state != STATE_IDLE )
 						{
 							m_sdar = 0 ;

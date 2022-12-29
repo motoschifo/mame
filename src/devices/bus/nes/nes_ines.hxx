@@ -1037,11 +1037,6 @@ void nes_cart_slot_device::call_load_ines()
 				m_pcb_id = WAIXING_DQ8;    // Mapper 242 is used for 2 diff boards
 			break;
 
-		case BMC_GOLD_7IN1:
-			if (crc_hack)
-				m_pcb_id = BMC_MARIOPARTY_7IN1;    // Mapper 52 is used for 2 diff boards
-			break;
-
 		case BTL_MARIOBABY:
 			if (crc_hack)
 				m_pcb_id = BTL_AISENSHINICOL;    // Mapper 42 is used for 2 diff boards
@@ -1109,9 +1104,9 @@ void nes_cart_slot_device::call_load_ines()
 
 	// SETUP step 5: allocate pointers for PRG/VROM
 	if (prg_size)
-		m_cart->prg_alloc(prg_size, tag());
+		m_cart->prg_alloc(prg_size);
 	if (vrom_size)
-		m_cart->vrom_alloc(vrom_size, tag());
+		m_cart->vrom_alloc(vrom_size);
 
 	// if there is a trainer, skip it for the moment
 	if (m_cart->get_trainer())
@@ -1326,11 +1321,6 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 		case WAIXING_WXZS:
 			if (crc_hack)
 				pcb_id = WAIXING_DQ8;    // Mapper 242 is used for 2 diff boards
-			break;
-
-		case BMC_GOLD_7IN1:
-			if (crc_hack)
-				pcb_id = BMC_MARIOPARTY_7IN1;    // Mapper 52 is used for 2 diff boards
 			break;
 
 		case BTL_MARIOBABY:

@@ -29,7 +29,7 @@
 
 ALLOW_SAVE_TYPE(pic8259_device::state_t); // allow save_item on a non-fundamental type
 
-void pic8259_device::device_timer(emu_timer &timer, device_timer_id id, int param)
+TIMER_CALLBACK_MEMBER(pic8259_device::irq_timer_tick)
 {
 	/* check the various IRQs */
 	for (int n = 0, irq = m_prio; n < 8; n++, irq = (irq + 1) & 7)
@@ -63,18 +63,15 @@ void pic8259_device::set_irq_line(int irq, int state)
 {
 	uint8_t mask = (1 << irq);
 
-	if (state)
+	if (state && !(m_irq_lines & mask))
 	{
 		/* setting IRQ line */
 		LOG("set_irq_line(): PIC set IR%d line\n", irq);
 
-		if(m_level_trig_mode || (!m_level_trig_mode && !(m_irq_lines & mask)))
-		{
-			m_irr |= mask;
-		}
+		m_irr |= mask;
 		m_irq_lines |= mask;
 	}
-	else
+	else if (!state && (m_irq_lines & mask))
 	{
 		/* clearing IRQ line */
 		LOG("set_irq_line(): PIC cleared IR%d line\n", irq);
@@ -84,7 +81,7 @@ void pic8259_device::set_irq_line(int irq, int state)
 	}
 
 	if (m_inta_sequence == 0)
-		set_timer();
+		m_irq_timer->adjust(attotime::zero);
 }
 
 
@@ -99,13 +96,13 @@ uint8_t pic8259_device::acknowledge()
 			if (!machine().side_effects_disabled())
 			{
 				LOG("pic8259_acknowledge(): PIC acknowledge IR%d\n", m_current_level);
-				if (!m_level_trig_mode)
+				if (!m_level_trig_mode && (!m_master || !(m_slave & mask)))
 					m_irr &= ~mask;
 
 				if (!m_auto_eoi)
 					m_isr |= mask;
 
-				set_timer();
+				m_irq_timer->adjust(attotime::zero);
 			}
 
 			if ((m_cascade!=0) && (m_master!=0) && (mask & m_slave))
@@ -138,7 +135,7 @@ uint8_t pic8259_device::acknowledge()
 					LOG("pic8259_acknowledge(): PIC acknowledge IR%d\n", m_current_level);
 
 					uint8_t mask = 1 << m_current_level;
-					if (!m_level_trig_mode)
+					if (!m_level_trig_mode && (!m_master || !(m_slave & mask)))
 						m_irr &= ~mask;
 					m_isr |= mask;
 				}
@@ -167,7 +164,7 @@ uint8_t pic8259_device::acknowledge()
 				m_inta_sequence = 0;
 				if (m_auto_eoi && m_current_level != -1)
 					m_isr &= ~(1 << m_current_level);
-				set_timer();
+				m_irq_timer->adjust(attotime::zero);
 			}
 			if (m_cascade && m_master && m_current_level != -1 && BIT(m_slave, m_current_level))
 				return m_read_slave_ack_func(m_current_level);
@@ -199,13 +196,13 @@ uint8_t pic8259_device::read(offs_t offset)
 				{
 					data = 0x80 | m_current_level;
 
-					if (!m_level_trig_mode)
+					if (!m_level_trig_mode && (!m_master || !BIT(m_slave, m_current_level)))
 						m_irr &= ~(1 << m_current_level);
 
 					if (!m_auto_eoi)
 						m_isr |= 1 << m_current_level;
 
-					set_timer();
+					m_irq_timer->adjust(attotime::zero);
 				}
 			}
 			else
@@ -246,6 +243,7 @@ void pic8259_device::write(offs_t offset, uint8_t data)
 				m_imr                = 0x00;
 				m_isr                = 0x00;
 				m_irr                = 0x00;
+				m_slave              = 0x00;
 				m_level_trig_mode    = (data & 0x08) ? 1 : 0;
 				m_vector_size        = (data & 0x04) ? 1 : 0;
 				m_cascade            = (data & 0x02) ? 0 : 1;
@@ -263,6 +261,7 @@ void pic8259_device::write(offs_t offset, uint8_t data)
 					/* write OCW3 */
 					LOGOCW("pic8259_device::write(): OCW3; data=0x%02X\n", data);
 
+					// TODO: special mask mode
 					m_ocw3 = data;
 				}
 				else if ((data & 0x18) == 0x00)
@@ -376,7 +375,7 @@ void pic8259_device::write(offs_t offset, uint8_t data)
 			}
 			break;
 	}
-	set_timer();
+	m_irq_timer->adjust(attotime::zero);
 }
 
 
@@ -427,6 +426,8 @@ void pic8259_device::device_start()
 	save_item(NAME(m_inta_sequence));
 
 	m_inta_sequence = 0;
+
+	m_irq_timer = timer_alloc(FUNC(pic8259_device::irq_timer_tick), this);
 }
 
 

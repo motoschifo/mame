@@ -89,7 +89,7 @@ enum
 	BMC_GN45, BMC_HIK8IN1, BMC_SFC12, BMC_JY208, BMC_JY302, BMC_KC885, BMC_KL06,
 	BMC_S24IN1SC03, BMC_T262, BMC_TELETUBBIES,
 	BMC_WS, BMC_SUPERBIG_7IN1, BMC_SUPERHIK_4IN1, BMC_BALLGAMES_11IN1,
-	BMC_MARIOPARTY_7IN1, BMC_GOLD_7IN1, BMC_SUPER_700IN1, BMC_FAMILY_4646,
+	BMC_GOLD_7IN1, BMC_SUPER_700IN1, BMC_FAMILY_4646,
 	BMC_36IN1, BMC_21IN1, BMC_150IN1, BMC_35IN1, BMC_64IN1,
 	BMC_8IN1, BMC_15IN1, BMC_SUPERHIK_300IN1, BMC_SUPERGUN_20IN1,
 	BMC_72IN1, BMC_SUPER_42IN1, BMC_76IN1,
@@ -182,7 +182,7 @@ enum
 class device_nes_cart_interface : public device_interface
 {
 public:
-	enum class mmc1_type : u8 { MMC1, MMC1A, MMC1B, MMC1C };
+	enum class mmc1_type : u8 { MMC1, MMC1A, MMC1B };
 
 	// construction/destruction
 	virtual ~device_nes_cart_interface();
@@ -205,9 +205,9 @@ public:
 	// hack until disk system is made modern!
 	virtual void disk_flip_side() { }
 
-	void prg_alloc(size_t size, const char *tag);
-	void vrom_alloc(size_t size, const char *tag);
-	void misc_rom_alloc(size_t size, const char *tag);
+	void prg_alloc(size_t size);
+	void vrom_alloc(size_t size);
+	void misc_rom_alloc(size_t size);
 	void prgram_alloc(size_t size);
 	void vram_alloc(size_t size);
 	void battery_alloc(size_t size);
@@ -251,8 +251,8 @@ public:
 	uint32_t get_misc_rom_size() const { return m_misc_rom_size; }
 
 	virtual void ppu_latch(offs_t offset) {}
-	virtual void hblank_irq(int scanline, int vblank, int blanked) {}
-	virtual void scanline_irq(int scanline, int vblank, int blanked) {}
+	virtual void hblank_irq(int scanline, bool vblank, bool blanked) {}
+	virtual void scanline_irq(int scanline, bool vblank, bool blanked) {}
 
 	virtual void pcb_reset() {} // many pcb expect specific PRG/CHR banking at start
 	virtual void pcb_start(running_machine &machine, uint8_t *ciram_ptr, bool cart_mounted);
@@ -453,14 +453,5 @@ protected:
 
 // device type definition
 DECLARE_DEVICE_TYPE(NES_CART_SLOT, nes_cart_slot_device)
-
-
-/***************************************************************************
- DEVICE CONFIGURATION MACROS
- ***************************************************************************/
-
-#define NESSLOT_PRGROM_REGION_TAG ":cart:prg_rom"
-#define NESSLOT_CHRROM_REGION_TAG ":cart:chr_rom"
-#define NESSLOT_MISC_ROM_REGION_TAG ":cart:misc_rom"
 
 #endif // MAME_BUS_NES_NES_SLOT_H
