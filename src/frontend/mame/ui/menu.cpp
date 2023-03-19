@@ -25,6 +25,8 @@
 #include "rendutil.h"
 #include "uiinput.h"
 
+#include "osdepend.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -193,8 +195,7 @@ uint32_t menu::global_state::ui_handler(render_container &container)
 
 	// update the menu state
 	m_hide = false;
-	if (m_stack)
-		m_stack->do_handle();
+	bool need_update = m_stack && m_stack->do_handle();
 
 	// clear up anything pending being released
 	clear_free_list();
@@ -214,10 +215,10 @@ uint32_t menu::global_state::ui_handler(render_container &container)
 				m_stack->menu_deactivated();
 			}
 		}
-		return UI_HANDLER_CANCEL;
+		return mame_ui_manager::HANDLER_CANCEL;
 	}
 
-	return 0;
+	return need_update ? mame_ui_manager::HANDLER_UPDATE : 0;
 }
 
 
@@ -374,11 +375,23 @@ void menu::item_append_on_off(const std::string &text, bool state, uint32_t flag
 
 
 //-------------------------------------------------
+//  set_custom_space - set space required for
+//  custom rendering above and below menu
+//-------------------------------------------------
+
+void menu::set_custom_space(float top, float bottom)
+{
+	m_customtop = top;
+	m_custombottom = bottom;
+}
+
+
+//-------------------------------------------------
 //  process - process a menu, drawing it
 //  and returning any interesting events
 //-------------------------------------------------
 
-const menu::event *menu::process()
+std::pair<const menu::event *, bool> menu::process()
 {
 	// reset the event
 	m_event.iptkey = IPT_INVALID;
@@ -400,6 +413,8 @@ const menu::event *menu::process()
 		container().add_rect(0.0F, 0.0F, 1.0F, 1.0F, rgb_t(114, 0, 0, 0), PRIMFLAG_BLENDMODE(BLENDMODE_ALPHA));
 
 	// draw the menu proper
+	// FIXME: this should happen after processing events to fix the egregious latency
+	// The main thing preventing this is that mouse handling is mixed up with drawing
 	draw(m_process_flags);
 
 	// process input
@@ -418,11 +433,11 @@ const menu::event *menu::process()
 	{
 		m_event.itemref = get_selection_ref();
 		m_event.item = &m_items[m_selected];
-		return &m_event;
+		return std::make_pair(&m_event, false);
 	}
 	else
 	{
-		return nullptr;
+		return std::make_pair(nullptr, false);
 	}
 }
 
@@ -938,7 +953,7 @@ void menu::handle_events(uint32_t flags, event &ev)
 				ev.iptkey = IPT_UI_SELECT;
 				if (is_last_selected() && m_needs_prev_menu_item)
 				{
-					ev.iptkey = IPT_UI_CANCEL;
+					ev.iptkey = IPT_UI_BACK;
 					stack_pop();
 					if (is_special_main_menu())
 						machine().schedule_exit();
@@ -1017,7 +1032,7 @@ void menu::handle_keys(uint32_t flags, int &iptkey)
 	{
 		if (is_last_selected() && m_needs_prev_menu_item)
 		{
-			iptkey = IPT_UI_CANCEL;
+			iptkey = IPT_UI_BACK;
 			stack_pop();
 			if (is_special_main_menu())
 				machine().schedule_exit();
@@ -1026,7 +1041,7 @@ void menu::handle_keys(uint32_t flags, int &iptkey)
 	}
 
 	// UI configure hides the menus
-	if (!(flags & PROCESS_NOKEYS) && exclusive_input_pressed(iptkey, IPT_UI_CONFIGURE, 0) && !m_global_state.stack_has_special_main_menu())
+	if (!(flags & PROCESS_NOKEYS) && exclusive_input_pressed(iptkey, IPT_UI_MENU, 0) && !m_global_state.stack_has_special_main_menu())
 	{
 		if (is_one_shot())
 			stack_pop();
@@ -1039,10 +1054,10 @@ void menu::handle_keys(uint32_t flags, int &iptkey)
 	if (flags & PROCESS_ONLYCHAR)
 		return;
 
-	// hitting cancel also pops the stack
-	if (exclusive_input_pressed(iptkey, IPT_UI_CANCEL, 0))
+	// hitting back also pops the stack
+	if (exclusive_input_pressed(iptkey, IPT_UI_BACK, 0))
 	{
-		if (!custom_ui_cancel())
+		if (!custom_ui_back())
 		{
 			stack_pop();
 			if (is_special_main_menu())
@@ -1236,8 +1251,13 @@ void menu::validate_selection(int scandir)
     MENU STACK MANAGEMENT
 ***************************************************************************/
 
-void menu::do_handle()
+bool menu::do_handle()
 {
+	bool need_update = false;
+
+	// let OSD do its thing
+	machine().osd().check_osd_inputs();
+
 	// recompute metrics if necessary
 	render_manager &render(machine().render());
 	render_target &target(render.ui_target());
@@ -1248,6 +1268,7 @@ void menu::do_handle()
 		m_last_size = uisize;
 		m_last_aspect = aspect;
 		recompute_metrics(uisize.first, uisize.second, aspect);
+		need_update = true;
 	}
 
 	if (m_items.empty())
@@ -1260,7 +1281,8 @@ void menu::do_handle()
 				item_append(_("Return to Previous Menu"), 0, nullptr);
 
 			// let implementation add other items
-			populate(m_customtop, m_custombottom);
+			populate();
+			need_update = true;
 		}
 		catch (...)
 		{
@@ -1270,7 +1292,11 @@ void menu::do_handle()
 		}
 		m_rebuilding = false;
 	}
-	handle(process());
+
+	auto [eventptr, changed] = process();
+	need_update = need_update || changed;
+	need_update = handle(eventptr) || need_update;
+	return need_update;
 }
 
 

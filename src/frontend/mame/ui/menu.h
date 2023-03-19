@@ -70,6 +70,9 @@ public:
 	void item_append(menu_item_type type, uint32_t flags = 0);
 	void item_append_on_off(const std::string &text, bool state, uint32_t flags, void *ref, menu_item_type type = menu_item_type::UNKNOWN);
 
+	// set space required for drawing extra content
+	void set_custom_space(float top, float bottom);
+
 	// reset the menus, clearing everything
 	static void stack_reset(mame_ui_manager &ui) { get_global_state(ui).stack_reset(); }
 
@@ -99,7 +102,7 @@ public:
 	// Used by sliders
 	void validate_selection(int scandir);
 
-	void do_handle();
+	bool do_handle();
 
 protected:
 	using bitmap_ptr = widgets_manager::bitmap_ptr;
@@ -347,7 +350,7 @@ protected:
 	void set_process_flags(uint32_t flags) { m_process_flags = flags; }
 	virtual void handle_events(uint32_t flags, event &ev);
 	virtual void handle_keys(uint32_t flags, int &iptkey);
-	virtual bool custom_ui_cancel() { return false; }
+	virtual bool custom_ui_back() { return false; }
 	virtual bool custom_mouse_down() { return false; }
 	virtual bool custom_mouse_scroll(int lines) { return false; }
 
@@ -415,17 +418,17 @@ private:
 	};
 
 	// process a menu, drawing it and returning any interesting events
-	const event *process();
+	std::pair<const event *, bool> process();
 	virtual void draw(uint32_t flags);
 
 	// request the specific handling of the game selection main menu
 	void set_special_main_menu(bool disable);
 
 	// to be implemented in derived classes
-	virtual void populate(float &customtop, float &custombottom) = 0;
+	virtual void populate() = 0;
 
 	// to be implemented in derived classes
-	virtual void handle(event const *ev) = 0;
+	virtual bool handle(event const *ev) = 0;
 
 	void extra_text_draw_box(float origx1, float origx2, float origy, float yspan, std::string_view text, int direction);
 

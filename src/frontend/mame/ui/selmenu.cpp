@@ -172,8 +172,8 @@ public:
 	virtual ~software_parts() override;
 
 private:
-	virtual void populate(float &customtop, float &custombottom) override;
-	virtual void handle(event const *ev) override;
+	virtual void populate() override;
+	virtual bool handle(event const *ev) override;
 
 	ui_software_info const &m_uiinfo;
 	s_parts const          m_parts;
@@ -189,8 +189,8 @@ public:
 private:
 	bios_selection(mame_ui_manager &mui, render_container &container, s_bios &&biosname, void const *driver, bool software, bool inlist);
 
-	virtual void populate(float &customtop, float &custombottom) override;
-	virtual void handle(event const *ev) override;
+	virtual void populate() override;
+	virtual bool handle(event const *ev) override;
 
 	void const  *m_driver;
 	bool        m_software, m_inlist;
@@ -280,7 +280,7 @@ menu_select_launch::software_parts::~software_parts()
 //  populate
 //-------------------------------------------------
 
-void menu_select_launch::software_parts::populate(float &customtop, float &custombottom)
+void menu_select_launch::software_parts::populate()
 {
 	std::vector<s_parts::const_iterator> parts;
 	parts.reserve(m_parts.size());
@@ -297,9 +297,8 @@ void menu_select_launch::software_parts::populate(float &customtop, float &custo
 //  handle
 //-------------------------------------------------
 
-void menu_select_launch::software_parts::handle(event const *ev)
+bool menu_select_launch::software_parts::handle(event const *ev)
 {
-	// process the menu
 	if (ev && (ev->iptkey == IPT_UI_SELECT) && ev->itemref)
 	{
 		for (auto const &elem : m_parts)
@@ -311,6 +310,8 @@ void menu_select_launch::software_parts::handle(event const *ev)
 			}
 		}
 	}
+
+	return false;
 }
 
 
@@ -350,7 +351,7 @@ menu_select_launch::bios_selection::~bios_selection()
 //  populate
 //-------------------------------------------------
 
-void menu_select_launch::bios_selection::populate(float &customtop, float &custombottom)
+void menu_select_launch::bios_selection::populate()
 {
 	for (auto &elem : m_bios)
 		item_append(elem.first, 0, (void *)&elem.first);
@@ -362,9 +363,8 @@ void menu_select_launch::bios_selection::populate(float &customtop, float &custo
 //  handle
 //-------------------------------------------------
 
-void menu_select_launch::bios_selection::handle(event const *ev)
+bool menu_select_launch::bios_selection::handle(event const *ev)
 {
-	// process the menu
 	if (ev && (ev->iptkey == IPT_UI_SELECT) && ev->itemref)
 	{
 		for (auto & elem : m_bios)
@@ -402,6 +402,8 @@ void menu_select_launch::bios_selection::handle(event const *ev)
 			}
 		}
 	}
+
+	return false;
 }
 
 
@@ -526,22 +528,32 @@ menu_select_launch::menu_select_launch(mame_ui_manager &mui, render_container &c
 }
 
 
-void menu_select_launch::next_image_view()
+bool menu_select_launch::next_image_view()
 {
 	if (LAST_VIEW > m_image_view)
 	{
 		++m_image_view;
 		set_switch_image();
+		return true;
+	}
+	else
+	{
+		return false;
 	}
 }
 
 
-void menu_select_launch::previous_image_view()
+bool menu_select_launch::previous_image_view()
 {
 	if (FIRST_VIEW < m_image_view)
 	{
 		--m_image_view;
 		set_switch_image();
+		return true;
+	}
+	else
+	{
+		return false;
 	}
 }
 
@@ -1450,24 +1462,34 @@ void menu_select_launch::handle_keys(u32 flags, int &iptkey)
 		return;
 	}
 
-	if (exclusive_input_pressed(iptkey, IPT_UI_CANCEL, 0))
+	if (exclusive_input_pressed(iptkey, IPT_UI_BACK, 0))
 	{
 		if (m_ui_error)
 		{
 			// dismiss error
+			return;
 		}
-		else if (!m_search.empty())
+		else if (!is_special_main_menu() && m_search.empty())
+		{
+			// pop the stack if this isn't the root session menu
+			stack_pop();
+			return;
+		}
+	}
+
+	if (exclusive_input_pressed(iptkey, IPT_UI_CANCEL, 0))
+	{
+		if (!m_search.empty())
 		{
 			// escape pressed with non-empty search text clears it
 			m_search.clear();
 			reset(reset_options::REMEMBER_REF);
 		}
-		else
+		else if (is_special_main_menu())
 		{
-			// otherwise pop the stack
+			// this is the root session menu, exit
 			stack_pop();
-			if (is_special_main_menu())
-				machine().schedule_exit();
+			machine().schedule_exit();
 		}
 		return;
 	}
@@ -1779,7 +1801,7 @@ void menu_select_launch::handle_events(u32 flags, event &ev)
 				}
 				else if (hover() == HOVER_BACKTRACK)
 				{
-					ev.iptkey = IPT_UI_CANCEL;
+					ev.iptkey = IPT_UI_BACK;
 					stack_pop();
 					if (is_special_main_menu())
 						machine().schedule_exit();

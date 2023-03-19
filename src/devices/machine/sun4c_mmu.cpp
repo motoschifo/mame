@@ -19,28 +19,30 @@ DEFINE_DEVICE_TYPE(SUN4C_MMU, sun4c_mmu_device, "sun4c_mmu", "Sun 4c MMU")
 
 #define LOG_PAGE_MAP        (1U << 0)
 #define LOG_SEGMENT_MAP     (1U << 1)
-#define LOG_INVALID_PTE     (1U << 2)
-#define LOG_SYSTEM          (1U << 3)
-#define LOG_CONTEXT         (1U << 4)
-#define LOG_SYSTEM_ENABLE   (1U << 5)
-#define LOG_BUSERROR        (1U << 6)
-#define LOG_CACHE_TAGS      (1U << 7)
-#define LOG_CACHE_DATA      (1U << 8)
-#define LOG_UNKNOWN_SYSTEM  (1U << 9)
-#define LOG_UNKNOWN_SEGMENT (1U << 10)
-#define LOG_TYPE0_TIMEOUT   (1U << 11)
-#define LOG_TYPE1_TIMEOUT   (1U << 12)
-#define LOG_UNKNOWN_SPACE   (1U << 13)
-#define LOG_WRITE_PROTECT   (1U << 14)
-#define LOG_SEGMENT_FLUSH   (1U << 15)
-#define LOG_PAGE_FLUSH      (1U << 16)
-#define LOG_CONTEXT_FLUSH   (1U << 17)
-#define LOG_ALL_FLUSH       (1U << 18)
-#define LOG_UART            (1U << 19)
-#define LOG_PARITY          (1U << 20)
-#define LOG_ALL_ASI         (1U << 21) // WARNING: Heavy!
+#define LOG_CONTEXT         (1U << 2)
+#define LOG_SYSTEM_ENABLE   (1U << 3)
+#define LOG_UART            (1U << 4)
+#define LOG_PARITY          (1U << 5)
+#define LOG_SEGMENT_FLUSH   (1U << 6)
+#define LOG_PAGE_FLUSH      (1U << 7)
+#define LOG_CONTEXT_FLUSH   (1U << 8)
+#define LOG_ALL_FLUSH       (1U << 9)
+#define LOG_CACHE_TAGS      (1U << 10)
+#define LOG_CACHE_DATA      (1U << 11)
+#define LOG_INVALID_PTE     (1U << 12)
+#define LOG_BUSERROR        (1U << 13)
+#define LOG_TYPE0_TIMEOUT   (1U << 14)
+#define LOG_TYPE1_TIMEOUT   (1U << 15)
+#define LOG_UNKNOWN_SPACE   (1U << 16)
+#define LOG_UNKNOWN_SEGMENT (1U << 17)
+#define LOG_WRITE_PROTECT   (1U << 18)
+#define LOG_MMU             (LOG_PAGE_MAP | LOG_SEGMENT_MAP | LOG_CONTEXT)
+#define LOG_MISC_HW         (LOG_SYSTEM_ENABLE | LOG_UART | LOG_PARITY)
+#define LOG_FLUSHES         (LOG_SEGMENT_FLUSH | LOG_PAGE_FLUSH | LOG_CONTEXT_FLUSH | LOG_ALL_FLUSH)
+#define LOG_CACHE           (LOG_CACHE_TAGS | LOG_CACHE_DATA | LOG_FLUSHES)
+#define LOG_ERRORS          (LOG_INVALID_PTE | LOG_BUSERROR | LOG_TYPE0_TIMEOUT | LOG_TIME1_TIMEOUT | LOG_UNKNOWN_SPACE | LOG_UNKNOWN_SEGMENT | LOG_WRITE_PROTECT)
 
-#define VERBOSE (0)
+//#define VERBOSE (LOG_MMU | LOG_MISC_HW | LOG_FLUSHES | LOG_CACHE | LOG_ERRORS)
 #include "logmacro.h"
 
 #define PRINT_UART_DATA (0)
@@ -429,7 +431,7 @@ uint32_t sun4_mmu_base_device::page_map_r(uint32_t offset, uint32_t mem_mask)
 void sun4_mmu_base_device::page_map_w(uint32_t offset, uint32_t data, uint32_t mem_mask)
 {
 	const uint32_t page = m_curr_segmap_masked[(offset >> 16) & 0xfff] | ((offset >> m_seg_entry_shift) & m_seg_entry_mask);
-	LOGMASKED(LOG_PAGE_MAP, "%s: page_map_w: %08x (%x) = %08x & %08x\n", offset << 2, page, data, mem_mask);
+	LOGMASKED(LOG_PAGE_MAP, "%s: page_map_w: %08x (%x) = %08x & %08x\n", machine().describe_context(), offset << 2, page, data, mem_mask);
 	merge_page_entry(page, data, mem_mask);
 	m_page_valid[page] = m_pagemap[page].valid;
 }
@@ -531,7 +533,7 @@ uint32_t sun4_mmu_base_device::insn_data_r(const uint32_t offset, const uint32_t
 	}
 
 	// it's translation time
-	const uint32_t pmeg = m_curr_segmap_masked[(offset >> 16) & 0xfff];// & m_pmeg_mask;
+	const uint32_t pmeg = m_curr_segmap_masked[(offset >> 16) & 0xfff];
 	const uint32_t entry_index = pmeg | ((offset >> m_seg_entry_shift) & m_seg_entry_mask);
 
 	if (m_page_valid[entry_index])
@@ -682,21 +684,16 @@ void sun4_mmu_base_device::insn_data_w(const uint32_t offset, const uint32_t dat
 
 void sun4_mmu_base_device::l2p_command(const std::vector<std::string_view> &params)
 {
-	uint64_t addr, offset;
-
+	uint64_t addr;
 	if (!machine().debugger().console().validate_number_parameter(params[0], addr)) return;
 
 	addr &= 0xffffffff;
-	offset = addr >> 2;
+	uint64_t offset = addr >> 2;
 
-	uint8_t pmeg = 0;
-	uint32_t entry_index = 0, tmp = 0;
-	uint32_t entry_value = 0;
-
-	pmeg = m_curr_segmap_masked[(offset >> 16) & 0xfff];
-	entry_index = pmeg | ((offset >> m_seg_entry_shift) & m_seg_entry_mask);
-	tmp = m_pagemap[entry_index].page | (offset & m_page_mask);
-	entry_value = page_entry_to_uint(entry_index);
+	const uint32_t pmeg = m_curr_segmap_masked[(offset >> 16) & 0xfff];
+	const uint32_t entry_index = pmeg | ((offset >> m_seg_entry_shift) & m_seg_entry_mask);
+	const uint32_t tmp = m_pagemap[entry_index].page | (offset & m_page_mask);
+	const uint32_t entry_value = page_entry_to_uint(entry_index);
 
 	if (m_page_valid[entry_index])
 	{
@@ -704,7 +701,7 @@ void sun4_mmu_base_device::l2p_command(const std::vector<std::string_view> &para
 	}
 	else
 	{
-		machine().debugger().console().printf("logical %08x points to an invalid PTE! (pmeg %d, entry %d PTE %08x)\n", addr, tmp << 2, pmeg, entry_index, entry_value);
+		machine().debugger().console().printf("logical %08x points to an invalid PTE! (tmp %08x, pmeg %d, entry %d PTE %08x)\n", addr, tmp << 2, pmeg, entry_index, entry_value);
 	}
 }
 

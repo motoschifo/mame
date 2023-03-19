@@ -89,7 +89,7 @@ void menu_confswitch::menu_activated()
 }
 
 
-void menu_confswitch::populate(float &customtop, float &custombottom)
+void menu_confswitch::populate()
 {
 	// locate relevant fields if necessary
 	if (m_fields.empty())
@@ -171,99 +171,106 @@ void menu_confswitch::populate(float &customtop, float &custombottom)
 }
 
 
-void menu_confswitch::handle(event const *ev)
+bool menu_confswitch::handle(event const *ev)
 {
-	// handle events
-	if (ev && ev->itemref)
-	{
-		if (uintptr_t(ev->itemref) == 1U)
-		{
-			// reset
-			if (ev->iptkey == IPT_UI_SELECT)
-				machine().schedule_hard_reset();
-		}
-		else
-		{
-			// actual settings
-			ioport_field &field(*reinterpret_cast<ioport_field *>(ev->itemref));
-			bool changed(false);
+	if (!ev || !ev->itemref)
+		return false;
 
-			switch (ev->iptkey)
+	if (uintptr_t(ev->itemref) == 1U)
+	{
+		// reset
+		if (ev->iptkey == IPT_UI_SELECT)
+			machine().schedule_hard_reset();
+	}
+	else
+	{
+		// actual settings
+		ioport_field &field(*reinterpret_cast<ioport_field *>(ev->itemref));
+		bool changed(false);
+
+		switch (ev->iptkey)
+		{
+		// left goes to previous setting
+		case IPT_UI_LEFT:
+			field.select_previous_setting();
+			changed = true;
+			break;
+
+		// right goes to next setting
+		case IPT_UI_SELECT:
+		case IPT_UI_RIGHT:
+			field.select_next_setting();
+			changed = true;
+			break;
+
+		// if cleared, reset to default value
+		case IPT_UI_CLEAR:
 			{
-			// if selected, reset to default value
-			case IPT_UI_SELECT:
+				ioport_field::user_settings settings;
+				field.get_user_settings(settings);
+				if (field.defvalue() != settings.value)
 				{
-					ioport_field::user_settings settings;
-					field.get_user_settings(settings);
 					settings.value = field.defvalue();
 					field.set_user_settings(settings);
+					changed = true;
 				}
-				changed = true;
-				break;
-
-			// left goes to previous setting
-			case IPT_UI_LEFT:
-				field.select_previous_setting();
-				changed = true;
-				break;
-
-			// right goes to next setting
-			case IPT_UI_RIGHT:
-				field.select_next_setting();
-				changed = true;
-				break;
-
-			// trick to get previous group - depend on headings having null reference
-			case IPT_UI_PREV_GROUP:
-				{
-					auto current = selected_index();
-					bool found_break = false;
-					while (0 < current)
-					{
-						if (!found_break)
-						{
-							if (!item(--current).ref())
-								found_break = true;
-						}
-						else if (!item(current - 1).ref())
-						{
-							set_selected_index(current);
-							set_top_line(current - 1);
-							break;
-						}
-						else
-						{
-							--current;
-						}
-					}
-				}
-				break;
-
-			// trick to get next group - depend on special item references
-			case IPT_UI_NEXT_GROUP:
-				{
-					auto current = selected_index();
-					while (item_count() > ++current)
-					{
-						if (!item(current).ref())
-						{
-							if ((item_count() > (current + 1)) && (uintptr_t(item(current + 1).ref()) != 1))
-							{
-								set_selected_index(current + 1);
-								set_top_line(current);
-							}
-							break;
-						}
-					}
-				}
-				break;
 			}
+			break;
 
-			// if anything changed, rebuild the menu, trying to stay on the same field
-			if (changed)
-				reset(reset_options::REMEMBER_REF);
+		// trick to get previous group - depend on headings having null reference
+		case IPT_UI_PREV_GROUP:
+			{
+				auto current = selected_index();
+				bool found_break = false;
+				while (0 < current)
+				{
+					if (!found_break)
+					{
+						if (!item(--current).ref())
+							found_break = true;
+					}
+					else if (!item(current - 1).ref())
+					{
+						set_selected_index(current);
+						set_top_line(current - 1);
+						return true;
+					}
+					else
+					{
+						--current;
+					}
+				}
+			}
+			break;
+
+		// trick to get next group - depend on special item references
+		case IPT_UI_NEXT_GROUP:
+			{
+				auto current = selected_index();
+				while (item_count() > ++current)
+				{
+					if (!item(current).ref())
+					{
+						if ((item_count() > (current + 1)) && (uintptr_t(item(current + 1).ref()) != 1))
+						{
+							set_selected_index(current + 1);
+							set_top_line(current);
+							return true;
+						}
+						break;
+					}
+				}
+			}
+			break;
 		}
+
+		// if anything changed, rebuild the menu, trying to stay on the same field
+		if (changed)
+			reset(reset_options::REMEMBER_REF);
 	}
+
+	// changing settings triggers an item rebuild because it can affect whether things are enabled
+	return false;
 }
 
 
@@ -317,6 +324,18 @@ menu_settings_dip_switches::menu_settings_dip_switches(mame_ui_manager &mui, ren
 
 menu_settings_dip_switches::~menu_settings_dip_switches()
 {
+}
+
+
+void menu_settings_dip_switches::recompute_metrics(uint32_t width, uint32_t height, float aspect)
+{
+	menu_confswitch::recompute_metrics(width, height, aspect);
+
+	set_custom_space(
+			0.0f,
+			m_visible_switch_groups
+				? ((m_visible_switch_groups * (DIP_SWITCH_HEIGHT * line_height())) + ((m_visible_switch_groups - 1) * (DIP_SWITCH_SPACING * line_height())) + (tb_border() * 3.0f))
+				: 0.0f);
 }
 
 
@@ -470,10 +489,10 @@ bool menu_settings_dip_switches::custom_mouse_down()
 }
 
 
-void menu_settings_dip_switches::populate(float &customtop, float &custombottom)
+void menu_settings_dip_switches::populate()
 {
 	// let the base class add items
-	menu_confswitch::populate(customtop, custombottom);
+	menu_confswitch::populate();
 
 	// use up to about 70% of height for DIP switch display
 	if (active_switch_groups())
@@ -485,12 +504,12 @@ void menu_settings_dip_switches::populate(float &customtop, float &custombottom)
 			m_visible_switch_groups = unsigned(0.7f / (groupheight + groupspacing));
 		else
 			m_visible_switch_groups = active_switch_groups();
-		custombottom = (m_visible_switch_groups * groupheight) + ((m_visible_switch_groups - 1) * groupspacing) + (tb_border() * 3.0f);
+		set_custom_space(0.0f, (m_visible_switch_groups * groupheight) + ((m_visible_switch_groups - 1) * groupspacing) + (tb_border() * 3.0f));
 	}
 	else
 	{
 		m_visible_switch_groups = 0U;
-		custombottom = 0.0f;
+		set_custom_space(0.0f, 0.0f);
 	}
 }
 

@@ -110,106 +110,110 @@ void menu_custom_ui::menu_dismissed()
 //  handle
 //-------------------------------------------------
 
-void menu_custom_ui::handle(event const *ev)
+bool menu_custom_ui::handle(event const *ev)
 {
-	// process the menu
-	if (ev && ev->itemref)
+	if (!ev || !ev->itemref)
+		return false;
+
+	switch ((uintptr_t)ev->itemref)
 	{
-		switch ((uintptr_t)ev->itemref)
+	case FONT_MENU:
+		if (ev->iptkey == IPT_UI_SELECT)
+			menu::stack_push<menu_font_ui>(ui(), container(), nullptr);
+		break;
+	case COLORS_MENU:
+		if (ev->iptkey == IPT_UI_SELECT)
+			menu::stack_push<menu_colors_ui>(ui(), container());
+		break;
+	case LANGUAGE_MENU:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
 		{
-		case FONT_MENU:
-			if (ev->iptkey == IPT_UI_SELECT)
-				menu::stack_push<menu_font_ui>(ui(), container(), nullptr);
-			break;
-		case COLORS_MENU:
-			if (ev->iptkey == IPT_UI_SELECT)
-				menu::stack_push<menu_colors_ui>(ui(), container());
-			break;
-		case LANGUAGE_MENU:
-			if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-			{
-				if (ev->iptkey == IPT_UI_LEFT)
-					--m_currlang;
-				else if (ev->iptkey == IPT_UI_RIGHT)
-					++m_currlang;
-				else
-					m_currlang = 0;
-				ev->item->set_subtext(m_languages[m_currlang]);
-				ev->item->set_flags(get_arrow_flags<std::size_t>(0, m_languages.size() - 1, m_currlang));
-			}
-			else if (ev->iptkey == IPT_UI_SELECT)
-			{
-				// copying list of language names - expensive
-				menu::stack_push<menu_selector>(
-						ui(), container(), _("UI Language"), std::vector<std::string>(m_languages), m_currlang,
-						[this, item = ev->item] (int selection)
-						{
-							m_currlang = selection;
-							item->set_subtext(m_languages[selection]);
-							item->set_flags(get_arrow_flags<std::size_t>(0, m_languages.size() - 1, selection));
-						});
-			}
-			break;
-		case SYSNAMES_MENU:
-			if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-			{
-				if (ev->iptkey == IPT_UI_LEFT)
-					--m_currsysnames;
-				else if (ev->iptkey == IPT_UI_RIGHT)
-					++m_currsysnames;
-				else
-					m_currsysnames = 0;
-				ev->item->set_subtext(m_sysnames[m_currsysnames]);
-				ev->item->set_flags(get_arrow_flags<std::size_t>(0, m_sysnames.size() - 1, m_currsysnames));
-			}
-			else if (ev->iptkey == IPT_UI_SELECT)
-			{
-				// copying list of file names - expensive
-				menu::stack_push<menu_selector>(
-						ui(), container(), _("System Names"), std::vector<std::string>(m_sysnames), m_currsysnames,
-						[this, item = ev->item] (int selection)
-						{
-							m_currsysnames = selection;
-							item->set_subtext(m_sysnames[selection]);
-							item->set_flags(get_arrow_flags<std::size_t>(0, m_sysnames.size() - 1, selection));
-						});
-			}
-			break;
-		case HIDE_MENU:
-			if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-			{
-				if (ev->iptkey == IPT_UI_LEFT)
-					--m_currpanels;
-				else if (ev->iptkey == IPT_UI_RIGHT)
-					++m_currpanels;
-				else
-					m_currpanels = 0;
-				ev->item->set_subtext(_(HIDE_STATUS[m_currpanels]));
-				ev->item->set_flags(get_arrow_flags<uint16_t>(0, HIDE_BOTH, m_currpanels));
-			}
-			else if (ev->iptkey == IPT_UI_SELECT)
-			{
-				std::vector<std::string> s_sel(std::size(HIDE_STATUS));
-				std::transform(std::begin(HIDE_STATUS), std::end(HIDE_STATUS), s_sel.begin(), [](auto &s) { return _(s); });
-				menu::stack_push<menu_selector>(
-						ui(), container(), _("Show Side Panels"), std::move(s_sel), m_currpanels,
-						[this, item = ev->item] (int selection)
-						{
-							m_currpanels = selection;
-							item->set_subtext(_(HIDE_STATUS[selection]));
-							item->set_flags(get_arrow_flags<uint16_t>(0, HIDE_BOTH, selection));
-						});
-			}
-			break;
+			if (ev->iptkey == IPT_UI_LEFT)
+				--m_currlang;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				++m_currlang;
+			else
+				m_currlang = 0;
+			ev->item->set_subtext(m_languages[m_currlang]);
+			ev->item->set_flags(get_arrow_flags<std::size_t>(0, m_languages.size() - 1, m_currlang));
+			return true;
 		}
+		else if (ev->iptkey == IPT_UI_SELECT)
+		{
+			// copying list of language names - expensive
+			menu::stack_push<menu_selector>(
+					ui(), container(), _("UI Language"), std::vector<std::string>(m_languages), m_currlang,
+					[this, item = ev->item] (int selection)
+					{
+						m_currlang = selection;
+						item->set_subtext(m_languages[selection]);
+						item->set_flags(get_arrow_flags<std::size_t>(0, m_languages.size() - 1, selection));
+					});
+		}
+		break;
+	case SYSNAMES_MENU:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
+		{
+			if (ev->iptkey == IPT_UI_LEFT)
+				--m_currsysnames;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				++m_currsysnames;
+			else
+				m_currsysnames = 0;
+			ev->item->set_subtext(m_sysnames[m_currsysnames]);
+			ev->item->set_flags(get_arrow_flags<std::size_t>(0, m_sysnames.size() - 1, m_currsysnames));
+			return true;
+		}
+		else if (ev->iptkey == IPT_UI_SELECT)
+		{
+			// copying list of file names - expensive
+			menu::stack_push<menu_selector>(
+					ui(), container(), _("System Names"), std::vector<std::string>(m_sysnames), m_currsysnames,
+					[this, item = ev->item] (int selection)
+					{
+						m_currsysnames = selection;
+						item->set_subtext(m_sysnames[selection]);
+						item->set_flags(get_arrow_flags<std::size_t>(0, m_sysnames.size() - 1, selection));
+					});
+		}
+		break;
+	case HIDE_MENU:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
+		{
+			if (ev->iptkey == IPT_UI_LEFT)
+				--m_currpanels;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				++m_currpanels;
+			else
+				m_currpanels = 0;
+			ev->item->set_subtext(_(HIDE_STATUS[m_currpanels]));
+			ev->item->set_flags(get_arrow_flags<uint16_t>(0, HIDE_BOTH, m_currpanels));
+			return true;
+		}
+		else if (ev->iptkey == IPT_UI_SELECT)
+		{
+			std::vector<std::string> s_sel(std::size(HIDE_STATUS));
+			std::transform(std::begin(HIDE_STATUS), std::end(HIDE_STATUS), s_sel.begin(), [](auto &s) { return _(s); });
+			menu::stack_push<menu_selector>(
+					ui(), container(), _("Show Side Panels"), std::move(s_sel), m_currpanels,
+					[this, item = ev->item] (int selection)
+					{
+						m_currpanels = selection;
+						item->set_subtext(_(HIDE_STATUS[selection]));
+						item->set_flags(get_arrow_flags<uint16_t>(0, HIDE_BOTH, selection));
+					});
+		}
+		break;
 	}
+
+	return false;
 }
 
 //-------------------------------------------------
 //  populate
 //-------------------------------------------------
 
-void menu_custom_ui::populate(float &customtop, float &custombottom)
+void menu_custom_ui::populate()
 {
 	uint32_t arrow_flags;
 	item_append(_("Fonts"), 0, (void *)(uintptr_t)FONT_MENU);
@@ -405,100 +409,104 @@ void menu_font_ui::menu_dismissed()
 //  handle
 //-------------------------------------------------
 
-void menu_font_ui::handle(event const *ev)
+bool menu_font_ui::handle(event const *ev)
 {
-	// process the menu
-	if (ev && ev->itemref)
+	if (!ev || !ev->itemref)
+		return false;
+
+	switch ((uintptr_t)ev->itemref)
 	{
-		switch ((uintptr_t)ev->itemref)
+	case FONT_SIZE:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
 		{
-			case FONT_SIZE:
-				if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-				{
-					m_changed = true;
-					if (ev->iptkey == IPT_UI_LEFT)
-						--m_font_size;
-					else if (ev->iptkey == IPT_UI_RIGHT)
-						++m_font_size;
-					else
-						m_font_size = parse_number<int>(ui().options().get_entry(OPTION_FONT_ROWS)->default_value().c_str());
-					ev->item->set_subtext(string_format("%d", m_font_size));
-					ev->item->set_flags(get_arrow_flags(m_font_min, m_font_max, m_font_size));
-				}
-				break;
+			m_changed = true;
+			if (ev->iptkey == IPT_UI_LEFT)
+				--m_font_size;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				++m_font_size;
+			else
+				m_font_size = parse_number<int>(ui().options().get_entry(OPTION_FONT_ROWS)->default_value().c_str());
+			ev->item->set_subtext(string_format("%d", m_font_size));
+			ev->item->set_flags(get_arrow_flags(m_font_min, m_font_max, m_font_size));
+			return true;
+		}
+		break;
 
-			case INFOS_SIZE:
-				if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-				{
-					m_changed = true;
-					if (ev->iptkey == IPT_UI_LEFT)
-						m_info_size -= 0.05f;
-					else if (ev->iptkey == IPT_UI_RIGHT)
-						m_info_size += 0.05f;
-					else
-						m_info_size = parse_number<float>(ui().options().get_entry(OPTION_INFOS_SIZE)->default_value().c_str());
-					ev->item->set_subtext(string_format("%.2f", m_info_size));
-					ev->item->set_flags(get_arrow_flags(m_info_min, m_info_max, m_info_size));
-				}
-				break;
+	case INFOS_SIZE:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
+		{
+			m_changed = true;
+			if (ev->iptkey == IPT_UI_LEFT)
+				m_info_size -= 0.05f;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				m_info_size += 0.05f;
+			else
+				m_info_size = parse_number<float>(ui().options().get_entry(OPTION_INFOS_SIZE)->default_value().c_str());
+			ev->item->set_subtext(string_format("%.2f", m_info_size));
+			ev->item->set_flags(get_arrow_flags(m_info_min, m_info_max, m_info_size));
+			return true;
+		}
+		break;
 
-			case MUI_FNT:
-				if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
-				{
-					m_face_changed = true;
-					m_changed = true;
-					if (ev->iptkey == IPT_UI_LEFT)
-						--m_actual;
-					else if (ev->iptkey == IPT_UI_RIGHT)
-						++m_actual;
-					else
-						m_actual = 0;
-					reset(reset_options::REMEMBER_REF);
-				}
-				else if (ev->iptkey == IPT_UI_SELECT)
-				{
-					std::vector<std::string> display_names;
-					display_names.reserve(m_fonts.size());
-					for (auto const &font : m_fonts)
-						display_names.emplace_back(font.second);
-					menu::stack_push<menu_selector>(
-							ui(), container(), _("UI Font"), std::move(display_names), m_actual,
-							[this] (int selection)
-							{
-								m_face_changed = true;
-								m_changed = true;
-								m_actual = selection;
-								reset(reset_options::REMEMBER_REF);
-							});
-				}
-				break;
+	case MUI_FNT:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_CLEAR))
+		{
+			m_face_changed = true;
+			m_changed = true;
+			if (ev->iptkey == IPT_UI_LEFT)
+				--m_actual;
+			else if (ev->iptkey == IPT_UI_RIGHT)
+				++m_actual;
+			else
+				m_actual = 0;
+			reset(reset_options::REMEMBER_REF);
+		}
+		else if (ev->iptkey == IPT_UI_SELECT)
+		{
+			std::vector<std::string> display_names;
+			display_names.reserve(m_fonts.size());
+			for (auto const &font : m_fonts)
+				display_names.emplace_back(font.second);
+			menu::stack_push<menu_selector>(
+					ui(), container(), _("UI Font"), std::move(display_names), m_actual,
+					[this] (int selection)
+					{
+						m_face_changed = true;
+						m_changed = true;
+						m_actual = selection;
+						reset(reset_options::REMEMBER_REF);
+					});
+		}
+		break;
 
 #ifdef UI_WINDOWS
-			case MUI_BOLD:
-			case MUI_ITALIC:
-				if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_SELECT) || (ev->iptkey == IPT_UI_CLEAR))
-				{
-					m_face_changed = true;
-					m_changed = true;
-					bool &val = ((uintptr_t)ev->itemref == MUI_BOLD) ? m_bold : m_italic;
-					if (ev->iptkey == IPT_UI_CLEAR)
-						val = false;
-					else
-						val = !val;
-					ev->item->set_subtext(val ? _("On") : _("Off"));
-					ev->item->set_flags(val ? FLAG_LEFT_ARROW : FLAG_RIGHT_ARROW);
-				}
-				break;
-#endif
+	case MUI_BOLD:
+	case MUI_ITALIC:
+		if ((ev->iptkey == IPT_UI_LEFT) || (ev->iptkey == IPT_UI_RIGHT) || (ev->iptkey == IPT_UI_SELECT) || (ev->iptkey == IPT_UI_CLEAR))
+		{
+			m_face_changed = true;
+			m_changed = true;
+			bool &val = ((uintptr_t)ev->itemref == MUI_BOLD) ? m_bold : m_italic;
+			if (ev->iptkey == IPT_UI_CLEAR)
+				val = false;
+			else
+				val = !val;
+			ev->item->set_subtext(val ? _("On") : _("Off"));
+			ev->item->set_flags(val ? FLAG_LEFT_ARROW : FLAG_RIGHT_ARROW);
+			return true;
 		}
+		break;
+#endif
 	}
+
+	return false;
 }
 
 //-------------------------------------------------
 //  populate
 //-------------------------------------------------
 
-void menu_font_ui::populate(float &customtop, float &custombottom)
+void menu_font_ui::populate()
 {
 	// set filter arrow
 	uint32_t arrow_flags;
@@ -523,8 +531,17 @@ void menu_font_ui::populate(float &customtop, float &custombottom)
 	item_append(_("Infos text size"), string_format("%.2f", m_info_size), arrow_flags, (void *)(uintptr_t)INFOS_SIZE);
 
 	item_append(menu_item_type::SEPARATOR);
+}
 
-	custombottom = line_height() + 3.0f * tb_border();
+//-------------------------------------------------
+//  recompute metrics
+//-------------------------------------------------
+
+void menu_font_ui::recompute_metrics(uint32_t width, uint32_t height, float aspect)
+{
+	menu::recompute_metrics(width, height, aspect);
+
+	set_custom_space(0.0f, line_height() + 3.0f * tb_border());
 }
 
 //-------------------------------------------------
@@ -592,9 +609,8 @@ void menu_colors_ui::menu_dismissed()
 //  handle
 //-------------------------------------------------
 
-void menu_colors_ui::handle(event const *ev)
+bool menu_colors_ui::handle(event const *ev)
 {
-	// process the menu
 	if (ev && ev->itemref && ev->iptkey == IPT_UI_SELECT)
 	{
 		if ((uintptr_t)ev->itemref != MUI_RESTORE)
@@ -604,15 +620,18 @@ void menu_colors_ui::handle(event const *ev)
 		else
 		{
 			restore_colors();
+			return true;
 		}
 	}
+
+	return false;
 }
 
 //-------------------------------------------------
 //  populate
 //-------------------------------------------------
 
-void menu_colors_ui::populate(float &customtop, float &custombottom)
+void menu_colors_ui::populate()
 {
 	item_append(_("color-option", "Normal text"),                 0, (void *)(uintptr_t)MUI_TEXT_COLOR);
 	item_append(_("color-option", "Selected color"),              0, (void *)(uintptr_t)MUI_SELECTED_COLOR);
@@ -634,8 +653,17 @@ void menu_colors_ui::populate(float &customtop, float &custombottom)
 	item_append(menu_item_type::SEPARATOR);
 
 	item_append(_("Restore default colors"), 0, (void *)(uintptr_t)MUI_RESTORE);
+}
 
-	custombottom = line_height() + 3.0f * tb_border();
+//-------------------------------------------------
+//  recompute metrics
+//-------------------------------------------------
+
+void menu_colors_ui::recompute_metrics(uint32_t width, uint32_t height, float aspect)
+{
+	menu::recompute_metrics(width, height, aspect);
+
+	set_custom_space(0.0f, line_height() + 3.0f * tb_border());
 }
 
 //-------------------------------------------------
@@ -795,88 +823,89 @@ menu_rgb_ui::menu_rgb_ui(mame_ui_manager &mui, render_container &container, rgb_
 //  handle
 //-------------------------------------------------
 
-void menu_rgb_ui::handle(event const *ev)
+bool menu_rgb_ui::handle(event const *ev)
 {
-	// process the menu
-	if (ev && ev->itemref)
-	{
-		switch (ev->iptkey)
-		{
-		case IPT_UI_LEFT:
-		case IPT_UI_RIGHT:
-			{
-				bool changed = false;
-				int updated = (IPT_UI_LEFT == ev->iptkey) ? -1 : 1;
-				switch (uintptr_t(ev->itemref))
-				{
-				case RGB_ALPHA:
-					updated += m_color->a();
-					if ((0 <= updated) && (255 >= updated))
-					{
-						m_color->set_a(updated);
-						changed = true;
-					}
-					break;
-				case RGB_RED:
-					updated += m_color->r();
-					if ((0 <= updated) && (255 >= updated))
-					{
-						m_color->set_r(updated);
-						changed = true;
-					}
-					break;
-				case RGB_GREEN:
-					updated += m_color->g();
-					if ((0 <= updated) && (255 >= updated))
-					{
-						m_color->set_g(updated);
-						changed = true;
-					}
-					break;
-				case RGB_BLUE:
-					updated += m_color->b();
-					if ((0 <= updated) && (255 >= updated))
-					{
-						m_color->set_b(updated);
-						changed = true;
-					}
-					break;
-				}
-				if (changed)
-				{
-					ev->item->set_subtext(string_format("%3u", updated));
-					ev->item->set_flags(get_arrow_flags<uint8_t>(0, 255, updated));
-				}
-			}
-			break;
+	if (!ev || !ev->itemref)
+		return false;
 
-		case IPT_UI_SELECT:
-			if (uintptr_t(ev->itemref) == PALETTE_CHOOSE)
-			{
-				menu::stack_push<menu_palette_sel>(ui(), container(), *m_color);
-				break;
-			}
-			[[fallthrough]];
-		case IPT_SPECIAL:
+	switch (ev->iptkey)
+	{
+	case IPT_UI_LEFT:
+	case IPT_UI_RIGHT:
+		{
+			bool changed = false;
+			int updated = (IPT_UI_LEFT == ev->iptkey) ? -1 : 1;
 			switch (uintptr_t(ev->itemref))
 			{
 			case RGB_ALPHA:
+				updated += m_color->a();
+				if ((0 <= updated) && (255 >= updated))
+				{
+					m_color->set_a(updated);
+					changed = true;
+				}
+				break;
 			case RGB_RED:
+				updated += m_color->r();
+				if ((0 <= updated) && (255 >= updated))
+				{
+					m_color->set_r(updated);
+					changed = true;
+				}
+				break;
 			case RGB_GREEN:
+				updated += m_color->g();
+				if ((0 <= updated) && (255 >= updated))
+				{
+					m_color->set_g(updated);
+					changed = true;
+				}
+				break;
 			case RGB_BLUE:
-				inkey_special(ev);
+				updated += m_color->b();
+				if ((0 <= updated) && (255 >= updated))
+				{
+					m_color->set_b(updated);
+					changed = true;
+				}
 				break;
 			}
+			if (changed)
+			{
+				ev->item->set_subtext(string_format("%3u", updated));
+				ev->item->set_flags(get_arrow_flags<uint8_t>(0, 255, updated));
+				return true;
+			}
+		}
+		break;
+
+	case IPT_UI_SELECT:
+		if (uintptr_t(ev->itemref) == PALETTE_CHOOSE)
+		{
+			menu::stack_push<menu_palette_sel>(ui(), container(), *m_color);
 			break;
 		}
+		[[fallthrough]];
+	case IPT_SPECIAL:
+		switch (uintptr_t(ev->itemref))
+		{
+		case RGB_ALPHA:
+		case RGB_RED:
+		case RGB_GREEN:
+		case RGB_BLUE:
+			return inkey_special(ev);
+		}
+		break;
 	}
+
+	return false;
 }
 
 //-------------------------------------------------
 //  populate
 //-------------------------------------------------
 
-void menu_rgb_ui::populate(float &customtop, float &custombottom)
+void menu_rgb_ui::populate()
 {
 	// set filter arrow
 	std::string s_text = std::string(m_search).append("_");
@@ -917,8 +946,17 @@ void menu_rgb_ui::populate(float &customtop, float &custombottom)
 	item_append(menu_item_type::SEPARATOR);
 	item_append(_("Choose from palette"), 0, (void *)(uintptr_t)PALETTE_CHOOSE);
 	item_append(menu_item_type::SEPARATOR);
+}
 
-	custombottom = line_height() + 3.0f * tb_border();
+//-------------------------------------------------
+//  recompute metrics
+//-------------------------------------------------
+
+void menu_rgb_ui::recompute_metrics(uint32_t width, uint32_t height, float aspect)
+{
+	menu::recompute_metrics(width, height, aspect);
+
+	set_custom_space(0.0f, line_height() + 3.0f * tb_border());
 }
 
 //-------------------------------------------------
@@ -970,7 +1008,7 @@ void menu_rgb_ui::custom_render(void *selectedref, float top, float bottom, floa
 //  handle special key event
 //-------------------------------------------------
 
-void menu_rgb_ui::inkey_special(const event *menu_event)
+bool menu_rgb_ui::inkey_special(const event *menu_event)
 {
 	if (menu_event->iptkey == IPT_UI_SELECT)
 	{
@@ -1013,11 +1051,16 @@ void menu_rgb_ui::inkey_special(const event *menu_event)
 			menu_event->item->set_subtext("_");
 			menu_event->item->set_flags(0);
 		}
+		return true;
 	}
-	else if (m_key_active)
+	else if (m_key_active && input_character(m_search, 3, menu_event->unichar, uchar_is_digit))
 	{
-		input_character(m_search, 3, menu_event->unichar, uchar_is_digit);
 		menu_event->item->set_subtext(m_search + "_");
+		return true;
+	}
+	else
+	{
+		return false;
 	}
 }
 
@@ -1047,9 +1090,8 @@ menu_palette_sel::menu_palette_sel(mame_ui_manager &mui, render_container &conta
 //  handle
 //-------------------------------------------------
 
-void menu_palette_sel::handle(event const *ev)
+bool menu_palette_sel::handle(event const *ev)
 {
-	// process the menu
 	if (ev && ev->itemref)
 	{
 		if (ev->iptkey == IPT_UI_SELECT)
@@ -1059,13 +1101,15 @@ void menu_palette_sel::handle(event const *ev)
 			stack_pop();
 		}
 	}
+
+	return false;
 }
 
 //-------------------------------------------------
 //  populate
 //-------------------------------------------------
 
-void menu_palette_sel::populate(float &customtop, float &custombottom)
+void menu_palette_sel::populate()
 {
 	for (unsigned x = 0; x < std::size(s_palette); ++x)
 		item_append(_("color-preset", s_palette[x].first), s_palette[x].second, FLAG_COLOR_BOX, (void *)(uintptr_t)(x + 1));

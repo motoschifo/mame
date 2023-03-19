@@ -64,6 +64,19 @@ menu_about::~menu_about()
 
 
 //-------------------------------------------------
+//  recompute metrics
+//-------------------------------------------------
+
+void menu_about::recompute_metrics(uint32_t width, uint32_t height, float aspect)
+{
+	menu_textbox::recompute_metrics(width, height, aspect);
+
+	// make space for the title and revision
+	set_custom_space((line_height() * m_header.size()) + (tb_border() * 3.0F), 0.0F);
+}
+
+
+//-------------------------------------------------
 //  perform our special rendering
 //-------------------------------------------------
 
@@ -103,10 +116,8 @@ void menu_about::populate_text(std::optional<text_layout> &layout, float &width,
 //  populate - populates the about modal
 //-------------------------------------------------
 
-void menu_about::populate(float &customtop, float &custombottom)
+void menu_about::populate()
 {
-	// make space for the title and revision
-	customtop = (line_height() * m_header.size()) + (tb_border() * 3.0f);
 }
 
 
@@ -114,10 +125,12 @@ void menu_about::populate(float &customtop, float &custombottom)
 //  handle - manages inputs in the about modal
 //-------------------------------------------------
 
-void menu_about::handle(event const *ev)
+bool menu_about::handle(event const *ev)
 {
 	if (ev)
-		handle_key(ev->iptkey);
+		return handle_key(ev->iptkey);
+	else
+		return false;
 }
 
 } // namespace ui
