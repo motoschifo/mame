@@ -213,7 +213,7 @@ void tsconf_state::tsconf_UpdateGfxBitmap(bitmap_ind16 &bitmap, const rectangle 
 	u8 pal_offset = m_regs[PAL_SEL] << 4;
 	for (u16 vpos = cliprect.top(); vpos <= cliprect.bottom(); vpos++)
 	{
-		u16 y_offset = (0x200 + OFFS_512(G_Y_OFFS_L) + m_gfx_y_frame_offset + vpos) & 0x1ff;
+		u16 y_offset = (OFFS_512(G_Y_OFFS_L) + m_gfx_y_frame_offset + vpos) & 0x1ff;
 		u16 x_offset = (OFFS_512(G_X_OFFS_L) + (cliprect.left() - get_screen_area().left())) & 0x1ff;
 		u8 *video_location = m_ram->pointer() + PAGE4K(m_regs[V_PAGE]) + ((y_offset * 512 + x_offset) >> (2 - VM));
 		u16 *bm = &(bitmap.pix(vpos, cliprect.left()));
@@ -368,12 +368,12 @@ void tsconf_state::ram_page_write(u8 page, offs_t offset, u8 data)
 
 u16 tsconf_state::ram_read16(offs_t offset)
 {
-	return ((m_ram->read(offset & 0xfffffffe)) << 8) | m_ram->read(offset | 1);
+	return ((m_ram->read(offset & ~offs_t(1))) << 8) | m_ram->read(offset | 1);
 }
 
 void tsconf_state::ram_write16(offs_t offset, u16 data)
 {
-	ram_page_write(0, offset & 0xfffffffe, data >> 8);
+	ram_page_write(0, offset & ~offs_t(1), data >> 8);
 	ram_page_write(0, offset | 1, data & 0xff);
 }
 
@@ -403,6 +403,12 @@ void tsconf_state::sfile_write16(offs_t offset, u16 data)
 	m_sfile->write(dest, data >> 8);
 	m_sfile->write(dest | 1, data & 0xff);
 };
+
+u8 tsconf_state::tsconf_port_xx1f_r(offs_t offset) {
+	return m_beta->started() && m_beta->is_active()
+		? m_beta->status_r()
+		: 0x00; // TODO kempston read
+}
 
 void tsconf_state::tsconf_port_7ffd_w(u8 data)
 {
@@ -745,6 +751,14 @@ void tsconf_state::tsconf_spi_miso_w(u8 data)
 	m_zctl_di |= data;
 }
 
+void tsconf_state::tsconf_ay_address_w(u8 data)
+{
+	if ((m_mod_ay->read() == 1) && ((data & 0xfe) == 0xfe))
+		m_ay_selected = data & 1;
+	else
+		m_ay[m_ay_selected]->address_w(data);
+}
+
 IRQ_CALLBACK_MEMBER(tsconf_state::irq_vector)
 {
 	u8 vector = 0xff;
@@ -767,58 +781,65 @@ IRQ_CALLBACK_MEMBER(tsconf_state::irq_vector)
 	return vector;
 }
 
-TIMER_CALLBACK_MEMBER(tsconf_state::irq_on)
-{
-	m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
-	m_irq_off_timer->adjust(attotime::from_ticks(32, m_maincpu->unscaled_clock()));
-}
-
 TIMER_CALLBACK_MEMBER(tsconf_state::irq_off)
 {
-	m_int_mask = 0;
-	m_maincpu->set_input_line(0, CLEAR_LINE);
+	m_int_mask &= ~1;
+	if (!m_int_mask)
+		m_maincpu->set_input_line(0, CLEAR_LINE);
 }
 
 void tsconf_state::update_frame_timer()
 {
 	u16 vpos = OFFS_512(VS_INT_L);
 	u16 hpos = m_regs[HS_INT];
-	attotime at = (BIT(m_regs[INT_MASK], 0) && vpos <= 319 && hpos <= 223) ? m_screen->time_until_pos(vpos, hpos << 1) : m_screen->time_until_pos(0, 0);
-	if (at >= m_screen->frame_period())
-		at = attotime::zero;
-	m_frame_irq_timer->adjust(at);
+	attotime next;
+	if (vpos <= 319 && hpos <= 223)
+	{
+		next = m_screen->time_until_pos(vpos, hpos << 1);
+		if (next >= m_screen->frame_period())
+			next = attotime::zero;
+	}
+	else
+		next = attotime::never;
 
-	m_gfx_y_frame_offset = -get_screen_area().top();
+	m_frame_irq_timer->adjust(next);
 }
 
 INTERRUPT_GEN_MEMBER(tsconf_state::tsconf_vblank_interrupt)
 {
 	update_frame_timer();
+	m_gfx_y_frame_offset = -get_screen_area().top();
 	m_scanline_irq_timer->adjust(attotime::zero);
 }
 
 void tsconf_state::dma_ready(int line)
 {
-	if (BIT(m_regs[INT_MASK], 4))
+	if (BIT(m_regs[INT_MASK], 2))
 	{
+		if (!m_int_mask)
+			m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
 		m_int_mask |= 4;
-		m_irq_on_timer->adjust(attotime::zero);
 	}
 }
 
 TIMER_CALLBACK_MEMBER(tsconf_state::irq_frame)
 {
 	if (BIT(m_regs[INT_MASK], 0))
+	{
+		if (!m_int_mask)
+			m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
+		m_irq_off_timer->adjust(attotime::from_ticks(32, m_maincpu->unscaled_clock()));
 		m_int_mask |= 1;
-	m_irq_on_timer->adjust(attotime::zero);
+	}
 }
 
 TIMER_CALLBACK_MEMBER(tsconf_state::irq_scanline)
 {
 	if (BIT(m_regs[INT_MASK], 1))
 	{
+		if (!m_int_mask)
+			m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
 		m_int_mask |= 2;
-		m_irq_on_timer->adjust(attotime::zero);
 	}
 
 	u16 screen_vpos = m_screen->vpos();

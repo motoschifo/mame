@@ -730,6 +730,7 @@ TODO:
 - scprpng  : fix read/writes at/to unmapped/wrong memory
 - scorpion : check whether konami filters are used
 - explorer : check whether konami filters are used
+- superbon : needs correct color PROM
 
 ***************************************************************************/
 
@@ -4869,9 +4870,9 @@ static INPUT_PORTS_START( jumpbug )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT ) PORT_8WAY PORT_COCKTAIL
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_BUTTON1 ) PORT_COCKTAIL
 	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_COIN2 )
-	PORT_DIPNAME( 0x40, 0x00, "Difficulty ?" )
-	PORT_DIPSETTING(    0x00, DEF_STR( Hard ) )
-	PORT_DIPSETTING(    0x40, DEF_STR( Easy ) )
+	PORT_DIPNAME( 0x40, 0x00, "Difficulty" )
+	PORT_DIPSETTING(    0x00, DEF_STR( Easy ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Hard ) )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN ) PORT_8WAY PORT_COCKTAIL
 
 	PORT_START("IN2")
@@ -9909,6 +9910,22 @@ ROM_START( galap1 )
 	ROM_LOAD( "6l.bpr",       0x0000, 0x0020, CRC(c3ac9467) SHA1(f382ad5a34d282056c78a5ec00c30ec43772bae2) )
 ROM_END
 
+ROM_START( galap2 ) // PCB marked International Scientific, same code as galap4 but different GFX (shows GX Part II on screen)
+	ROM_REGION( 0x4000, "maincpu", 0 ) // on a daugther board, handwritten labels
+	ROM_LOAD( "p2-1.1", 0x0000, 0x0800, CRC(acfde501) SHA1(4b72c1ffecaccadc541da2367f3ef70a2a9aed64) )
+	ROM_LOAD( "p2-2.2", 0x0800, 0x0800, CRC(65cf3c77) SHA1(1c5249815816b395e1e04bf6a7dbb63e40faa0e3) )
+	ROM_LOAD( "p2-3.3", 0x1000, 0x0800, CRC(9eef9ae6) SHA1(b2282e4edb8911e6aabfa936c3526f90381e1320) )
+	ROM_LOAD( "p2-4.4", 0x1800, 0x0800, CRC(56a5ddd1) SHA1(1f87f647ebdffba28d5957f195448f6bce17f4d5) )
+	ROM_LOAD( "p2-5.5", 0x2000, 0x0800, CRC(f4bc7262) SHA1(c4b70e474d49f45cec96f7c250bd77e01e18601a) )
+
+	ROM_REGION( 0x1000, "gfx1", 0 ) // handwritten labels, almost unreadable
+	ROM_LOAD( "galii.1j", 0x0000, 0x0800, CRC(3dcdb3d2) SHA1(60f7052a1b97adf035a7497e6204ca70651f4f11) )
+	ROM_LOAD( "galii.1k", 0x0800, 0x0800, CRC(25789c21) SHA1(d7c9d711c6bb7331ecde310c27c45a2626677223) )
+
+	ROM_REGION( 0x0020, "proms", 0 )
+	ROM_LOAD( "6l.bpr", 0x0000, 0x0020, CRC(c3ac9467) SHA1(f382ad5a34d282056c78a5ec00c30ec43772bae2) )
+ROM_END
+
 ROM_START( galap4 )
 	ROM_REGION( 0x4000, "maincpu", 0 )
 	ROM_LOAD( "galnamco.u",   0x0000, 0x0800, CRC(acfde501) SHA1(4b72c1ffecaccadc541da2367f3ef70a2a9aed64) )
@@ -9939,6 +9956,22 @@ ROM_START( galartic )
 
 	ROM_REGION( 0x0020, "proms", 0 )
 	ROM_LOAD( "mmi6331.6l", 0x0000, 0x0020, CRC(6a0c7d87) SHA1(140335d85c67c75b65689d4e76d29863c209cf32) )
+ROM_END
+
+ROM_START( galaxianiii ) // this was found on a genuine Midway PCB
+	ROM_REGION( 0x4000, "maincpu", 0 ) // handwritten labels
+	ROM_LOAD( "galiii_u.u", 0x0000, 0x0800, CRC(e8f3aa67) SHA1(a0e9576784dbe602dd9780e667f01f31defd7c00) )
+	ROM_LOAD( "galiii_v.v", 0x0800, 0x0800, CRC(f58283e3) SHA1(edc6e72516c50fd3402281d9936574d276581ce9) )
+	ROM_LOAD( "galiii_x.x", 0x1000, 0x0800, CRC(ddeabdae) SHA1(daa5109a32c7c9a80bdb212dc3e4e3e3c104a731) )
+	ROM_LOAD( "galiii_y.y", 0x1800, 0x0800, CRC(87b24ab8) SHA1(f7202213b5c635a27041fc7ebb8f13a71b742d74) )
+	ROM_LOAD( "galiii_z.z", 0x2000, 0x0800, CRC(b960abbd) SHA1(0182dc84c93e02fa7c15db1dfdad638f33ec508f) )
+
+	ROM_REGION( 0x1000, "gfx1", 0 )
+	ROM_LOAD( "1h", 0x0000, 0x0800, CRC(84decf98) SHA1(2e565cb6057b1816a6b4541e6dfadd3c3762fa36) )
+	ROM_LOAD( "1k", 0x0800, 0x0800, CRC(c31ada9e) SHA1(237ebb48549b34ca59a13cc2706512d957413ec4) )
+
+	ROM_REGION( 0x0020, "proms", 0 )
+	ROM_LOAD( "6l.bpr", 0x0000, 0x0020, CRC(c3ac9467) SHA1(f382ad5a34d282056c78a5ec00c30ec43772bae2) )
 ROM_END
 
 ROM_START( swarm )
@@ -15782,7 +15815,7 @@ ROM_START( spdcoin )
 ROM_END
 
 
-ROM_START( superbon )
+ROM_START( superbon ) // has no copyright and 'rent this space' in GFX
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "2d.cpu",       0x0000, 0x1000, CRC(60c0ba18) SHA1(6ad09e01dd3c86c8d9c465916227c9b00f38e025) )
 	ROM_LOAD( "2e.cpu",       0x1000, 0x1000, CRC(ddcf44bf) SHA1(b862622f4aa8af6da568b4f82ef043359ece530f) )
@@ -15800,14 +15833,36 @@ ROM_START( superbon )
 	ROM_LOAD( "5f.cpu",       0x0000, 0x0800, CRC(5b9d4686) SHA1(c7814aefaccab9c8a3a0b015447d366cd2e43c3a) )
 	ROM_LOAD( "5h.cpu",       0x0800, 0x0800, CRC(58c29927) SHA1(b88515d9c3108d2ad59f30fed5d74877b1636280) )
 
-	/* The conversion instructions do not mention color proms:
-	   http://www.arcadeflyers.com/?page=flyer&db=videodb&id=5353&image=2
+	/* The conversion instructions do not mention color PROMs:
+	   https://flyers.arcade-museum.com/?page=thumbs&db=videodb&id=5353
 	   However, pages may be missing. In addition, it is mentioned that the
 	   conversion kit may be used for Scramble, Amidar and Frogger as well.
-	   They all have different color proms. We use the prom from Super Cobra
+	   They all have different color PROMs. We use the PROM from Super Cobra
 	   for now and mark it as bad dump until we have more information. */
 	ROM_REGION( 0x0020, "proms", 0 )
 	ROM_LOAD( "82s123.6e",    0x0000, 0x0020, BAD_DUMP CRC(9b87f90d) SHA1(d11ac5e4a6057301ea2a9cbb404c2b978eb4c1dc) )
+ROM_END
+
+ROM_START( superbona ) // MU-1A + MU-2A PCBs. Has 'Video Village @ 84' copyright and 'Video Village' in GFX
+	ROM_REGION( 0x10000, "maincpu", 0 )
+	ROM_LOAD( "2c",       0x0000, 0x1000, CRC(5a8f69b5) SHA1(7c8b29731cf04f25f71c9a1d5b02b0298d78cf46) )
+	ROM_LOAD( "2e",       0x1000, 0x1000, CRC(5a126243) SHA1(4c3e560dee0722108770902c1e10e556263c554c) )
+	ROM_LOAD( "2f",       0x2000, 0x1000, CRC(bb66c2d5) SHA1(cbb7f4279ae48460790cb8abf976b978ae6a1a25) )
+	ROM_LOAD( "2h",       0x3000, 0x1000, CRC(74f4f04d) SHA1(d51c5d2c21453ee0dab60253c3124b6112d1f859) )
+	ROM_LOAD( "2j",       0x4000, 0x1000, CRC(78effb08) SHA1(64f211b34c2f37c25a36200b393f145b39ae67b5) )
+	ROM_LOAD( "2l",       0x5000, 0x1000, CRC(e9dcecbd) SHA1(ec61cec2b66c041872a2ca29cf724a89c73fc9a3) )
+	ROM_LOAD( "2m",       0x6000, 0x1000, CRC(3ed0337e) SHA1(975b93aee851867e335614419aa6db16fbf8063f) )
+
+	ROM_REGION( 0x10000, "audiocpu", 0 )
+	ROM_LOAD( "5c",       0x0000, 0x0800, CRC(b899be2a) SHA1(9b343a682531255104db61177a43ad933c3af34e) )
+	ROM_LOAD( "5d",       0x0800, 0x0800, CRC(f2ebd14c) SHA1(470811078d761714064d03e7dddb42a2ed1ed217) )
+
+	ROM_REGION( 0x1000, "gfx1", 0 )
+	ROM_LOAD( "5f",       0x0000, 0x0800, CRC(d26f3fdc) SHA1(a2bf8de5260e85b4dccd29784b1b414f953e4350) )
+	ROM_LOAD( "5h",       0x0800, 0x0800, CRC(08e093ee) SHA1(3171f0c8423413bb9e562dba85b10163e24684e0) )
+
+	ROM_REGION( 0x0020, "proms", 0 )
+	ROM_LOAD( "82s123.6e",    0x0000, 0x0020, BAD_DUMP CRC(9b87f90d) SHA1(d11ac5e4a6057301ea2a9cbb404c2b978eb4c1dc) ) // PROM is present but not dumped. Using Scramble's for now.
 ROM_END
 
 ROM_START( jungsub )
@@ -16026,6 +16081,7 @@ GAME( 1979, superg,      galaxian, galaxian,   superg,     galaxian_state, init_
 GAME( 1979, supergs,     galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "hack",                                       "Super Galaxians (Silver Systems)",                                                             MACHINE_SUPPORTS_SAVE )
 GAME( 1979, galturbo,    galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "hack",                                       "Galaxian Turbo ('Super Galaxians' hack)",                                                      MACHINE_SUPPORTS_SAVE ) // Hack of a hack (superg)
 GAME( 1979, galap1,      galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "hack",                                       "Space Invaders Galactica ('Galaxian (Namco set 2)' hack)",                                     MACHINE_SUPPORTS_SAVE )
+GAME( 1979, galap2,      galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "hack (International Scientific)",            "GX Part 2 (Galaxian hack)",                                                                    MACHINE_SUPPORTS_SAVE )
 GAME( 1979, galap4,      galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "hack (G.G.I)",                               "Galaxian Part 4 (hack)",                                                                       MACHINE_SUPPORTS_SAVE )
 GAME( 1979, zerotime,    galaxian, galaxian,   zerotime,   galaxian_state, init_galaxian,   ROT90,  "bootleg? (Petaco S.A.)",                     "Zero Time (Petaco S.A.)",                                                                      MACHINE_SUPPORTS_SAVE )
 GAME( 1979, galaktron,   galaxian, galaxian,   zerotime,   galaxian_state, init_galaxian,   ROT90,  "bootleg (Petaco S.A.)",                      "Galaktron (Petaco S.A.)",                                                                      MACHINE_SUPPORTS_SAVE )
@@ -16047,6 +16103,7 @@ GAME( 1980, galaxrcgg,   galaxian, galaxian,   galaxrf,    galaxian_state, init_
 GAME( 1979, galaxianrp,  galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "bootleg (Valadon Automation / Rene Pierre)", "Galaxian (Rene Pierre bootleg)",                                                               MACHINE_SUPPORTS_SAVE )
 GAME( 1979, galaxyx,     galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "bootleg",                                    "Galaxy X (bootleg of Galaxian)",                                                               MACHINE_SUPPORTS_SAVE )
 GAME( 1979, galartic,    galaxian, galartic,   galartic,   galaxian_state, init_galaxian,   ROT270, "bootleg (Artic System)",                     "Galaxian (Artic System bootleg)",                                                              MACHINE_SUPPORTS_SAVE )
+GAME( 1979, galaxianiii, galaxian, galaxian,   galaxian,   galaxian_state, init_galaxian,   ROT90,  "bootleg",                                    "Galaxian III (bootleg of Galaxian)",                                                           MACHINE_SUPPORTS_SAVE )
 
 // These have the extra 'linescroll effect' title screens, like Moon Alien 2 but made out of a random tile, they lack an energy bar.
 GAME( 1979, moonaln,     galaxian, galaxian,   superg,     galaxian_state, init_galaxian,   ROT90,  "Namco / Nichibutsu (Karateco license?)", "Moon Alien",                          MACHINE_SUPPORTS_SAVE ) // endorsed by Namco, or bootleg?
@@ -16410,7 +16467,8 @@ GAME( 1982, losttombh,   losttomb, scobra,     losttomb,   galaxian_state, init_
 
 GAME( 1984, spdcoin,     0,        scobra,     spdcoin,    galaxian_state, init_scobra,     ROT90,  "Stern Electronics", "Speed Coin (prototype)", MACHINE_SUPPORTS_SAVE )
 
-GAME( 1985, superbon,    0,        scobra,     superbon,   galaxian_state, init_superbon,   ROT90,  "Signatron USA", "Agent Super Bond (Super Cobra conversion)", MACHINE_WRONG_COLORS | MACHINE_SUPPORTS_SAVE )
+GAME( 1985, superbon,    0,        scobra,     superbon,   galaxian_state, init_superbon,   ROT90,  "Signatron USA", "Agent Super Bond (Super Cobra conversion, encrypted)",     MACHINE_WRONG_COLORS | MACHINE_SUPPORTS_SAVE )
+GAME( 1984, superbona,   superbon, scobra,     superbon,   galaxian_state, init_scobra,     ROT90,  "Video Village", "Agent Super Bond (Super Cobra conversion, not encrypted)", MACHINE_WRONG_COLORS | MACHINE_SUPPORTS_SAVE )
 
 // Namennayo - single player reference: https://www.nicovideo.jp/watch/sm16782405
 GAME( 1982, namenayo,    0,        namenayo,   namenayo,   namenayo_state, init_namenayo,   ROT0,   "Cat's", "Namennayo (Japan)", MACHINE_SUPPORTS_SAVE )
