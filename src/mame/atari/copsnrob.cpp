@@ -121,12 +121,10 @@ private:
 
 	uint8_t misc_r();
 	void misc2_w(uint8_t data);
-	DECLARE_WRITE_LINE_MEMBER(one_start_w);
+	void one_start_w(int state);
 	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 };
 
-
-// video
 
 uint32_t copsnrob_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
@@ -246,10 +244,8 @@ uint32_t copsnrob_state::screen_update(screen_device &screen, bitmap_ind16 &bitm
 }
 
 
-// machine
 
-
-WRITE_LINE_MEMBER(copsnrob_state::one_start_w)
+void copsnrob_state::one_start_w(int state)
 {
 	// One Start
 	m_leds[0] = state ? 0 :1;

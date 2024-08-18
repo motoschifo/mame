@@ -18,14 +18,13 @@
 #include "bus/amiga/keyboard/keyboard.h"
 #include "bus/amiga/zorro/zorro.h"
 #include "bus/ata/ataintf.h"
+#include "bus/pccard/sram.h"
 #include "cpu/m68000/m68000.h"
 #include "cpu/m6502/m6502.h"
 #include "machine/6525tpi.h"
 #include "machine/mos6526.h"
 #include "machine/gayle.h"
 #include "machine/dmac.h"
-#include "machine/pccard.h"
-#include "machine/pccard_sram.h"
 #include "machine/nvram.h"
 #include "machine/i2cmem.h"
 #include "machine/amigafdc.h"
@@ -115,7 +114,7 @@ public:
 		return *this;
 	}
 
-	DECLARE_WRITE_LINE_MEMBER(kbclk_w)
+	void kbclk_w(int state)
 	{
 		if (bool(state) != bool(m_kbclk))
 		{
@@ -143,11 +142,6 @@ public:
 	}
 
 protected:
-	virtual void device_resolve_objects() override
-	{
-		m_kbrst_cb.resolve_safe();
-	}
-
 	virtual void device_start() override
 	{
 		// allocate resources
@@ -275,8 +269,8 @@ public:
 	void init_pal();
 	void init_ntsc();
 
-	DECLARE_WRITE_LINE_MEMBER( zorro2_int2_w );
-	DECLARE_WRITE_LINE_MEMBER( zorro2_int6_w );
+	void zorro2_int2_w(int state);
+	void zorro2_int6_w(int state);
 
 	u16 clock_r(offs_t offset);
 	void clock_w(offs_t offset, u16 data);
@@ -315,8 +309,8 @@ public:
 	void init_pal();
 	void init_ntsc();
 
-	DECLARE_WRITE_LINE_MEMBER( side_int2_w );
-	DECLARE_WRITE_LINE_MEMBER( side_int6_w );
+	void side_int2_w(int state);
+	void side_int6_w(int state);
 
 	void a500n(machine_config &config);
 	void a500(machine_config &config);
@@ -359,10 +353,10 @@ public:
 
 	uint8_t dmac_scsi_data_read(offs_t offset);
 	void dmac_scsi_data_write(offs_t offset, uint8_t data);
-	DECLARE_WRITE_LINE_MEMBER( dmac_int_w );
+	void dmac_int_w(int state);
 
 	void tpi_port_b_write(uint8_t data);
-	DECLARE_WRITE_LINE_MEMBER( tpi_int_w );
+	void tpi_int_w(int state);
 
 	void cdtv(machine_config &config);
 	void cdtvn(machine_config &config);
@@ -461,8 +455,8 @@ public:
 		, m_gayle_int2(0)
 	{ }
 
-	DECLARE_WRITE_LINE_MEMBER( gayle_int2_w );
-	DECLARE_WRITE_LINE_MEMBER( gayle_int6_w );
+	void gayle_int2_w(int state);
+	void gayle_int6_w(int state);
 
 	void init_pal();
 	void init_ntsc();
@@ -496,8 +490,8 @@ public:
 		, m_gayle_int2(0)
 	{ }
 
-	DECLARE_WRITE_LINE_MEMBER( gayle_int2_w );
-	DECLARE_WRITE_LINE_MEMBER( gayle_int6_w );
+	void gayle_int2_w(int state);
+	void gayle_int6_w(int state);
 
 	void init_pal();
 	void init_ntsc();
@@ -538,7 +532,7 @@ public:
 	void scsi_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 	u16 ide_r(offs_t offset, u16 mem_mask = ~0);
 	void ide_w(offs_t offset, u16 data, u16 mem_mask);
-	DECLARE_WRITE_LINE_MEMBER( ide_interrupt_w );
+	void ide_interrupt_w(int state);
 	u32 motherboard_r(offs_t offset, u32 mem_mask = ~0);
 	void motherboard_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 
@@ -576,14 +570,14 @@ public:
 		, m_cdda(*this, "akiko:cdda")
 	{ }
 
-	DECLARE_WRITE_LINE_MEMBER( akiko_int_w );
+	void akiko_int_w(int state);
 	void akiko_cia_0_port_a_write(uint8_t data);
 
 	void handle_joystick_cia(u8 pra, u8 dra);
 	u16 handle_joystick_potgor(u16 potgor);
 
 	DECLARE_CUSTOM_INPUT_MEMBER( cd32_input );
-	template <int P> DECLARE_READ_LINE_MEMBER( cd32_sel_mirror_input );
+	template <int P> int cd32_sel_mirror_input();
 
 	void init_pal();
 	void init_ntsc();
@@ -660,7 +654,7 @@ void cdtv_state::dmac_scsi_data_write(offs_t offset, uint8_t data)
 		m_tpi->write(offset, data);
 }
 
-WRITE_LINE_MEMBER( cdtv_state::dmac_int_w )
+void cdtv_state::dmac_int_w(int state)
 {
 	m_dmac_irq = state;
 	update_int2();
@@ -672,7 +666,7 @@ void cdtv_state::tpi_port_b_write(uint8_t data)
 	m_cdrom->enable_w(BIT(data, 1));
 }
 
-WRITE_LINE_MEMBER( cdtv_state::tpi_int_w )
+void cdtv_state::tpi_int_w(int state)
 {
 	m_tpi_irq = state;
 	update_int2();
@@ -847,13 +841,13 @@ void a2000_state::machine_reset()
 	m_zorro->reset();
 }
 
-WRITE_LINE_MEMBER( a2000_state::zorro2_int2_w )
+void a2000_state::zorro2_int2_w(int state)
 {
 	m_zorro2_int2 = state;
 	update_int2();
 }
 
-WRITE_LINE_MEMBER( a2000_state::zorro2_int6_w )
+void a2000_state::zorro2_int6_w(int state)
 {
 	m_zorro2_int6 = state;
 	update_int6();
@@ -878,13 +872,13 @@ void a500_state::machine_reset()
 	m_side->reset();
 }
 
-WRITE_LINE_MEMBER( a500_state::side_int2_w )
+void a500_state::side_int2_w(int state)
 {
 	m_side_int2 = state;
 	update_int2();
 }
 
-WRITE_LINE_MEMBER( a500_state::side_int6_w )
+void a500_state::side_int6_w(int state)
 {
 	m_side_int6 = state;
 	update_int6();
@@ -973,13 +967,13 @@ bool a600_state::int6_pending()
 	return m_cia_1_irq || m_gayle_int6;
 }
 
-WRITE_LINE_MEMBER( a600_state::gayle_int2_w )
+void a600_state::gayle_int2_w(int state)
 {
 	m_gayle_int2 = state;
 	update_int2();
 }
 
-WRITE_LINE_MEMBER( a600_state::gayle_int6_w )
+void a600_state::gayle_int6_w(int state)
 {
 	m_gayle_int6 = state;
 	update_int6();
@@ -995,13 +989,13 @@ bool a1200_state::int6_pending()
 	return m_cia_1_irq || m_gayle_int6;
 }
 
-WRITE_LINE_MEMBER( a1200_state::gayle_int2_w )
+void a1200_state::gayle_int2_w(int state)
 {
 	m_gayle_int2 = state;
 	update_int2();
 }
 
-WRITE_LINE_MEMBER( a1200_state::gayle_int6_w )
+void a1200_state::gayle_int6_w(int state)
 {
 	m_gayle_int6 = state;
 	update_int6();
@@ -1045,7 +1039,7 @@ void a4000_state::ide_w(offs_t offset, u16 data, u16 mem_mask)
 		m_ata->cs0_swap_w((offset >> 1) & 0x07, data, mem_mask);
 }
 
-WRITE_LINE_MEMBER( a4000_state::ide_interrupt_w )
+void a4000_state::ide_interrupt_w(int state)
 {
 	m_ide_interrupt = state;
 }
@@ -1090,7 +1084,7 @@ void a4000_state::motherboard_w(offs_t offset, u32 data, u32 mem_mask)
 	logerror("motherboard_w(%06x): %08x & %08x\n", offset, data, mem_mask);
 }
 
-WRITE_LINE_MEMBER(cd32_state::akiko_int_w)
+void cd32_state::akiko_int_w(int state)
 {
 	set_interrupt(INTENA_SETCLR | INTENA_PORTS);
 }
@@ -1177,7 +1171,7 @@ CUSTOM_INPUT_MEMBER( cd32_state::cd32_input )
 }
 
 template <int P>
-READ_LINE_MEMBER( cd32_state::cd32_sel_mirror_input )
+int cd32_state::cd32_sel_mirror_input()
 {
 	u8 bits = m_player_ports[P]->read();
 	return (bits & 0x20)>>5;
@@ -2042,10 +2036,11 @@ void a600_state::a600(machine_config &config)
 	ata.irq_handler().set("gayle", FUNC(gayle_device::ide_interrupt_w));
 
 	PCCARD_SLOT(config, m_pcmcia, pcmcia_devices, nullptr);
-	m_pcmcia->card_detect_cb().set("gayle", FUNC(gayle_device::cc_cd_w));
-	m_pcmcia->battery_voltage_1_cb().set("gayle", FUNC(gayle_device::cc_bvd1_w));
-	m_pcmcia->battery_voltage_2_cb().set("gayle", FUNC(gayle_device::cc_bvd2_w));
-	m_pcmcia->write_protect_cb().set("gayle", FUNC(gayle_device::cc_wp_w));
+	m_pcmcia->cd1().set("gayle", FUNC(gayle_device::cc_cd1_w));
+	m_pcmcia->cd2().set("gayle", FUNC(gayle_device::cc_cd2_w));
+	m_pcmcia->bvd1().set("gayle", FUNC(gayle_device::cc_bvd1_w));
+	m_pcmcia->bvd2().set("gayle", FUNC(gayle_device::cc_bvd2_w));
+	m_pcmcia->wp().set("gayle", FUNC(gayle_device::cc_wp_w));
 
 	// software
 	SOFTWARE_LIST(config, "ecs_list").set_original("amigaecs_flop");
@@ -2086,7 +2081,7 @@ void a1200_state::a1200(machine_config &config)
 	kbd.kdat_handler().set("cia_0", FUNC(mos8520_device::sp_w));
 	kbd.krst_handler().set(FUNC(a1200_state::kbreset_w));
 
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 
 	MCFG_VIDEO_START_OVERRIDE(amiga_state, amiga_aga)
 
@@ -2109,10 +2104,11 @@ void a1200_state::a1200(machine_config &config)
 #endif
 
 	PCCARD_SLOT(config, m_pcmcia, pcmcia_devices, nullptr);
-	m_pcmcia->card_detect_cb().set("gayle", FUNC(gayle_device::cc_cd_w));
-	m_pcmcia->battery_voltage_1_cb().set("gayle", FUNC(gayle_device::cc_bvd1_w));
-	m_pcmcia->battery_voltage_2_cb().set("gayle", FUNC(gayle_device::cc_bvd2_w));
-	m_pcmcia->write_protect_cb().set("gayle", FUNC(gayle_device::cc_wp_w));
+	m_pcmcia->cd1().set("gayle", FUNC(gayle_device::cc_cd1_w));
+	m_pcmcia->cd2().set("gayle", FUNC(gayle_device::cc_cd2_w));
+	m_pcmcia->bvd1().set("gayle", FUNC(gayle_device::cc_bvd1_w));
+	m_pcmcia->bvd2().set("gayle", FUNC(gayle_device::cc_bvd2_w));
+	m_pcmcia->wp().set("gayle", FUNC(gayle_device::cc_wp_w));
 
 	// software
 	SOFTWARE_LIST(config, "aga_list").set_original("amigaaga_flop");
@@ -2127,7 +2123,7 @@ void a1200_state::a1200n(machine_config &config)
 	subdevice<gayle_device>("gayle")->set_clock(amiga_state::CLK_28M_NTSC / 2);
 	config.device_remove("screen");
 	ntsc_video(config);
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 	m_paula->set_clock(amiga_state::CLK_C1_NTSC);
 	m_cia_0->set_clock(amiga_state::CLK_E_NTSC);
 	m_cia_1->set_clock(amiga_state::CLK_E_NTSC);
@@ -2153,7 +2149,7 @@ void a4000_state::a4000(machine_config &config)
 	kbd.kclk_handler().set("cia_0", FUNC(mos8520_device::cnt_w));
 	kbd.kdat_handler().set("cia_0", FUNC(mos8520_device::sp_w));
 
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 
 	MCFG_VIDEO_START_OVERRIDE(amiga_state, amiga_aga)
 
@@ -2178,7 +2174,7 @@ void a4000_state::a4000n(machine_config &config)
 
 	config.device_remove("screen");
 	ntsc_video(config);
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 	m_paula->set_clock(amiga_state::CLK_C1_NTSC);
 	m_cia_0->set_clock(amiga_state::CLK_E_NTSC);
 	m_cia_1->set_clock(amiga_state::CLK_E_NTSC);
@@ -2201,7 +2197,7 @@ void a4000_state::a400030n(machine_config &config)
 	a400030(config);
 	config.device_remove("screen");
 	ntsc_video(config);
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 	m_paula->set_clock(amiga_state::CLK_C1_NTSC);
 	m_cia_0->set_clock(amiga_state::CLK_E_NTSC);
 	m_cia_1->set_clock(amiga_state::CLK_E_NTSC);
@@ -2235,7 +2231,7 @@ void cd32_state::cd32(machine_config &config)
 	akiko.sda_r_callback().set("i2cmem", FUNC(i2cmem_device::read_sda));
 	akiko.sda_w_callback().set("i2cmem", FUNC(i2cmem_device::write_sda));
 
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 
 	MCFG_VIDEO_START_OVERRIDE(amiga_state, amiga_aga)
 
@@ -2253,7 +2249,7 @@ void cd32_state::cd32n(machine_config &config)
 	m_maincpu->set_clock(amiga_state::CLK_28M_NTSC / 2);
 	config.device_remove("screen");
 	ntsc_video(config);
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 	m_paula->set_clock(amiga_state::CLK_C1_NTSC);
 	m_cia_0->set_clock(amiga_state::CLK_E_NTSC);
 	m_cia_1->set_clock(amiga_state::CLK_E_NTSC);
@@ -2277,7 +2273,7 @@ void a4000_state::a4000tn(machine_config &config)
 
 	config.device_remove("screen");
 	ntsc_video(config);
-	m_screen->set_screen_update(FUNC(amiga_state::screen_update_amiga_aga));
+	m_screen->set_screen_update(FUNC(amiga_state::screen_update));
 	m_paula->set_clock(amiga_state::CLK_C1_NTSC);
 	m_cia_0->set_clock(amiga_state::CLK_E_NTSC);
 	m_cia_1->set_clock(amiga_state::CLK_E_NTSC);

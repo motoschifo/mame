@@ -277,7 +277,7 @@
 
 #include "dcs.h"
 
-#include "bus/ata/idehd.h"
+#include "bus/ata/hdd.h"
 #include "bus/rs232/rs232.h"
 #include "cpu/adsp2100/adsp2100.h"
 #include "cpu/mips/mips3.h"
@@ -292,6 +292,7 @@
 #include "video/voodoo_pci.h"
 
 #include "screen.h"
+#include "speaker.h"
 
 #include "sf2049.lh"
 
@@ -435,13 +436,13 @@ private:
 	uint32_t m_keypad_select;
 	uint32_t m_gear;
 
-	DECLARE_WRITE_LINE_MEMBER(duart_irq_cb);
-	DECLARE_WRITE_LINE_MEMBER(vblank_assert);
+	void duart_irq_cb(int state);
+	void vblank_assert(int state);
 
 	void update_sio_irqs();
 
-	DECLARE_WRITE_LINE_MEMBER(watchdog_reset);
-	DECLARE_WRITE_LINE_MEMBER(watchdog_irq);
+	void watchdog_reset(int state);
+	void watchdog_irq(int state);
 	void timekeeper_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t timekeeper_r(offs_t offset, uint32_t mem_mask = ~0);
 	void reset_sio(void);
@@ -455,8 +456,8 @@ private:
 	uint32_t ethernet_r(offs_t offset, uint32_t mem_mask = ~0);
 	void ethernet_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	void dcs3_fifo_full_w(uint32_t data);
-	DECLARE_WRITE_LINE_MEMBER(ethernet_interrupt);
-	DECLARE_WRITE_LINE_MEMBER(ioasic_irq);
+	void ethernet_interrupt(int state);
+	void ioasic_irq(int state);
 	uint32_t unknown_r(offs_t offset, uint32_t mem_mask = ~0);
 	uint8_t parallel_r(offs_t offset);
 	void parallel_w(offs_t offset, uint8_t data);
@@ -545,14 +546,13 @@ void vegas_state::machine_reset()
 	m_wheel_force = 0;
 	m_wheel_offset = 0;
 	m_wheel_calibrated = false;
-
 }
 
 /*************************************
 *  Watchdog interrupts
 *************************************/
 #define WD_IRQ 0x1
-WRITE_LINE_MEMBER(vegas_state::watchdog_irq)
+void vegas_state::watchdog_irq(int state)
 {
 	if (state && !(m_sio_irq_state & WD_IRQ)) {
 		LOGMASKED(LOG_WATCHDOG, "%s: vegas_state::watchdog_irq state = %i\n", machine().describe_context(), state);
@@ -569,7 +569,7 @@ WRITE_LINE_MEMBER(vegas_state::watchdog_irq)
 /*************************************
 *  Watchdog Reset
 *************************************/
-WRITE_LINE_MEMBER(vegas_state::watchdog_reset)
+void vegas_state::watchdog_reset(int state)
 {
 	if (state) {
 		LOGMASKED(LOG_WATCHDOG, "vegas_state::watchdog_reset!!!\n");
@@ -625,7 +625,6 @@ uint32_t vegas_state::timekeeper_r(offs_t offset, uint32_t mem_mask)
 
 
 
-
 /*************************************
  *
  *  SIO interrupts
@@ -656,7 +655,7 @@ void vegas_state::update_sio_irqs()
 	LOGMASKED(LOG_SIO, "update_sio_irqs: irq_enable: %02x %s irq_state: %02x %s\n", m_sio_irq_enable, sioEnable, m_sio_irq_state, sioState);
 }
 
-WRITE_LINE_MEMBER(vegas_state::duart_irq_cb)
+void vegas_state::duart_irq_cb(int state)
 {
 	// Duart shares IRQ with SIO
 	if (state ^ m_duart_irq_state) {
@@ -665,7 +664,7 @@ WRITE_LINE_MEMBER(vegas_state::duart_irq_cb)
 	}
 }
 
-WRITE_LINE_MEMBER(vegas_state::vblank_assert)
+void vegas_state::vblank_assert(int state)
 {
 	LOGMASKED(LOG_SIO, "vblank_assert: m_sio_reset_ctrl: %04x state: %d\n", m_sio_reset_ctrl, state);
 	// latch on the correct polarity transition
@@ -677,7 +676,7 @@ WRITE_LINE_MEMBER(vegas_state::vblank_assert)
 }
 
 
-WRITE_LINE_MEMBER(vegas_state::ioasic_irq)
+void vegas_state::ioasic_irq(int state)
 {
 	if (state)
 		m_sio_irq_state |= 0x04;
@@ -686,7 +685,7 @@ WRITE_LINE_MEMBER(vegas_state::ioasic_irq)
 	update_sio_irqs();
 }
 
-WRITE_LINE_MEMBER(vegas_state::ethernet_interrupt)
+void vegas_state::ethernet_interrupt(int state)
 {
 	if (state)
 		m_sio_irq_state |= 0x10;
@@ -884,7 +883,7 @@ void vegas_state::cpu_io_w(offs_t offset, uint8_t data)
 		case 0xfe: digit = '-'; break;
 		case 0xff: digit = 'Z'; break;
 		}
-		//popmessage("System LED: %C", digit);
+		//popmessage("System LED: %c", digit);
 		LOGMASKED(LOG_SIO, "%s: cpu_io_w System LED offset %X = %02X '%c'\n", machine().describe_context(), offset, data, digit);
 		break;
 	}
@@ -1347,7 +1346,6 @@ static INPUT_PORTS_START( vegas_common )
 
 	PORT_START("8WAY_P4")
 	PORT_BIT( 0xff00, IP_ACTIVE_HIGH, IPT_UNUSED )
-
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( vegas_analog )
@@ -1359,7 +1357,6 @@ static INPUT_PORTS_START( vegas_analog )
 
 	PORT_MODIFY("IN2")
 	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED  )
-
 INPUT_PORTS_END
 
 /*************************************
@@ -1469,7 +1466,6 @@ static INPUT_PORTS_START( gauntleg )
 
 	PORT_START("49WAYY_P4")
 	PORT_BIT(0xff, 0x38, IPT_AD_STICK_Y) PORT_MINMAX(0x00, 0x6f) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_PLAYER(4) PORT_REVERSE
-
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( tenthdeg )
@@ -1506,7 +1502,6 @@ static INPUT_PORTS_START( tenthdeg )
 	PORT_BIT( 0x0040, IP_ACTIVE_LOW, IPT_BUTTON3 ) PORT_PLAYER(2) PORT_NAME("P2 Fierce")
 	PORT_BIT( 0x0080, IP_ACTIVE_LOW, IPT_BUTTON7 ) PORT_PLAYER(2) PORT_NAME("P2 Counter")
 	PORT_BIT( 0xe000, IP_ACTIVE_LOW, IPT_UNUSED)
-
 INPUT_PORTS_END
 
 
@@ -1547,7 +1542,6 @@ static INPUT_PORTS_START( warfa )
 
 	PORT_MODIFY("AN.1")
 	PORT_BIT( 0xff, 0x80, IPT_AD_STICK_Y ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_PLAYER(1)
-
 INPUT_PORTS_END
 
 
@@ -1579,7 +1573,6 @@ static INPUT_PORTS_START( roadburn )
 
 	PORT_MODIFY("AN.2")
 	PORT_BIT( 0xff, 0x80, IPT_AD_STICK_X ) PORT_NAME("Bank") PORT_MINMAX(0x00, 0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(10)
-
 INPUT_PORTS_END
 
 
@@ -1673,7 +1666,6 @@ static INPUT_PORTS_START( nbashowt )
 
 	PORT_START("49WAYY_P4")
 	PORT_BIT( 0xff, 0x38, IPT_AD_STICK_Y ) PORT_MINMAX(0x00, 0x6f) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_PLAYER(4)
-
 INPUT_PORTS_END
 
 
@@ -1817,7 +1809,6 @@ static INPUT_PORTS_START( cartfury )
 
 	PORT_MODIFY("AN.2")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake") PORT_SENSITIVITY(25) PORT_KEYDELTA(100) PORT_PLAYER(1)
-
 INPUT_PORTS_END
 
 /*************************************
@@ -1933,7 +1924,6 @@ void vegas_state::hdd_config(device_t *device)
 	// Allow ultra dma
 	//uint16_t *identify_device = dynamic_cast<ide_hdd_device *>(device)->identify_device_buffer();
 	//identify_device[88] = 0x7f;
-
 }
 
 
@@ -2026,7 +2016,6 @@ void vegas_state::denver(machine_config &config)
 	ttys02.dsr_handler().set(m_uart2, FUNC(ins8250_uart_device::dsr_w));
 	ttys02.ri_handler().set(m_uart2, FUNC(ins8250_uart_device::ri_w));
 	ttys02.cts_handler().set(m_uart2, FUNC(ins8250_uart_device::cts_w));
-
 }
 
 // Per driver configs
@@ -2036,12 +2025,24 @@ void vegas_state::gauntleg(machine_config &config)
 	// Needs 250MHz MIPS or screen tearing occurs (See MT8064)
 	// Firmware frequency detection seems to have a bug, console reports 220MHz for a 200MHz cpu and 260MHz for a 250MHz cpu
 	vegas250(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_CALSPEED);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_CALSPEED);
 	m_ioasic->set_upper(340); // 340=39", 322=27" others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2052,12 +2053,24 @@ void vegas_state::gauntdl(machine_config &config)
 {
 	// Needs 250MHz MIPS or screen tearing occurs (See MT8064)
 	vegas250(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_GAUNTDL);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_GAUNTDL);
 	m_ioasic->set_upper(346); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2067,12 +2080,24 @@ void vegas_state::gauntdl(machine_config &config)
 void vegas_state::warfa(machine_config &config)
 {
 	vegas250(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_MACE);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_MACE);
 	m_ioasic->set_upper(337); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2082,12 +2107,24 @@ void vegas_state::warfa(machine_config &config)
 void vegas_state::tenthdeg(machine_config &config)
 {
 	vegas(config);
-	dcs2_audio_2115_device &dcs(DCS2_AUDIO_2115(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0afb);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2115(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0afb);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_GAUNTDL);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_GAUNTDL);
 	m_ioasic->set_upper(330); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2097,12 +2134,24 @@ void vegas_state::tenthdeg(machine_config &config)
 void vegas_state::roadburn(machine_config &config)
 {
 	vegas32m(config);
-	dcs2_audio_dsio_device &dcs(DCS2_AUDIO_DSIO(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0ddd);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_DSIO(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0ddd);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_STANDARD);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_STANDARD);
 	m_ioasic->set_upper(325); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2112,12 +2161,24 @@ void vegas_state::roadburn(machine_config &config)
 void vegas_state::nbashowt(machine_config &config)
 {
 	vegasban(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_MACE);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_MACE);
 	// 528 494 478 development pic, 487 NBA
 	m_ioasic->set_upper(487); // or 478 or 487
 	m_ioasic->set_yearoffs(80);
@@ -2129,12 +2190,24 @@ void vegas_state::nbashowt(machine_config &config)
 void vegas_state::nbanfl(machine_config &config)
 {
 	vegasban(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_BLITZ99);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_BLITZ99);
 	m_ioasic->set_upper(498); // or 478 or 487
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2145,17 +2218,30 @@ void vegas_state::nbanfl(machine_config &config)
 void vegas_state::nbagold(machine_config &config)
 {
 	vegasban(config);
+
 	QED5271LE(config.replace(), m_maincpu, vegas_state::SYSTEM_CLOCK * 2.5);
 	m_maincpu->set_icache_size(32768);
 	m_maincpu->set_dcache_size(32768);
 	m_maincpu->set_system_clock(vegas_state::SYSTEM_CLOCK);
 	m_nile->set_sdram_size(0, 0x00800000);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_GAUNTDL);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_GAUNTDL);
 	m_ioasic->set_upper(109); // 494 109 ???
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2166,12 +2252,30 @@ void vegas_state::nbagold(machine_config &config)
 void vegas_state::sf2049(machine_config &config)
 {
 	denver(config);
-	dcs2_audio_denver_5ch_device &dcs(DCS2_AUDIO_DENVER_5CH(config, "dcs", 0));
-	dcs.set_dram_in_mb(8);
-	dcs.set_polling_offset(0x872);
+
+	SPEAKER(config, "flspeaker").front_left();
+	SPEAKER(config, "frspeaker").front_right();
+	SPEAKER(config, "rlspeaker").headrest_left();
+	SPEAKER(config, "rrspeaker").headrest_right();
+	SPEAKER(config, "subwoofer").backrest();
+
+	DCS2_AUDIO_DENVER_5CH(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(8);
+	m_dcs->set_polling_offset(0x872);
+	m_dcs->add_route(0, "flspeaker", 1.0);
+	m_dcs->add_route(1, "frspeaker", 1.0);
+	m_dcs->add_route(2, "rlspeaker", 1.0);
+	m_dcs->add_route(3, "rrspeaker", 1.0);
+	m_dcs->add_route(4, "subwoofer", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_STANDARD);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_STANDARD);
 	m_ioasic->set_upper(336); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2182,12 +2286,30 @@ void vegas_state::sf2049(machine_config &config)
 void vegas_state::sf2049se(machine_config &config)
 {
 	denver(config);
-	dcs2_audio_denver_5ch_device &dcs(DCS2_AUDIO_DENVER_5CH(config, "dcs", 0));
-	dcs.set_dram_in_mb(8);
-	dcs.set_polling_offset(0x872);
+
+	SPEAKER(config, "flspeaker").front_left();
+	SPEAKER(config, "frspeaker").front_right();
+	SPEAKER(config, "rlspeaker").headrest_left();
+	SPEAKER(config, "rrspeaker").headrest_right();
+	SPEAKER(config, "subwoofer").backrest();
+
+	DCS2_AUDIO_DENVER_5CH(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(8);
+	m_dcs->set_polling_offset(0x872);
+	m_dcs->add_route(0, "flspeaker", 1.0);
+	m_dcs->add_route(1, "frspeaker", 1.0);
+	m_dcs->add_route(2, "rlspeaker", 1.0);
+	m_dcs->add_route(3, "rrspeaker", 1.0);
+	m_dcs->add_route(4, "subwoofer", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_SFRUSHRK);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_SFRUSHRK);
 	m_ioasic->set_upper(352); // 352 336 others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2198,12 +2320,30 @@ void vegas_state::sf2049se(machine_config &config)
 void vegas_state::sf2049te(machine_config &config)
 {
 	denver(config);
-	dcs2_audio_denver_5ch_device &dcs(DCS2_AUDIO_DENVER_5CH(config, "dcs", 0));
-	dcs.set_dram_in_mb(8);
-	dcs.set_polling_offset(0x872);
+
+	SPEAKER(config, "flspeaker").front_left();
+	SPEAKER(config, "frspeaker").front_right();
+	SPEAKER(config, "rlspeaker").headrest_left();
+	SPEAKER(config, "rrspeaker").headrest_right();
+	SPEAKER(config, "subwoofer").backrest();
+
+	DCS2_AUDIO_DENVER_5CH(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(8);
+	m_dcs->set_polling_offset(0x872);
+	m_dcs->add_route(0, "flspeaker", 1.0);
+	m_dcs->add_route(1, "frspeaker", 1.0);
+	m_dcs->add_route(2, "rlspeaker", 1.0);
+	m_dcs->add_route(3, "rrspeaker", 1.0);
+	m_dcs->add_route(4, "subwoofer", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_SFRUSHRK);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_SFRUSHRK);
 	m_ioasic->set_upper(348); // others?
 	m_ioasic->set_yearoffs(80);
 	m_ioasic->irq_handler().set(FUNC(vegas_state::ioasic_irq));
@@ -2214,12 +2354,24 @@ void vegas_state::sf2049te(machine_config &config)
 void vegas_state::cartfury(machine_config &config)
 {
 	vegasv3(config);
-	dcs2_audio_2104_device &dcs(DCS2_AUDIO_2104(config, "dcs", 0));
-	dcs.set_dram_in_mb(4);
-	dcs.set_polling_offset(0x0b5d);
+
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	DCS2_AUDIO_2104(config, m_dcs, 0);
+	m_dcs->set_maincpu_tag(m_maincpu);
+	m_dcs->set_dram_in_mb(4);
+	m_dcs->set_polling_offset(0x0b5d);
+	m_dcs->add_route(0, "rspeaker", 1.0);
+	m_dcs->add_route(1, "lspeaker", 1.0);
 
 	MIDWAY_IOASIC(config, m_ioasic, 0);
-	m_ioasic->set_shuffle(MIDWAY_IOASIC_CARNEVIL);
+	m_ioasic->in_port_cb<0>().set_ioport("DIPS");
+	m_ioasic->in_port_cb<1>().set_ioport("SYSTEM");
+	m_ioasic->in_port_cb<2>().set_ioport("IN1");
+	m_ioasic->in_port_cb<3>().set_ioport("IN2");
+	m_ioasic->set_dcs_tag(m_dcs);
+	m_ioasic->set_shuffle(midway_ioasic_device::SHUFFLE_CARNEVIL);
 	// 433, 495, 490 Development PIC
 	m_ioasic->set_upper(495/*433,  495 others? */);
 	m_ioasic->set_yearoffs(80);

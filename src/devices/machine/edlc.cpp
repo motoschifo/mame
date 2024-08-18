@@ -52,10 +52,6 @@ seeq8003_device::seeq8003_device(machine_config const &mconfig, char const *tag,
 
 void seeq8003_device::device_start()
 {
-	m_out_int.resolve_safe();
-	m_out_rxrdy.resolve_safe();
-	m_out_txrdy.resolve_safe();
-
 	save_item(NAME(m_int_state));
 	save_item(NAME(m_reset_state));
 	save_item(NAME(m_station_address));
@@ -86,7 +82,7 @@ void seeq8003_device::device_reset()
 
 	// TODO: deassert RxDC and TxRET
 
-	if (m_dev)
+	if (has_net_device())
 		m_out_txrdy(1);
 
 	interrupt();
@@ -257,7 +253,7 @@ void seeq8003_device::tx_command_w(u8 data)
 	m_tx_command = data;
 }
 
-void seeq8003_device::transmit(int param)
+void seeq8003_device::transmit(s32 param)
 {
 	if (m_tx_fifo.queue_length())
 	{
@@ -332,7 +328,7 @@ int seeq8003_device::receive(u8 *buf, int length)
 	return length;
 }
 
-void seeq8003_device::interrupt(int param)
+void seeq8003_device::interrupt(s32 param)
 {
 	int const state =
 		(!(m_tx_status & TXS_O) && (m_tx_status & m_tx_command & TXS_M)) ||
@@ -431,7 +427,7 @@ void seeq80c03_device::send_complete_cb(int result)
 	else
 	{
 		// assume transmit failure and no device means loss of carrier
-		if ((m_control & CTL_TNC) && !m_dev)
+		if ((m_control & CTL_TNC) && !has_net_device())
 			m_flags |= FLAGS_TNC;
 	}
 }

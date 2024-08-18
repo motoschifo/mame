@@ -25,14 +25,16 @@ public:
 	uint8_t dac_r(offs_t offset);
 	void dac_w(offs_t offset, uint8_t data);
 
-	DECLARE_READ_LINE_MEMBER(vblank) const { return m_screen->vblank(); }
-	DECLARE_READ_LINE_MEMBER(hblank) const { return m_screen->hblank(); }
+	int vblank() const { return m_screen->vblank(); }
+	int hblank() const { return m_screen->hblank(); }
 
 	auto screen_vblank() { return m_screen_vblank.bind(); }
 
 	void set_vram_base(const uint64_t *vram) { m_vram = vram; }
 	void set_vram_offset(uint32_t offset) { m_vram_offset = offset; }
 	void set_32bit() { m_is32bit = true; }
+	void set_PDM() { m_isPDM = true; }
+	void set_pixel_clock(uint32_t pclk) { m_extPixelClock = pclk; }
 
 protected:
 	virtual void device_start() override;
@@ -48,6 +50,7 @@ private:
 		uint32_t htot, hfp, hs, hbp;
 		uint32_t vtot, vfp, vs, vbp;
 		bool supports_16bpp;
+		bool monochrome;
 	};
 
 	static const modeline modelines[5];
@@ -58,10 +61,11 @@ private:
 	devcb_write_line m_screen_vblank;
 
 	const uint64_t *m_vram;
-	uint32_t m_vram_offset;
+	uint32_t m_vram_offset, m_extPixelClock;
 	uint8_t m_mode, m_depth, m_monitor_id, m_vtest;
 	uint8_t m_pal_address, m_pal_idx, m_pal_control, m_pal_colkey;
 	int m_modeline_id;
+	bool m_isPDM;
 	bool m_is32bit;
 
 	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);

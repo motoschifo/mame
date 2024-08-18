@@ -116,8 +116,7 @@ void vrc4373_device::device_start()
 	pci_host_device::device_start();
 
 	m_cpu_space = &m_cpu->space(AS_PCI_CONFIG);
-	memory_space = &space(AS_PCI_MEM);
-	io_space = &space(AS_PCI_IO);
+	set_spaces(&space(AS_PCI_MEM), &space(AS_PCI_IO));
 	is_multifunction_device = false;
 
 	std::fill(std::begin(m_cpu_regs), std::end(m_cpu_regs), 0);
@@ -129,8 +128,6 @@ void vrc4373_device::device_start()
 	io_window_end   = 0xffffffff;
 	io_offset       = 0x00000000;
 	status = 0x0280;
-
-	m_irq_cb.resolve();
 
 	// Reserve 8M for ram
 	m_ram.reserve(0x00800000 / 4);
@@ -416,7 +413,7 @@ TIMER_CALLBACK_MEMBER (vrc4373_device::dma_transfer)
 		m_cpu_regs[NREG_DMACR1 + which * 0xc] &= ~DMA_GO;
 		// Set the interrupt
 		if (m_cpu_regs[NREG_DMACR1 + which * 0xc] & DMA_INT_EN) {
-			if (!m_irq_cb.isnull()) {
+			if (!m_irq_cb.isunset()) {
 				m_irq_cb(ASSERT_LINE);
 			} else {
 				logerror("vrc4373_device::dma_transfer Error: DMA configured to trigger interrupt but no interrupt line configured\n");
@@ -523,7 +520,7 @@ void vrc4373_device::cpu_if_w(offs_t offset, uint32_t data, uint32_t mem_mask)
 		case NREG_ICSR:
 			// TODO: Check and clear individual interrupts
 			if (data & 0xff000000) {
-				if (!m_irq_cb.isnull())
+				if (!m_irq_cb.isunset())
 					m_irq_cb(CLEAR_LINE);
 			}
 			break;

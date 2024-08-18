@@ -660,6 +660,8 @@ void vertex_program_simulator::process(int address, vertex_nv *in, vertex_nv *ou
 		output++;
 		count--;
 	}
+	input = nullptr;
+	output = nullptr;
 }
 
 int vertex_program_simulator::status()
@@ -2024,26 +2026,10 @@ void nv2a_renderer::render_color(int32_t scanline, const nv2a_rasterizer::extent
 		z = (extent.param[(int)VERTEX_PARAMETER::PARAM_Z].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_Z].dpdx);
 		zf = (extent.param[(int)VERTEX_PARAMETER::PARAM_1W].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_1W].dpdx);
 		zf = 1.0f / zf;
-		cb = ((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_B].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_B].dpdx)) * zf * 255.0f;
-		cg = ((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_G].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_G].dpdx)) * zf * 255.0f;
-		cr = ((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_R].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_R].dpdx)) * zf * 255.0f;
-		ca = ((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_A].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_A].dpdx)) * zf * 255.0f;
-		if (cb > 255)
-			cb = 255;
-		if (cb < 0)
-			cb = 0;
-		if (cg > 255)
-			cg = 255;
-		if (cg < 0)
-			cg = 0;
-		if (cr > 255)
-			cr = 255;
-		if (cr < 0)
-			cr = 0;
-		if (ca > 255)
-			ca = 255;
-		if (ca < 0)
-			ca = 0;
+		cb = std::clamp<int>(((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_B].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_B].dpdx)) * zf * 255.0f, 0, 255);
+		cg = std::clamp<int>(((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_G].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_G].dpdx)) * zf * 255.0f, 0, 255);
+		cr = std::clamp<int>(((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_R].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_R].dpdx)) * zf * 255.0f, 0, 255);
+		ca = std::clamp<int>(((extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_A].start + (double)x * extent.param[(int)VERTEX_PARAMETER::PARAM_COLOR_A].dpdx)) * zf * 255.0f, 0, 255);
 		a8r8g8b8 = (ca << 24) | (cr << 16) | (cg << 8) | cb; // pixel color obtained by interpolating the colors of the vertices
 		write_pixel(xp, scanline, a8r8g8b8, z);
 		x--;
@@ -2512,25 +2498,7 @@ void nv2a_renderer::compute_supersample_factors(float &horizontal, float &vertic
 
 void nv2a_renderer::convert_vertices(vertex_nv *source, nv2avertex_t *destination)
 {
-/*
-	FIXME: GCC 13.1 errored this without the static on "vert".  I believe this is a real bug, but I don't
-	know enough about what this code is doing to be confident.
-
-	In member function ‘void vertex_program_simulator::set_data(vertex_nv*, vertex_nv*)’,
-    inlined from ‘void vertex_program_simulator::process(int, vertex_nv*, vertex_nv*, int)’ at ../../../../../src/mame/shared/xbox_nv2a.cpp:643:10,
-    inlined from ‘void nv2a_renderer::convert_vertices(vertex_nv*, nv2avertex_t*)’ at ../../../../../src/mame/shared/xbox_nv2a.cpp:2546:29:
-../../../../../src/mame/shared/xbox_nv2a.cpp:449:16: error: storing the address of local variable ‘vert’ in ‘*&this_144(D)->vertexprogram.exec.vertex_program_simulator::output’ [-Werror=dangling-pointer=]
-  449 |         output = out;
-      |         ~~~~~~~^~~~~
-../../../../../src/mame/shared/xbox_nv2a.cpp: In member function ‘void nv2a_renderer::convert_vertices(vertex_nv*, nv2avertex_t*)’:
-../../../../../src/mame/shared/xbox_nv2a.cpp:2504:19: note: ‘vert’ declared here
- 2522 |         vertex_nv vert;
-      |                   ^~~~
-../../../../../src/mame/shared/xbox_nv2a.cpp:2502:82: note: ‘this’ declared here
- 2502 | void nv2a_renderer::convert_vertices(vertex_nv *source, nv2avertex_t *destination)
-      |                                                                                  ^
-*/
-	static vertex_nv vert;
+	vertex_nv vert;
 	int u;
 	float v[4];
 	double c;
@@ -4763,9 +4731,9 @@ void nv2a_renderer::combiner_compute_alpha_outputs(int id, int stage_number)
 	combiner.work[id].functions.Aop3 = std::clamp((combiner.work[id].functions.Aop3 + bias) * scale, -1.0f, 1.0f);
 }
 
-WRITE_LINE_MEMBER(nv2a_renderer::vblank_callback)
+void nv2a_renderer::vblank_callback(int state)
 {
-    LOGMASKED(LOG_NV2A_VERBOSE, "vblank_callback\n\r");
+	LOGMASKED(LOG_NV2A_VERBOSE, "vblank_callback\n\r");
 	if ((state != 0) && (puller_waiting == 1)) {
 		puller_waiting = 0;
 		puller_timer_work(0);

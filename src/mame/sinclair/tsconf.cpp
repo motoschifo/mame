@@ -27,17 +27,6 @@ TsConf: https://github.com/tslabs/zx-evo/blob/master/pentevo/docs/TSconf/tsconf_
 FAQ-RUS: https://forum.tslabs.info/viewtopic.php?f=35&t=157
     ROM: https://github.com/tslabs/zx-evo/blob/master/pentevo/rom/bin/ts-bios.rom (validated on: 2021-12-14)
 
-HowTo:
-# Create SD image "wc.img"
-# Copy WC files from archive https://github.com/tslabs/zx-evo/blob/master/pentevo/soft/WC/wc.zip
-# Tech Demos (currently *.spg only): http://prods.tslabs.info/index.php?t=4
-$ chdman createhd -i wc.img -o wc.chd -c none
-$ mame tsconf -hard wc.chd
-# BIOS Setup loads on fresh setup (return to BIOS: RShift+F3)
-# Change "Reset To: BD boot.$c"
-# Reset (F3)
-# Enable keyboard: MAME Setup (Tab) > Keyboard Mode > AT Keyboard: Enabled
-
 TODO:
 - Ram cache
 - VDos
@@ -56,7 +45,7 @@ TODO:
 
 TILE_GET_INFO_MEMBER(tsconf_state::get_tile_info_txt)
 {
-	u8 *m_row_location = &m_ram->pointer()[(m_regs[V_PAGE] << 14) + (tile_index / tilemap.cols() * 256)];
+	u8 *m_row_location = &m_ram->pointer()[get_vpage_offset() + (tile_index / tilemap.cols() * 256)];
 	u8 col = tile_index % tilemap.cols();
 	u8 symbol = m_row_location[col];
 	tileinfo.set(TM_TS_CHAR, symbol, 0, 0);
@@ -102,9 +91,9 @@ void tsconf_state::tsconf_io(address_map &map)
 	map(0x00fe, 0x00fe).select(0xff00).rw(FUNC(tsconf_state::spectrum_ula_r), FUNC(tsconf_state::tsconf_ula_w));
 	map(0x00ff, 0x00ff).mirror(0xff00).rw(m_beta, FUNC(beta_disk_device::state_r), FUNC(beta_disk_device::param_w));
 	map(0x00af, 0x00af).select(0xff00).rw(FUNC(tsconf_state::tsconf_port_xxaf_r), FUNC(tsconf_state::tsconf_port_xxaf_w));
-	map(0xfadf, 0xfadf).lr8(NAME([this]() { return 0x80 | (m_io_mouse[2]->read() & 0x07); }));
-	map(0xfbdf, 0xfbdf).lr8(NAME([this]() { return  m_io_mouse[0]->read(); }));
-	map(0xffdf, 0xffdf).lr8(NAME([this]() { return ~m_io_mouse[1]->read(); }));
+	map(0xfadf, 0xfadf).lr8(NAME([this]() -> u8 { return 0x80 | (m_io_mouse[2]->read() & 0x07); }));
+	map(0xfbdf, 0xfbdf).lr8(NAME([this]() -> u8 { return  m_io_mouse[0]->read(); }));
+	map(0xffdf, 0xffdf).lr8(NAME([this]() -> u8 { return ~m_io_mouse[1]->read(); }));
 	map(0x8ff7, 0x8ff7).select(0x7000).w(FUNC(tsconf_state::tsconf_port_f7_w)); // 3:bff7 5:dff7 6:eff7
 	map(0xbff7, 0xbff7).r(FUNC(tsconf_state::tsconf_port_f7_r));
 	map(0x00fb, 0x00fb).mirror(0xff00).w("cent_data_out", FUNC(output_latch_device::write));
@@ -240,6 +229,7 @@ void tsconf_state::machine_reset()
 	m_zctl_di = 0xff;
 	m_ay_selected = 0;
 
+	m_sprites_cache.clear();
 	tsconf_update_bank0();
 	tsconf_update_video_mode();
 
@@ -324,6 +314,9 @@ void tsconf_state::tsconf(machine_config &config)
 
 	PALETTE(config, "palette", FUNC(tsconf_state::tsconf_palette), 256);
 	m_screen->set_raw(14_MHz_XTAL / 2, 448, with_hblank(0), 448, 320, with_vblank(0), 320);
+	m_screen->set_screen_update(FUNC(tsconf_state::screen_update));
+	m_screen->set_no_palette();
+
 	subdevice<gfxdecode_device>("gfxdecode")->set_info(gfx_tsconf);
 	RAM(config, m_cram).set_default_size("512").set_default_value(0);
 	RAM(config, m_sfile).set_default_size("512").set_default_value(0); // 85*6

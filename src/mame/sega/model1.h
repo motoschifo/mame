@@ -35,7 +35,7 @@ public:
 		, m_m1audio(*this, M1AUDIO_TAG)
 		, m_m1uart(*this, "m1uart")
 		, m_m1comm(*this, "m1comm")
-		, m_dsbz80(*this, DSBZ80_TAG)
+		, m_dsbz80(*this, "dsbz80")
 		, m_tgp_copro(*this, "tgp_copro")
 		, m_screen(*this, "screen")
 		, m_copro_fifo_in(*this, "copro_fifo_in")
@@ -148,7 +148,7 @@ private:
 	void model1_listctl_w(offs_t offset, u16 data, u16 mem_mask = ~0);
 
 	uint32_t screen_update_model1(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
-	DECLARE_WRITE_LINE_MEMBER(screen_vblank_model1);
+	void screen_vblank_model1(int state);
 
 	struct lightparam_t
 	{

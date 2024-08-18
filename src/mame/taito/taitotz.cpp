@@ -173,7 +173,7 @@ Notes:
 
 #include "emu.h"
 #include "bus/ata/ataintf.h"
-#include "bus/ata/idehd.h"
+#include "bus/ata/hdd.h"
 #include "cpu/powerpc/ppc.h"
 #include "cpu/tlcs900/tmp95c063.h"
 #include "machine/nvram.h"
@@ -628,7 +628,7 @@ private:
 	INTERRUPT_GEN_MEMBER(taitotz_vbi);
 	uint16_t tlcs_ide0_r(offs_t offset, uint16_t mem_mask = ~0);
 	uint16_t tlcs_ide1_r(offs_t offset, uint16_t mem_mask = ~0);
-	DECLARE_WRITE_LINE_MEMBER(ide_interrupt);
+	void ide_interrupt(int state);
 	void draw_tile(uint32_t pos, uint32_t tile);
 	uint32_t video_mem_r(uint32_t address);
 	void video_mem_w(uint32_t address, uint32_t data);
@@ -2625,7 +2625,7 @@ INTERRUPT_GEN_MEMBER(taitotz_state::taitotz_vbi)
 	m_iocpu->set_input_line(TLCS900_INT3, ASSERT_LINE);
 }
 
-WRITE_LINE_MEMBER(taitotz_state::ide_interrupt)
+void taitotz_state::ide_interrupt(int state)
 {
 	m_iocpu->set_input_line(TLCS900_INT2, state);
 }
@@ -2918,6 +2918,8 @@ ROM_START( batlgr2 )
 	ROM_REGION( 0x10000, "sound_cpu", 0 ) /* Internal ROM :( */
 	ROM_LOAD( "e68-01.ic7", 0x000000, 0x010000, NO_DUMP )
 
+	// BATTLE GEAR 2 M9005023A VER.2.04J
+	// FUJITSU MPE3064AT
 	DISK_REGION( "ata:0:hdd" )
 	DISK_IMAGE( "bg2_204j", 0, SHA1(7ac100fba39ae0b93980c0af2f0212a731106912) )
 ROM_END
@@ -3051,7 +3053,7 @@ ROM_START( dendego3 )
 	DISK_IMAGE( "ddg3", 0, SHA1(468d699e02ef0a0242de4e7038613cc5d0545591) )
 ROM_END
 
-} // Anonymous namespace
+} // anonymous namespace
 
 
 GAME( 1999, taitotz,   0,        taitotz,  taitotz,  taitotz_state, empty_init,    ROT0, "Taito", "Type Zero BIOS", MACHINE_NO_SOUND|MACHINE_NOT_WORKING|MACHINE_IS_BIOS_ROOT )

@@ -216,18 +216,10 @@ void ps2_fdc_device::set_mode(mode_t _mode)
 	mode = _mode;
 }
 
-void upd765_family_device::device_resolve_objects()
-{
-	intrq_cb.resolve_safe();
-	drq_cb.resolve_safe();
-	hdl_cb.resolve_safe();
-	idx_cb.resolve_safe();
-	us_cb.resolve_safe();
-}
-
 void upd765_family_device::device_start()
 {
 	save_item(NAME(selected_drive));
+	save_item(NAME(drive_busy));
 
 	for(int i=0; i != 4; i++) {
 		char name[2];
@@ -357,7 +349,7 @@ bool upd765_family_device::get_ready(int fid)
 	return !external_ready;
 }
 
-WRITE_LINE_MEMBER(upd765_family_device::reset_w)
+void upd765_family_device::reset_w(int state)
 {
 	// This implementation is not valid for devices with DOR and possibly other extra registers.
 	// The working assumption is that no need to manipulate the RESET line directly when software can use DOR instead.
@@ -492,7 +484,7 @@ void upd765_family_device::tdr_w(uint8_t data)
 
 uint8_t upd765_family_device::msr_r()
 {
-	uint32_t msr = 0;
+	uint8_t msr = 0;
 	switch(main_phase) {
 	case PHASE_CMD:
 		msr |= MSR_RQM;
@@ -514,11 +506,12 @@ uint8_t upd765_family_device::msr_r()
 		msr |= MSR_RQM|MSR_DIO|MSR_CB;
 		break;
 	}
-	for(int i=0; i<4; i++)
+	for(int i=0; i<4; i++) {
 		if(flopi[i].main_state == RECALIBRATE || flopi[i].main_state == SEEK) {
 			msr |= 1<<i;
 			//msr |= MSR_CB;
 		}
+	}
 	msr |= get_drive_busy();
 
 	return msr;
@@ -549,7 +542,7 @@ uint8_t upd765_family_device::fifo_r()
 	switch(main_phase) {
 	case PHASE_CMD:
 		if(machine().side_effects_disabled())
-			return 0x00;
+			return 0xff;
 		if(command_pos)
 			fifo_w(0xff);
 		LOGFIFO("fifo_r in command phase\n");
@@ -1594,8 +1587,10 @@ void upd765_family_device::command_end(floppy_info &fi, bool data_completion)
 	LOGDONE("command done (%s) - %s\n", data_completion ? "data" : "seek", results());
 	fi.main_state = fi.sub_state = IDLE;
 	irq = true;
-	if(!data_completion)
+	if(!data_completion) {
 		fi.st0_filled = true;
+		drive_busy |= (1 << fi.id);
+	}
 	check_irq();
 }
 
@@ -2820,7 +2815,6 @@ void i82072_device::device_start()
 	save_item(NAME(motorcfg));
 	save_item(NAME(motor_off_counter));
 	save_item(NAME(motor_on_counter));
-	save_item(NAME(drive_busy));
 	save_item(NAME(delayed_command));
 }
 
@@ -2984,31 +2978,16 @@ void i82072_device::execute_command(int cmd)
 	}
 }
 
-/*
- * The Intel datasheet says that the drive busy bits in the MSR are supposed to remain
- * set after a seek or recalibrate until a sense interrupt status status command is
- * executed. The InterPro 2000 diagnostic routine goes further, and tests the drive
- * status bits before and after the first sense interrupt status result byte is read,
- * and expects the drive busy bit to clear only after.
- *
- * The Amstrad CPC6128 uses a upd765a and seems to expect the busy bits to be cleared
- * immediately after the seek/recalibrate interrupt is generated.
- *
- * Special casing the i82072 here seems the only way to reconcile this apparently
- * different behaviour for now.
- */
 void i82072_device::command_end(floppy_info &fi, bool data_completion)
 {
-	if(!data_completion)
-		drive_busy |= (1 << fi.id);
-
 	// set motor off counter
 	if(motorcfg)
 		motor_off_counter = (2 + ((motorcfg & MOFF) >> 4)) << (motorcfg & HSDA ? 1 : 0);
 
 	// clear existing interrupt sense data
-	for(floppy_info &fi : flopi)
+	for(floppy_info &fi : flopi) {
 		fi.st0_filled = false;
+	}
 
 	upd765_family_device::command_end(fi, data_completion);
 }
@@ -3200,19 +3179,13 @@ uint8_t wd37c65c_device::get_st3(floppy_info &fi)
 
 mcs3201_device::mcs3201_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
 	upd765_family_device(mconfig, MCS3201, tag, owner, clock),
-	m_input_handler(*this)
+	m_input_handler(*this, 0)
 {
 	has_dor = true;
 	ready_polled = false;
 	ready_connected = false;
 	select_connected = true;
 	select_multiplexed = false;
-}
-
-void mcs3201_device::device_start()
-{
-	upd765_family_device::device_start();
-	m_input_handler.resolve_safe(0);
 }
 
 uint8_t mcs3201_device::input_r()
@@ -3315,15 +3288,9 @@ void upd72069_device::auxcmd_w(uint8_t data)
 
 hd63266f_device::hd63266f_device(const machine_config& mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: upd765_family_device(mconfig, HD63266F, tag, owner, clock)
-	, inp_cb(*this)
+	, inp_cb(*this, 0)
 {
 	has_dor = false;
-}
-
-void hd63266f_device::device_start()
-{
-	upd765_family_device::device_start();
-	inp_cb.resolve();
 }
 
 void hd63266f_device::map(address_map &map)
@@ -3385,7 +3352,7 @@ void hd63266f_device::execute_command(int cmd)
 		break;
 	case C_SENSE_DRIVE_STATUS:
 		upd765_family_device::execute_command(cmd);
-		if(inp_cb)
+		if(!inp_cb.isunset())
 			result[0] = (result[0] & ~ST3_TS) | (inp_cb() ? 0 : 8);
 		break;
 	default:
@@ -3452,7 +3419,6 @@ void hd63266f_device::motor_control(int fid, bool start_motor)
 		if(selected_drive != fid)
 			return;
 
-		logerror("motor_on_counter %d\n", motor_on_counter);
 		// decrement motor on counter
 		if(motor_on_counter)
 			motor_on_counter--;

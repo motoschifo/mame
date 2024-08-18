@@ -35,16 +35,23 @@ void i82371sb_isa_device::config_map(address_map &map)
 void i82371sb_isa_device::internal_io_map(address_map &map)
 {
 	map(0x0000, 0x001f).rw("dma8237_1", FUNC(am9517a_device::read), FUNC(am9517a_device::write));
-	map(0x0020, 0x003f).rw("pic8259_master", FUNC(pic8259_device::read), FUNC(pic8259_device::write));
+	map(0x0020, 0x0021).rw("pic8259_master", FUNC(pic8259_device::read), FUNC(pic8259_device::write));
+//  map(0x002e, 0x002f) Super I/O config
 	map(0x0040, 0x005f).rw("pit8254", FUNC(pit8254_device::read), FUNC(pit8254_device::write));
 	map(0x0061, 0x0061).rw(FUNC(i82371sb_isa_device::at_portb_r), FUNC(i82371sb_isa_device::at_portb_w));
+//  map(0x0070, 0x0070) RTC address, bit 7 NMI enable
+//  map(0x0071, 0x0071) RTC data
+//  map(0x0078, 0x0079) Board Configuration
 	map(0x0080, 0x009f).rw(FUNC(i82371sb_isa_device::at_page8_r), FUNC(i82371sb_isa_device::at_page8_w));
-	map(0x00a0, 0x00bf).rw("pic8259_slave", FUNC(pic8259_device::read), FUNC(pic8259_device::write));
+	map(0x00a0, 0x00a1).rw("pic8259_slave", FUNC(pic8259_device::read), FUNC(pic8259_device::write));
 	map(0x00b2, 0x00b3).rw(FUNC(i82371sb_isa_device::read_apmcapms), FUNC(i82371sb_isa_device::write_apmcapms));
+	// Up to $de according to TC430HX spec?
 	map(0x00c0, 0x00df).rw(FUNC(i82371sb_isa_device::at_dma8237_2_r), FUNC(i82371sb_isa_device::at_dma8237_2_w));
+	map(0x00e0, 0x00ef).noprw();
+//  map(0x00f0, 0x00f0) Reset Numeric Error
+//  map(0x0270, 0x0273) I/O read port for PnP
 	map(0x04d0, 0x04d1).rw(FUNC(i82371sb_isa_device::eisa_irq_read), FUNC(i82371sb_isa_device::eisa_irq_write));
 	map(0x0cf9, 0x0cf9).rw(FUNC(i82371sb_isa_device::reset_control_r), FUNC(i82371sb_isa_device::reset_control_w));
-	map(0x00e0, 0x00ef).noprw();
 }
 
 //-------------------------------------------------
@@ -145,17 +152,37 @@ void i82371sb_isa_device::device_config_complete()
 }
 
 i82371sb_isa_device::i82371sb_isa_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
-	: pci_device(mconfig, type, tag, owner, clock), m_smi_callback(*this), m_nmi_callback(*this), m_stpclk_callback(*this), m_boot_state_hook(*this), m_maincpu(*this, finder_base::DUMMY_TAG), m_pic8259_master(*this, "pic8259_master"), m_pic8259_slave(*this, "pic8259_slave"), m_dma8237_1(*this, "dma8237_1"), m_dma8237_2(*this, "dma8237_2"), m_pit8254(*this, "pit8254"), m_isabus(*this, "isabus"), m_speaker(*this, "speaker"), m_at_spkrdata(0), m_pit_out2(0), m_dma_channel(0), m_cur_eop(false), m_dma_high_byte(0), m_eisa_irq_mode(0), m_at_speaker(0), m_refresh(false), m_channel_check(0), m_nmi_enabled(0)
+	: pci_device(mconfig, type, tag, owner, clock)
+	, m_smi_callback(*this)
+	, m_nmi_callback(*this)
+	, m_stpclk_callback(*this)
+	, m_boot_state_hook(*this)
+	, m_maincpu(*this, finder_base::DUMMY_TAG)
+	, m_pic8259_master(*this, "pic8259_master")
+	, m_pic8259_slave(*this, "pic8259_slave")
+	, m_dma8237_1(*this, "dma8237_1")
+	, m_dma8237_2(*this, "dma8237_2")
+	, m_pit8254(*this, "pit8254")
+	, m_isabus(*this, "isabus")
+	, m_speaker(*this, "speaker")
+	, m_at_spkrdata(0)
+	, m_pit_out2(0)
+	, m_dma_channel(0)
+	, m_cur_eop(false)
+	, m_dma_high_byte(0)
+	, m_eisa_irq_mode(0)
+	, m_at_speaker(0)
+	, m_refresh(false)
+	, m_channel_check(0)
+	, m_nmi_enabled(0)
 {
 }
 
 void i82371sb_isa_device::device_start()
 {
 	pci_device::device_start();
-	m_smi_callback.resolve();
-	m_nmi_callback.resolve_safe();
-	m_stpclk_callback.resolve_safe();
-	m_boot_state_hook.resolve();
+	m_pci_root->set_pin_mapper(pci_pin_mapper(*this, FUNC(i82371sb_isa_device::pin_mapper)));
+	m_pci_root->set_irq_handler(pci_irq_handler(*this, FUNC(i82371sb_isa_device::irq_handler)));
 }
 
 void i82371sb_isa_device::device_reset()
@@ -420,8 +447,15 @@ void i82371sb_isa_device::map_bios(address_space *memory_space, uint32_t start, 
 	memory_space->install_rom(start, end, m_region->base() + (start & mask));
 }
 
-void i82371sb_isa_device::map_extra(uint64_t memory_window_start, uint64_t memory_window_end, uint64_t memory_offset, address_space *memory_space,
-									uint64_t io_window_start, uint64_t io_window_end, uint64_t io_offset, address_space *io_space)
+void i82371sb_isa_device::map_extra(
+		uint64_t memory_window_start,
+		uint64_t memory_window_end,
+		uint64_t memory_offset,
+		address_space *memory_space,
+		uint64_t io_window_start,
+		uint64_t io_window_end,
+		uint64_t io_offset,
+		address_space *io_space)
 {
 	// assume that map_extra of the southbridge is called before the one of the northbridge
 	m_isabus->remap(AS_PROGRAM, 0, 1 << 24);
@@ -531,19 +565,19 @@ void i82371sb_isa_device::at_speaker_set_spkrdata(uint8_t data)
 	m_speaker->level_w(m_at_spkrdata & m_pit_out2);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::at_pit8254_out0_changed)
+void i82371sb_isa_device::at_pit8254_out0_changed(int state)
 {
 	if (m_pic8259_master)
 		m_pic8259_master->ir0_w(state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::at_pit8254_out1_changed)
+void i82371sb_isa_device::at_pit8254_out1_changed(int state)
 {
 	if (state)
 		m_refresh = !m_refresh;
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::at_pit8254_out2_changed)
+void i82371sb_isa_device::at_pit8254_out2_changed(int state)
 {
 	m_pit_out2 = state ? 1 : 0;
 	m_speaker->level_w(m_at_spkrdata & m_pit_out2);
@@ -595,7 +629,7 @@ void i82371sb_isa_device::at_page8_w(offs_t offset, uint8_t data)
 	}
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dma_hrq_changed)
+void i82371sb_isa_device::pc_dma_hrq_changed(int state)
 {
 	m_maincpu->set_input_line(INPUT_LINE_HALT, state ? ASSERT_LINE : CLEAR_LINE);
 
@@ -665,7 +699,7 @@ void i82371sb_isa_device::pc_dma8237_5_dack_w(uint8_t data) { m_isabus->dack_w(5
 void i82371sb_isa_device::pc_dma8237_6_dack_w(uint8_t data) { m_isabus->dack_w(6, data); }
 void i82371sb_isa_device::pc_dma8237_7_dack_w(uint8_t data) { m_isabus->dack_w(7, data); }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::at_dma8237_out_eop)
+void i82371sb_isa_device::at_dma8237_out_eop(int state)
 {
 	m_cur_eop = state == ASSERT_LINE;
 	if (m_dma_channel != -1)
@@ -690,14 +724,14 @@ void i82371sb_isa_device::pc_select_dma_channel(int channel, bool state)
 	}
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack0_w) { pc_select_dma_channel(0, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack1_w) { pc_select_dma_channel(1, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack2_w) { pc_select_dma_channel(2, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack3_w) { pc_select_dma_channel(3, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack4_w) { m_dma8237_1->hack_w(state ? 0 : 1); } // it's inverted
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack5_w) { pc_select_dma_channel(5, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack6_w) { pc_select_dma_channel(6, state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_dack7_w) { pc_select_dma_channel(7, state); }
+void i82371sb_isa_device::pc_dack0_w(int state) { pc_select_dma_channel(0, state); }
+void i82371sb_isa_device::pc_dack1_w(int state) { pc_select_dma_channel(1, state); }
+void i82371sb_isa_device::pc_dack2_w(int state) { pc_select_dma_channel(2, state); }
+void i82371sb_isa_device::pc_dack3_w(int state) { pc_select_dma_channel(3, state); }
+void i82371sb_isa_device::pc_dack4_w(int state) { m_dma8237_1->hack_w( state ? 0 : 1); } // it's inverted
+void i82371sb_isa_device::pc_dack5_w(int state) { pc_select_dma_channel(5, state); }
+void i82371sb_isa_device::pc_dack6_w(int state) { pc_select_dma_channel(6, state); }
+void i82371sb_isa_device::pc_dack7_w(int state) { pc_select_dma_channel(7, state); }
 
 void i82371sb_isa_device::redirect_irq(int irq, int state)
 {
@@ -745,7 +779,7 @@ void i82371sb_isa_device::redirect_irq(int irq, int state)
 	}
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqa_w)
+void i82371sb_isa_device::pc_pirqa_w(int state)
 {
 	int irq = pirqrc[0] & 15;
 
@@ -754,7 +788,7 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqa_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqb_w)
+void i82371sb_isa_device::pc_pirqb_w(int state)
 {
 	int irq = pirqrc[1] & 15;
 
@@ -763,7 +797,7 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqb_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqc_w)
+void i82371sb_isa_device::pc_pirqc_w(int state)
 {
 	int irq = pirqrc[2] & 15;
 
@@ -772,7 +806,7 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqc_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqd_w)
+void i82371sb_isa_device::pc_pirqd_w(int state)
 {
 	int irq = pirqrc[3] & 15;
 
@@ -781,7 +815,7 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_pirqd_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_mirq0_w)
+void i82371sb_isa_device::pc_mirq0_w(int state)
 {
 	int irq = mbirq0 & 15;
 
@@ -790,7 +824,8 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_mirq0_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_mirq1_w)
+// FIXME: this is PIIX specific, doesn't exist on PIIX3
+void i82371sb_isa_device::pc_mirq1_w(int state)
 {
 	int irq = mbirq1 & 15;
 
@@ -799,30 +834,30 @@ WRITE_LINE_MEMBER(i82371sb_isa_device::pc_mirq1_w)
 	redirect_irq(irq, state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_ferr_w)
+void i82371sb_isa_device::pc_ferr_w(int state)
 {
 	if (!(xbcs & 32))
 		return;
 	m_pic8259_slave->ir5_w(state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_extsmi_w)
+void i82371sb_isa_device::pc_extsmi_w(int state)
 {
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq1_w) { m_pic8259_master->ir1_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq3_w) { m_pic8259_master->ir3_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq4_w) { m_pic8259_master->ir4_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq5_w) { m_pic8259_master->ir5_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq6_w) { m_pic8259_master->ir6_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq7_w) { m_pic8259_master->ir7_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq8n_w) { m_pic8259_slave->ir0_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq9_w) { m_pic8259_slave->ir1_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq10_w) { m_pic8259_slave->ir2_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq11_w) { m_pic8259_slave->ir3_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq12m_w) { m_pic8259_slave->ir4_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq14_w) { m_pic8259_slave->ir6_w(state); }
-WRITE_LINE_MEMBER(i82371sb_isa_device::pc_irq15_w) { m_pic8259_slave->ir7_w(state); }
+void i82371sb_isa_device::pc_irq1_w(int state)   { m_pic8259_master->ir1_w(state); }
+void i82371sb_isa_device::pc_irq3_w(int state)   { m_pic8259_master->ir3_w(state); }
+void i82371sb_isa_device::pc_irq4_w(int state)   { m_pic8259_master->ir4_w(state); }
+void i82371sb_isa_device::pc_irq5_w(int state)   { m_pic8259_master->ir5_w(state); }
+void i82371sb_isa_device::pc_irq6_w(int state)   { m_pic8259_master->ir6_w(state); }
+void i82371sb_isa_device::pc_irq7_w(int state)   { m_pic8259_master->ir7_w(state); }
+void i82371sb_isa_device::pc_irq8n_w(int state)  { m_pic8259_slave->ir0_w(state); }
+void i82371sb_isa_device::pc_irq9_w(int state)   { m_pic8259_slave->ir1_w(state); }
+void i82371sb_isa_device::pc_irq10_w(int state)  { m_pic8259_slave->ir2_w(state); }
+void i82371sb_isa_device::pc_irq11_w(int state)  { m_pic8259_slave->ir3_w(state); }
+void i82371sb_isa_device::pc_irq12m_w(int state) { m_pic8259_slave->ir4_w(state); }
+void i82371sb_isa_device::pc_irq14_w(int state)  { m_pic8259_slave->ir6_w(state); }
+void i82371sb_isa_device::pc_irq15_w(int state)  { m_pic8259_slave->ir7_w(state); }
 
 uint8_t i82371sb_isa_device::at_portb_r()
 {
@@ -849,7 +884,7 @@ void i82371sb_isa_device::at_portb_w(uint8_t data)
 		m_maincpu->set_input_line(INPUT_LINE_NMI, CLEAR_LINE);
 }
 
-WRITE_LINE_MEMBER(i82371sb_isa_device::iochck_w)
+void i82371sb_isa_device::iochck_w(int state)
 {
 	if (!state && !m_channel_check && m_nmi_enabled)
 		m_maincpu->set_input_line(INPUT_LINE_NMI, ASSERT_LINE);
@@ -928,6 +963,23 @@ void i82371sb_isa_device::update_smireq_line()
 		m_smi_callback(0);
 }
 
+int i82371sb_isa_device::pin_mapper(int pin)
+{
+	if(pin < 0 || pin >= 4 || (pirqrc[pin] & 0x80))
+		return -1;
+	return pirqrc[pin];
+}
+
+void i82371sb_isa_device::irq_handler(int line, int state)
+{
+	if(line < 0 && line >= 16)
+		return;
+
+	logerror("irq_handler %d %d\n", line, state);
+	redirect_irq(line, state);
+}
+
+
 DEFINE_DEVICE_TYPE(I82371SB_IDE, i82371sb_ide_device, "i82371sb_ide", "Intel 82371 southbridge IDE interface")
 
 void i82371sb_ide_device::config_map(address_map &map)
@@ -997,8 +1049,6 @@ void i82371sb_ide_device::device_start()
 	status = 0x0280;
 	command = 2;
 	command_mask = 5;
-	m_irq_pri_callback.resolve();
-	m_irq_sec_callback.resolve();
 }
 
 void i82371sb_ide_device::device_reset()
@@ -1009,8 +1059,15 @@ void i82371sb_ide_device::reset_all_mappings()
 {
 }
 
-void i82371sb_ide_device::map_extra(uint64_t memory_window_start, uint64_t memory_window_end, uint64_t memory_offset, address_space *memory_space,
-									uint64_t io_window_start, uint64_t io_window_end, uint64_t io_offset, address_space *io_space)
+void i82371sb_ide_device::map_extra(
+		uint64_t memory_window_start,
+		uint64_t memory_window_end,
+		uint64_t memory_offset,
+		address_space *memory_space,
+		uint64_t io_window_start,
+		uint64_t io_window_end,
+		uint64_t io_offset,
+		address_space *io_space)
 {
 	io_space->install_device(0, 0x3ff, *this, &i82371sb_ide_device::internal_io_map);
 	if (command & 1)
@@ -1022,12 +1079,12 @@ void i82371sb_ide_device::map_extra(uint64_t memory_window_start, uint64_t memor
 	}
 }
 
-WRITE_LINE_MEMBER(i82371sb_ide_device::primary_int)
+void i82371sb_ide_device::primary_int(int state)
 {
 	m_irq_pri_callback(state);
 }
 
-WRITE_LINE_MEMBER(i82371sb_ide_device::secondary_int)
+void i82371sb_ide_device::secondary_int(int state)
 {
 	m_irq_sec_callback(state);
 }

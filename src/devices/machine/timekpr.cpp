@@ -15,7 +15,8 @@
 ***************************************************************************/
 
 #include "emu.h"
-#include "machine/timekpr.h"
+#include "timekpr.h"
+
 #include "machine/timehelp.h"
 
 #define LOG_TICKS   (1U << 1)
@@ -231,8 +232,6 @@ void timekeeper_device::device_start()
 
 	m_watchdog_timer = timer_alloc(FUNC(timekeeper_device::watchdog_callback), this);
 	m_watchdog_timer->adjust(attotime::never);
-	m_reset_cb.resolve_safe();
-	m_irq_cb.resolve_safe();
 }
 
 //-------------------------------------------------
@@ -472,8 +471,8 @@ void timekeeper_device::nvram_default()
 
 bool timekeeper_device::nvram_read(util::read_stream &file)
 {
-	size_t actual;
-	if (file.read(&m_data[0], m_size, actual) || actual != m_size)
+	auto const [err, actual] = util::read(file, &m_data[0], m_size);
+	if (err || (actual != m_size))
 		return false;
 
 	counters_to_ram();
@@ -488,6 +487,6 @@ bool timekeeper_device::nvram_read(util::read_stream &file)
 
 bool timekeeper_device::nvram_write(util::write_stream &file)
 {
-	size_t actual;
-	return !file.write(&m_data[0], m_size, actual) && actual == m_size;
+	auto const [err, actual] = util::write(file, &m_data[0], m_size);
+	return !err;
 }

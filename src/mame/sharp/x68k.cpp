@@ -299,7 +299,11 @@ void x68k_state::set_adpcm()
 {
 	uint32_t rate = adpcm_div[m_adpcm.rate];
 	uint32_t res_clock = adpcm_clock[m_adpcm.clock]/2;
-	m_adpcm_timer->adjust(attotime::from_ticks(rate, res_clock), 0, attotime::from_ticks(rate, res_clock));
+	attotime newperiod = attotime::from_ticks(rate, res_clock);
+	attotime newremain = newperiod;
+	if((m_adpcm_timer->period() != attotime::never) && (m_adpcm_timer->period() != attotime::zero))
+		newremain = newperiod * (m_adpcm_timer->remaining().as_double() / m_adpcm_timer->period().as_double());
+	m_adpcm_timer->adjust(newremain, 0, newperiod);
 }
 
 // PPI ports A and B are joystick inputs
@@ -337,17 +341,20 @@ uint8_t x68k_state::ppi_port_c_r()
 void x68k_state::ppi_port_c_w(uint8_t data)
 {
 	// ADPCM / Joystick control
-	if((data & 0x0f) != (m_ppi_portc & 0x0f))
+	if((data & 0x03) != (m_ppi_portc & 0x03))
 	{
 		m_adpcm.pan = data & 0x03;
+		m_adpcm_out[0]->set_gain((m_adpcm.pan & 1) ? 0.0f : 1.0f);
+		m_adpcm_out[1]->set_gain((m_adpcm.pan & 2) ? 0.0f : 1.0f);
+	}
+	if((data & 0x0c) != (m_ppi_portc & 0x0c))
+	{
 		m_adpcm.rate = (data & 0x0c) >> 2;
 		if (m_adpcm.rate == 3)
 			LOGMASKED(LOG_SYS, "PPI: Invalid ADPCM sample rate set.\n");
 
 		set_adpcm();
 		m_okim6258->set_divider(m_adpcm.rate);
-		m_adpcm_out[0]->flt_volume_set_volume((m_adpcm.pan & 1) ? 0.0f : 1.0f);
-		m_adpcm_out[1]->flt_volume_set_volume((m_adpcm.pan & 2) ? 0.0f : 1.0f);
 	}
 
 	// Set joystick outputs
@@ -375,9 +382,9 @@ void x68k_state::fdc_w(offs_t offset, uint16_t data)
 		x = data & 0x0f;
 		for(drive=0;drive<4;drive++)
 		{
-			if(m_fdc.control_drives & (1 << drive))
+			if(BIT(m_fdc.control_drives, drive) && m_fdc.floppy[drive])
 			{
-				if(!(x & (1 << drive)))  // functions take place on 1->0 transitions of drive bits only
+				if(!BIT(x, drive))  // functions take place on 1->0 transitions of drive bits only
 				{
 					m_fdc.led_ctrl[drive] = data & 0x80;  // blinking drive LED if no disk inserted
 					m_fdc.led_eject[drive] = data & 0x40;  // eject button LED (on when set to 0)
@@ -397,7 +404,7 @@ void x68k_state::fdc_w(offs_t offset, uint16_t data)
 		m_fdc.motor = data & 0x80;
 
 		for(int i = 0; i < 4; i++)
-			if(m_fdc.floppy[i]->exists())
+			if(m_fdc.floppy[i] && m_fdc.floppy[i]->exists())
 				m_fdc.floppy[i]->mon_w(!BIT(data, 7));
 
 		m_access_drv_out[x] = 0;
@@ -421,10 +428,10 @@ uint16_t x68k_state::fdc_r(offs_t offset)
 		ret = 0x00;
 		for(x=0;x<4;x++)
 		{
-			if(m_fdc.control_drives & (1 << x))
+			if(BIT(m_fdc.control_drives, x))
 			{
 				ret = 0x00;
-				if(m_fdc.floppy[x]->exists())
+				if(m_fdc.floppy[x] && m_fdc.floppy[x]->exists())
 				{
 					ret |= 0x80;
 				}
@@ -441,7 +448,7 @@ uint16_t x68k_state::fdc_r(offs_t offset)
 	return 0xff;
 }
 
-WRITE_LINE_MEMBER( x68k_state::fdc_irq )
+void x68k_state::fdc_irq(int state)
 {
 	if((m_ioc.irqstatus & 0x04) && state)
 	{
@@ -778,7 +785,7 @@ void x68k_state::exp_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 		set_bus_error((offset << 1) + 0xeafa00, 1, mem_mask);
 }
 
-WRITE_LINE_MEMBER(x68k_state::dma_irq)
+void x68k_state::dma_irq(int state)
 {
 	m_dmac_int = state != CLEAR_LINE;
 	update_ipl();
@@ -792,7 +799,7 @@ void x68k_state::dma_end(offs_t offset, uint8_t data)
 	}
 }
 
-WRITE_LINE_MEMBER(x68k_state::fm_irq)
+void x68k_state::fm_irq(int state)
 {
 	if(state == CLEAR_LINE)
 	{
@@ -817,7 +824,7 @@ void x68k_state::adpcm_w(offs_t offset, uint8_t data)
 	}
 }
 
-WRITE_LINE_MEMBER(x68k_state::mfp_irq_callback)
+void x68k_state::mfp_irq_callback(int state)
 {
 	m_mfp_int = state;
 	update_ipl();
@@ -898,7 +905,7 @@ uint8_t x68k_state::iack1()
 }
 
 template <int N>
-WRITE_LINE_MEMBER(x68k_state::irq2_line)
+void x68k_state::irq2_line(int state)
 {
 	m_exp_irq2[N] = (state != CLEAR_LINE);
 	LOGMASKED(LOG_IRQ, "IRQ2-%d %s\n", N + 1, m_exp_irq2[N] ? "asserted" : "cleared");
@@ -906,7 +913,7 @@ WRITE_LINE_MEMBER(x68k_state::irq2_line)
 }
 
 template <int N>
-WRITE_LINE_MEMBER(x68k_state::irq4_line)
+void x68k_state::irq4_line(int state)
 {
 	m_exp_irq4[N] = (state != CLEAR_LINE);
 	LOGMASKED(LOG_IRQ, "IRQ4-%d %s\n", N + 1, m_exp_irq4[N] ? "asserted" : "cleared");
@@ -914,7 +921,7 @@ WRITE_LINE_MEMBER(x68k_state::irq4_line)
 }
 
 template <int N>
-WRITE_LINE_MEMBER(x68k_state::nmi_line)
+void x68k_state::nmi_line(int state)
 {
 	m_exp_nmi[N] = (state != CLEAR_LINE);
 	LOGMASKED(LOG_IRQ, "EXNMI %s on expansion %d\n", m_exp_nmi[N] ? "asserted" : "cleared", N + 1);
@@ -967,7 +974,7 @@ void x68k_state::cpu_space_map(address_map &map)
 	map(0xffffff, 0xffffff).lr8(NAME([] () { return m68000_base_device::autovector(7); }));
 }
 
-WRITE_LINE_MEMBER(x68ksupr_state::scsi_irq)
+void x68ksupr_state::scsi_irq(int state)
 {
 	LOGMASKED(LOG_IRQ, "SCSI IRQ %s\n", state ? "asserted" : "cleared");
 
@@ -1282,6 +1289,7 @@ void x68k_state::x68000_base(machine_config &config)
 
 	RP5C15(config, m_rtc, 32.768_kHz_XTAL);
 	m_rtc->alarm().set(m_mfpdev, FUNC(mc68901_device::i0_w));
+	m_rtc->set_year_offset(20);
 
 	/* video hardware */
 	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);

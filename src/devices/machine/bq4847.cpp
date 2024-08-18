@@ -405,7 +405,7 @@ void bq4847_device::set_wdo(int state)
 	}
 }
 
-WRITE_LINE_MEMBER(bq4847_device::write_wdi)
+void bq4847_device::write_wdi(int state)
 {
 	if (m_wdi_state != state)
 	{
@@ -454,10 +454,6 @@ void bq4847_device::device_start()
 	m_periodic_timer = timer_alloc(FUNC(bq4847_device::periodic_callback), this);
 	m_watchdog_timer = timer_alloc(FUNC(bq4847_device::watchdog_callback), this);
 
-	m_int_handler.resolve_safe();
-	m_wdo_handler.resolve_safe();
-	m_rst_handler.resolve_safe();
-
 	m_wdo_handler(m_wdo_state);
 	m_int_handler(m_int_state);
 	m_rst_handler(m_rst_state);
@@ -504,12 +500,12 @@ void bq4847_device::nvram_default()
 
 bool bq4847_device::nvram_read(util::read_stream& file)
 {
-	size_t actual;
-	return !file.read(m_register, std::size(m_register), actual) && actual == std::size(m_register);
+	auto const [err, actual] = util::read(file, m_register, std::size(m_register));
+	return !err && (actual == std::size(m_register));
 }
 
 bool bq4847_device::nvram_write(util::write_stream& file)
 {
-	size_t actual;
-	return !file.write(m_register, std::size(m_register), actual) && actual == std::size(m_register);
+	auto const [err, actual] = util::write(file, m_register, std::size(m_register));
+	return !err;
 }

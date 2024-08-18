@@ -51,7 +51,7 @@ public:
 		m_bufferram(*this, "bufferram"),
 		m_soundram(*this, "soundram"),
 		m_maincpu(*this,"maincpu"),
-		m_dsbz80(*this, DSBZ80_TAG),
+		m_dsbz80(*this, "dsbz80"),
 		m_m1audio(*this, M1AUDIO_TAG),
 		m_uart(*this, "uart"),
 		m_m2comm(*this, "m2comm"),
@@ -222,8 +222,8 @@ protected:
 	DECLARE_VIDEO_START(model2);
 	void reset_model2_scsp();
 	u32 screen_update_model2(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
-//  DECLARE_WRITE_LINE_MEMBER(screen_vblank_model2);
-//  DECLARE_WRITE_LINE_MEMBER(sound_ready_w);
+//  void screen_vblank_model2(int state);
+//  void sound_ready_w(int state);
 	template <int TNum> TIMER_DEVICE_CALLBACK_MEMBER(model2_timer_cb);
 	void scsp_irq(offs_t offset, u8 data);
 

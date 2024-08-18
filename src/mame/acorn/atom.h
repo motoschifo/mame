@@ -37,9 +37,6 @@
 #define BASERAM_TAG     "baseram"
 
 
-#define X1  XTAL(3'579'545)    // MC6847 Clock
-#define X2  XTAL(4'000'000)           // CPU Clock - a divider reduces it to 1MHz
-
 class atom_state : public driver_device
 {
 public:
@@ -49,6 +46,7 @@ public:
 		, m_vdg(*this, MC6847_TAG)
 		, m_cassette(*this, "cassette")
 		, m_fdc(*this, I8271_TAG)
+		, m_floppies(*this, I8271_TAG ":%u", 0U)
 		, m_centronics(*this, CENTRONICS_TAG)
 		, m_speaker(*this, "speaker")
 		, m_cart(*this, "cartslot")
@@ -68,6 +66,7 @@ protected:
 	required_device<mc6847_base_device> m_vdg;
 	required_device<cassette_image_device> m_cassette;
 	optional_device<i8271_device> m_fdc;
+	optional_device_array<floppy_connector, 2> m_floppies;
 	required_device<centronics_device> m_centronics;
 	required_device<speaker_sound_device> m_speaker;
 	optional_device<generic_slot_device> m_cart;
@@ -84,8 +83,8 @@ protected:
 	uint8_t ppi_pc_r();
 	void ppi_pc_w(uint8_t data);
 	uint8_t vdg_videoram_r(offs_t offset);
-	DECLARE_WRITE_LINE_MEMBER( atom_8271_interrupt_callback );
-	DECLARE_WRITE_LINE_MEMBER( motor_w );
+	void atom_8271_interrupt_callback(int state);
+	void motor_w(int state);
 
 	/* keyboard state */
 	u8 m_keylatch = 0U;
@@ -98,7 +97,7 @@ protected:
 	/* devices */
 	bool m_previous_i8271_int_state = false;
 	static void floppy_formats(format_registration &fr);
-	DECLARE_WRITE_LINE_MEMBER(cassette_output_tick);
+	void cassette_output_tick(int state);
 
 	std::pair<std::error_condition, std::string> load_cart(device_image_interface &image, generic_slot_device &slot);
 	DECLARE_DEVICE_IMAGE_LOAD_MEMBER(cart_load) { return load_cart(image, *m_cart); }

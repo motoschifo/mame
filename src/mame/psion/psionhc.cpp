@@ -11,6 +11,7 @@
 
 #include "emu.h"
 #include "cpu/nec/nec.h"
+#include "machine/nvram.h"
 #include "machine/psion_asic1.h"
 #include "machine/psion_asic2.h"
 #include "machine/psion_asic3.h"
@@ -38,6 +39,7 @@ public:
 		, m_asic2(*this, "asic2")
 		, m_asic3(*this, "asic3")
 		, m_ram(*this, "ram")
+		, m_nvram(*this, "nvram")
 		, m_palette(*this, "palette")
 		, m_keyboard(*this, "COL%u", 0U)
 		, m_speaker(*this, "speaker")
@@ -61,17 +63,21 @@ private:
 	required_device<psion_asic2_device> m_asic2;
 	required_device<psion_asic3_device> m_asic3;
 	required_device<ram_device> m_ram;
+	required_device<nvram_device> m_nvram;
 	required_device<palette_device> m_palette;
 	required_ioport_array<8> m_keyboard;
 	required_device<speaker_sound_device> m_speaker;
 	required_device_array<psion_ssd_device, 2> m_ssd;
-	required_device_array<psion_module_slot_device, 3> m_exp;
+	required_device_array<psion_module_slot_device, 2> m_exp;
 
 	void palette_init(palette_device &palette);
 
 	void mem_map(address_map &map);
 	void io_map(address_map &map);
 	void asic1_map(address_map &map);
+
+	uint8_t port_data_r();
+	void port_data_w(uint8_t data);
 
 	int m_dr = 0;
 };
@@ -80,6 +86,7 @@ private:
 void psionhc_state::machine_start()
 {
 	m_asic1->space(0).install_ram(0, m_ram->mask(), m_ram->pointer());
+	m_nvram->set_base(m_ram->pointer(), m_ram->size());
 }
 
 void psionhc_state::machine_reset()
@@ -102,6 +109,7 @@ void psionhc_state::io_map(address_map &map)
 
 void psionhc_state::asic1_map(address_map &map)
 {
+	map(0x00000, 0x7ffff).noprw();
 	map(0x80000, 0xfffff).rom().region("flash", 0);
 }
 
@@ -191,68 +199,68 @@ static INPUT_PORTS_START( psionhc_uk )
 INPUT_PORTS_END
 
 //static INPUT_PORTS_START( psionhc_num )
-//	PORT_START("COL0")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_N)          PORT_CHAR('n')  PORT_CHAR('N')      PORT_NAME("No")
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_UNUSED)
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_UP)         PORT_CHAR(UCHAR_MAMEKEY(UP))        PORT_NAME(UTF8_UP)
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_DOWN)       PORT_CHAR(UCHAR_MAMEKEY(DOWN))      PORT_NAME(UTF8_DOWN)
-//	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_BACKSPACE)  PORT_CHAR(0x08)                     PORT_NAME("Del")
-//	PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_ESC)        PORT_CHAR(UCHAR_MAMEKEY(ESC))       PORT_NAME("C")
-//	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_EQUALS)     PORT_CHAR('+')
-//	PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Off")
+//  PORT_START("COL0")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_N)          PORT_CHAR('n')  PORT_CHAR('N')      PORT_NAME("No")
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_UP)         PORT_CHAR(UCHAR_MAMEKEY(UP))        PORT_NAME(UTF8_UP)
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_DOWN)       PORT_CHAR(UCHAR_MAMEKEY(DOWN))      PORT_NAME(UTF8_DOWN)
+//  PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_BACKSPACE)  PORT_CHAR(0x08)                     PORT_NAME("Del")
+//  PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_ESC)        PORT_CHAR(UCHAR_MAMEKEY(ESC))       PORT_NAME("C")
+//  PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_EQUALS)     PORT_CHAR('+')
+//  PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Off")
 //
-//	PORT_START("COL1")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_STOP)       PORT_CHAR('.')
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_0)          PORT_CHAR('0')
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD)                               PORT_CHAR('*')
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD)                               PORT_CHAR('%')
-//	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Info")
-//	PORT_BIT(0xe0, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL1")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_STOP)       PORT_CHAR('.')
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_0)          PORT_CHAR('0')
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD)                               PORT_CHAR('*')
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD)                               PORT_CHAR('%')
+//  PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Info")
+//  PORT_BIT(0xe0, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL2")
-//	PORT_BIT(0xff, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL2")
+//  PORT_BIT(0xff, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL3")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F1)         PORT_CHAR(UCHAR_MAMEKEY(F1))        PORT_NAME("F1")
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F2)         PORT_CHAR(UCHAR_MAMEKEY(F2))        PORT_NAME("F2")
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F3)         PORT_CHAR(UCHAR_MAMEKEY(F3))        PORT_NAME("F3")
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F4)         PORT_CHAR(UCHAR_MAMEKEY(F4))        PORT_NAME("F4")
-//	PORT_BIT(0xf0, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL3")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F1)         PORT_CHAR(UCHAR_MAMEKEY(F1))        PORT_NAME("F1")
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F2)         PORT_CHAR(UCHAR_MAMEKEY(F2))        PORT_NAME("F2")
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F3)         PORT_CHAR(UCHAR_MAMEKEY(F3))        PORT_NAME("F3")
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F4)         PORT_CHAR(UCHAR_MAMEKEY(F4))        PORT_NAME("F4")
+//  PORT_BIT(0xf0, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL4")
-//	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_LSHIFT)     PORT_CHAR(UCHAR_SHIFT_1)            PORT_NAME("Shift")
-//	PORT_BIT(0xbf, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL4")
+//  PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_LSHIFT)     PORT_CHAR(UCHAR_SHIFT_1)            PORT_NAME("Shift")
+//  PORT_BIT(0xbf, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL5")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_MINUS)      PORT_CHAR('-')
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_LEFT)       PORT_CHAR(UCHAR_MAMEKEY(LEFT))      PORT_NAME(UTF8_LEFT)
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_9)          PORT_CHAR('9')
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_8)          PORT_CHAR('8')
-//	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_7)          PORT_CHAR('7')
-//	PORT_BIT(0xe0, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL5")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_MINUS)      PORT_CHAR('-')
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_LEFT)       PORT_CHAR(UCHAR_MAMEKEY(LEFT))      PORT_NAME(UTF8_LEFT)
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_9)          PORT_CHAR('9')
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_8)          PORT_CHAR('8')
+//  PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_7)          PORT_CHAR('7')
+//  PORT_BIT(0xe0, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL6")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_UNUSED)//
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_RIGHT)      PORT_CHAR(UCHAR_MAMEKEY(RIGHT))     PORT_NAME(UTF8_RIGHT)
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_6)          PORT_CHAR('6')
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_5)          PORT_CHAR('5')
-//	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_4)          PORT_CHAR('4')
-//	PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_SLASH)      PORT_CHAR('/')
-//	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Backlight")
-//	PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL6")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_UNUSED)//
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_RIGHT)      PORT_CHAR(UCHAR_MAMEKEY(RIGHT))     PORT_NAME(UTF8_RIGHT)
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_6)          PORT_CHAR('6')
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_5)          PORT_CHAR('5')
+//  PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_4)          PORT_CHAR('4')
+//  PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_SLASH)      PORT_CHAR('/')
+//  PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Backlight")
+//  PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("COL7")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_ENTER)      PORT_CHAR(13)                       PORT_NAME("Enter")
-//	PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_Y)          PORT_CHAR('y')  PORT_CHAR('Y')      PORT_NAME("Yes")
-//	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_3)          PORT_CHAR('3')
-//	PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_2)          PORT_CHAR('2')
-//	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_1)          PORT_CHAR('1')
-//	PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_UNUSED)
-//	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Contrast")
-//	PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_START("COL7")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_ENTER)      PORT_CHAR(13)                       PORT_NAME("Enter")
+//  PORT_BIT(0x02, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_Y)          PORT_CHAR('y')  PORT_CHAR('Y')      PORT_NAME("Yes")
+//  PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_3)          PORT_CHAR('3')
+//  PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_2)          PORT_CHAR('2')
+//  PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_1)          PORT_CHAR('1')
+//  PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_UNUSED)
+//  PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_KEYBOARD)                                                                   PORT_NAME("Contrast")
+//  PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_UNUSED)
 //
-//	PORT_START("ON_OFF")
-//	PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F12) PORT_CHAR(UCHAR_MAMEKEY(F12)) PORT_NAME("On Off") PORT_CHANGED_MEMBER(DEVICE_SELF, psionhc_state, key_on, 0)
+//  PORT_START("ON_OFF")
+//  PORT_BIT(0x01, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_CODE(KEYCODE_F12) PORT_CHAR(UCHAR_MAMEKEY(F12)) PORT_NAME("On Off") PORT_CHANGED_MEMBER(DEVICE_SELF, psionhc_state, key_on, 0)
 //INPUT_PORTS_END
 
 INPUT_CHANGED_MEMBER(psionhc_state::key_on)
@@ -261,6 +269,24 @@ INPUT_CHANGED_MEMBER(psionhc_state::key_on)
 	{
 		m_asic2->on_clr_w(newval);
 	}
+}
+
+
+uint8_t psionhc_state::port_data_r()
+{
+	// b0 NC
+	// b1 NC
+	// b2 LED ?
+	// b3 VSLED ?
+	// b4 SCK6
+	// b5 SD6
+	// b6 ?
+	return 0x00;
+}
+
+void psionhc_state::port_data_w(uint8_t data)
+{
+	// b7 BackLight ?
 }
 
 
@@ -279,6 +305,7 @@ void psionhc_state::psionhc100(machine_config &config)
 	m_maincpu->set_irq_acknowledge_callback(m_asic1, FUNC(psion_asic1_device::inta_cb));
 
 	RAM(config, m_ram).set_default_size("128K");
+	NVRAM(config, "nvram", nvram_device::DEFAULT_NONE);
 
 	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_LCD));
 	screen.set_size(160, 80);
@@ -289,6 +316,7 @@ void psionhc_state::psionhc100(machine_config &config)
 	PALETTE(config, "palette", FUNC(psionhc_state::palette_init), 2);
 
 	PSION_ASIC1(config, m_asic1, 7.68_MHz_XTAL);
+	m_asic1->set_screen("screen");
 	m_asic1->set_laptop_mode(false);
 	m_asic1->set_addrmap(0, &psionhc_state::asic1_map);
 	m_asic1->int_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
@@ -303,20 +331,22 @@ void psionhc_state::psionhc100(machine_config &config)
 	m_asic2->buzvol_cb().set([this](int state) { m_speaker->set_output_gain(ALL_OUTPUTS, state ? 1.0 : 0.25); });
 	m_asic2->dr_cb().set([this](int state) { m_dr = state; });
 	m_asic2->col_cb().set([this](uint8_t data) { return m_keyboard[data & 7]->read(); });
+	m_asic2->read_pd_cb().set(FUNC(psionhc_state::port_data_r));
+	m_asic2->write_pd_cb().set(FUNC(psionhc_state::port_data_w));
 	m_asic2->data_r<0>().set(m_asic3, FUNC(psion_asic3_device::data_r));        // Power supply (ASIC3)
 	m_asic2->data_w<0>().set(m_asic3, FUNC(psion_asic3_device::data_w));
 	m_asic2->data_r<1>().set(m_ssd[0], FUNC(psion_ssd_device::data_r));         // SSD
 	m_asic2->data_w<1>().set(m_ssd[0], FUNC(psion_ssd_device::data_w));
 	m_asic2->data_r<2>().set(m_ssd[1], FUNC(psion_ssd_device::data_r));         // SSD
 	m_asic2->data_w<2>().set(m_ssd[1], FUNC(psion_ssd_device::data_w));
-	m_asic2->data_r<5>().set(m_exp[0], FUNC(psion_module_slot_device::data_r)); // Expansion port A
-	m_asic2->data_w<5>().set(m_exp[0], FUNC(psion_module_slot_device::data_w));
-	m_asic2->data_r<6>().set(m_exp[1], FUNC(psion_module_slot_device::data_r)); // Expansion port B
-	m_asic2->data_w<6>().set(m_exp[1], FUNC(psion_module_slot_device::data_w));
-	m_asic2->data_r<7>().set(m_exp[2], FUNC(psion_module_slot_device::data_r)); // Expansion port C
-	m_asic2->data_w<7>().set(m_exp[2], FUNC(psion_module_slot_device::data_w));
+	m_asic2->data_r<5>().set(m_exp[1], FUNC(psion_module_slot_device::data_r)); // Expansion port B
+	m_asic2->data_w<5>().set(m_exp[1], FUNC(psion_module_slot_device::data_w));
+	m_asic2->data_r<6>().set(m_exp[0], FUNC(psion_module_slot_device::data_r)); // Expansion port A
+	m_asic2->data_w<6>().set(m_exp[0], FUNC(psion_module_slot_device::data_w));
+	//m_asic2->data_r<7>().set(m_exp[2], FUNC(psion_module_slot_device::data_r));
+	//m_asic2->data_w<7>().set(m_exp[2], FUNC(psion_module_slot_device::data_w));
 
-	PSION_ASIC3(config, m_asic3);
+	PSION_PSU_ASIC3(config, m_asic3);
 
 	SPEAKER(config, "mono").front_center();
 	SPEAKER_SOUND(config, m_speaker).add_route(ALL_OUTPUTS, "mono", 1.00); // Piezo buzzer
@@ -327,10 +357,9 @@ void psionhc_state::psionhc100(machine_config &config)
 	m_ssd[1]->door_cb().set(m_asic2, FUNC(psion_asic2_device::dnmi_w));
 
 	PSION_MODULE_SLOT(config, m_exp[0], psion_hcmodule_devices, nullptr); // RS232/Parallel
-	m_exp[0]->intr_cb().set(m_asic1, FUNC(psion_asic1_device::eint1_w));
+	m_exp[0]->intr_cb().set(m_asic1, FUNC(psion_asic1_device::eint2_w));
 	PSION_MODULE_SLOT(config, m_exp[1], psion_hcmodule_devices, nullptr);
-	m_exp[1]->intr_cb().set(m_asic1, FUNC(psion_asic1_device::eint2_w));
-	PSION_MODULE_SLOT(config, m_exp[2], psion_hcmodule_devices, nullptr);
+	m_exp[1]->intr_cb().set(m_asic1, FUNC(psion_asic1_device::eint1_w));
 
 	SOFTWARE_LIST(config, "ssd_list").set_original("psion_ssd").set_filter("HC");
 }
@@ -372,6 +401,6 @@ ROM_END
 
 
 //    YEAR  NAME         PARENT       COMPAT  MACHINE       INPUT        CLASS           INIT         COMPANY   FULLNAME    FLAGS
-COMP( 1991, psionhc100,  psionhc120,  0,      psionhc100,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 100",   0 )
-COMP( 1991, psionhc110,  psionhc120,  0,      psionhc110,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 110",   0 )
-COMP( 1991, psionhc120,  0,           0,      psionhc120,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 120",   0 )
+COMP( 1991, psionhc100,  psionhc120,  0,      psionhc100,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 100",   MACHINE_SUPPORTS_SAVE )
+COMP( 1991, psionhc110,  psionhc120,  0,      psionhc110,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 110",   MACHINE_SUPPORTS_SAVE )
+COMP( 1991, psionhc120,  0,           0,      psionhc120,   psionhc_uk,  psionhc_state,  empty_init,  "Psion",  "HC 120",   MACHINE_SUPPORTS_SAVE )

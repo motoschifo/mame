@@ -194,8 +194,8 @@ private:
 
 	void ngp_z80_clear_irq(uint8_t data);
 
-	DECLARE_WRITE_LINE_MEMBER(ngp_vblank_pin_w);
-	DECLARE_WRITE_LINE_MEMBER(ngp_hblank_pin_w);
+	void ngp_vblank_pin_w(int state);
+	void ngp_hblank_pin_w(int state);
 	void ngp_tlcs900_porta(offs_t offset, uint8_t data);
 	uint32_t screen_update_ngp(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 	TIMER_CALLBACK_MEMBER(ngp_seconds_callback);
@@ -628,13 +628,13 @@ static INPUT_PORTS_START(ngp)
 INPUT_PORTS_END
 
 
-WRITE_LINE_MEMBER(ngp_state::ngp_vblank_pin_w)
+void ngp_state::ngp_vblank_pin_w(int state)
 {
 	m_maincpu->set_input_line(TLCS900_INT4, state ? ASSERT_LINE : CLEAR_LINE);
 }
 
 
-WRITE_LINE_MEMBER(ngp_state::ngp_hblank_pin_w)
+void ngp_state::ngp_hblank_pin_w(int state)
 {
 	m_maincpu->set_input_line(TLCS900_TIO, state ? ASSERT_LINE : CLEAR_LINE);
 }
@@ -805,8 +805,8 @@ void ngp_state::nvram_default()
 
 bool ngp_state::nvram_read(util::read_stream &file)
 {
-	size_t actual;
-	if (!file.read(m_mainram, 0x3000, actual) && actual == 0x3000)
+	auto const [err, actual] = read(file, m_mainram, 0x3000);
+	if (!err && (actual == 0x3000))
 	{
 		m_nvram_loaded = true;
 		return true;
@@ -817,8 +817,8 @@ bool ngp_state::nvram_read(util::read_stream &file)
 
 bool ngp_state::nvram_write(util::write_stream &file)
 {
-	size_t actual;
-	return !file.write(m_mainram, 0x3000, actual) && actual == 0x3000;
+	auto const [err, actual] = write(file, m_mainram, 0x3000);
+	return !err;
 }
 
 

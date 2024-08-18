@@ -195,8 +195,7 @@ void gt64xxx_device::device_start()
 {
 	pci_host_device::device_start();
 	m_cpu_space = &m_cpu->space(AS_PCI_CONFIG);
-	memory_space = &space(AS_PCI_MEM);
-	io_space = &space(AS_PCI_IO);
+	set_spaces(&space(AS_PCI_MEM), &space(AS_PCI_IO));
 
 	memory_window_start = 0;
 	memory_window_end   = 0xffffffff;
@@ -466,7 +465,7 @@ void gt64xxx_device::reset_all_mappings()
 }
 
 // PCI Stalling
-WRITE_LINE_MEMBER(gt64xxx_device::pci_stall)
+void gt64xxx_device::pci_stall(int state)
 {
 	// Reset the retry count once unstalled
 	if (state==0 && m_pci_stall_state==1) {

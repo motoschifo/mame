@@ -59,7 +59,9 @@ public:
 	virtual const char *image_brief_type_name() const noexcept override { return "cdrm"; }
 
 	int get_last_track() const;
+	int get_last_session() const;
 	uint32_t get_track(uint32_t frame) const;
+	uint32_t get_track_index(uint32_t frame) const;
 	uint32_t get_track_start(uint32_t track) const;
 	bool read_data(uint32_t lbasector, void *buffer, uint32_t datatype, bool phys=false);
 	bool read_subcode(uint32_t lbasector, void *buffer, bool phys=false);
@@ -82,7 +84,7 @@ protected:
 	// device_image_interface implementation
 	virtual const software_list_loader &get_software_list_loader() const override { return rom_software_list_loader::instance(); }
 
-	void setup_current_preset_image();	
+	void setup_current_preset_image();
 
 	bool        m_gd_compat;
 	bool        m_dvd_compat;

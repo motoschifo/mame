@@ -51,11 +51,11 @@ public:
 	static constexpr u16 with_vblank(u16 pixclocks) { return 32 + pixclocks; }
 
 protected:
-	void video_start() override;
-	void machine_start() override;
-	void machine_reset() override;
+	virtual void video_start() override ATTR_COLD;
+	virtual void machine_start() override ATTR_COLD;
+	virtual void machine_reset() override ATTR_COLD;
 
-	TIMER_CALLBACK_MEMBER(irq_off) override;
+	virtual TIMER_CALLBACK_MEMBER(irq_off) override;
 	TIMER_CALLBACK_MEMBER(irq_frame);
 	TIMER_CALLBACK_MEMBER(irq_scanline);
 
@@ -136,6 +136,17 @@ private:
 		T1_Y_OFFSET_H = 0x47
 	};
 
+	struct sprite_data
+	{
+		u32 code;
+		u32 color;
+		int flipx;
+		int flipy;
+		s32 destx;
+		s32 desty;
+		u32 pmask;
+	};
+
 	void update_frame_timer();
 	emu_timer *m_frame_irq_timer = nullptr;
 	emu_timer *m_scanline_irq_timer = nullptr;
@@ -149,13 +160,15 @@ private:
 	template <u8 Layer>
 	TILE_GET_INFO_MEMBER(get_tile_info_16c);
 
-	u8 get_border_color(u16 hpos = ~0, u16 vpos = ~0) override;
-	rectangle get_screen_area() override;
-	void spectrum_update_screen(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect) override;
-	void tsconf_UpdateZxScreenBitmap(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
-	void tsconf_UpdateTxtBitmap(bitmap_ind16 &bitmap, const rectangle &cliprect);
-	void tsconf_UpdateGfxBitmap(bitmap_ind16 &bitmap, const rectangle &cliprect);
-	void draw_sprites(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	virtual u8 get_border_color(u16 hpos = ~0, u16 vpos = ~0) override;
+	u32 get_vpage_offset();
+	virtual rectangle get_screen_area() override;
+	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void tsconf_update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void tsconf_draw_zx(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void tsconf_draw_txt(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void tsconf_draw_gfx(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void draw_sprites(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void tsconf_palette(palette_device &palette) const;
 	void tsconf_update_video_mode();
 
@@ -164,10 +177,10 @@ private:
 	void tsconf_ula_w(offs_t offset, u8 data);
 	u8 tsconf_port_xxaf_r(offs_t reg);
 	void tsconf_port_xxaf_w(offs_t reg, u8 data);
-	u8 tsconf_port_77_zctr_r(offs_t reg);
-	void tsconf_port_77_zctr_w(offs_t reg, u8 data);
-	u8 tsconf_port_57_zctr_r(offs_t reg);
-	void tsconf_port_57_zctr_w(offs_t reg, u8 data);
+	u8 tsconf_port_77_zctr_r();
+	void tsconf_port_77_zctr_w(u8 data);
+	u8 tsconf_port_57_zctr_r();
+	void tsconf_port_57_zctr_w(u8 data);
 	void tsconf_spi_miso_w(u8 data);
 	u8 tsconf_port_f7_r(offs_t offset);
 	void tsconf_port_f7_w(offs_t offset, u8 data);
@@ -220,6 +233,7 @@ private:
 	required_device<ram_device> m_cram;
 	required_device<ram_device> m_sfile;
 	required_device<centronics_device> m_centronics;
+	std::vector<sprite_data> m_sprites_cache;
 
 	required_device_array<ym2149_device, 2> m_ay;
 	u8 m_ay_selected;

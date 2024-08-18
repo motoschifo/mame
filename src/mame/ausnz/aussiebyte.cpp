@@ -281,40 +281,33 @@ void aussiebyte_state::io_write_byte(offs_t offset, u8 data)
 	prog_space.write_byte(offset, data);
 }
 
-WRITE_LINE_MEMBER( aussiebyte_state::busreq_w )
-{
-// since our Z80 has no support for BUSACK, we assume it is granted immediately
-	m_maincpu->set_input_line(Z80_INPUT_LINE_BUSRQ, state);
-	m_dma->bai_w(state); // tell dma that bus has been granted
-}
-
 /***********************************************************
 
     DMA selector
 
 ************************************************************/
-WRITE_LINE_MEMBER( aussiebyte_state::sio1_rdya_w )
+void aussiebyte_state::sio1_rdya_w(int state)
 {
 	m_port17_rdy = (m_port17_rdy & 0xfd) | (u8)(state << 1);
 	if (m_port17 == 1)
 		m_dma->rdy_w(state);
 }
 
-WRITE_LINE_MEMBER( aussiebyte_state::sio1_rdyb_w )
+void aussiebyte_state::sio1_rdyb_w(int state)
 {
 	m_port17_rdy = (m_port17_rdy & 0xfb) | (u8)(state << 2);
 	if (m_port17 == 2)
 		m_dma->rdy_w(state);
 }
 
-WRITE_LINE_MEMBER( aussiebyte_state::sio2_rdya_w )
+void aussiebyte_state::sio2_rdya_w(int state)
 {
 	m_port17_rdy = (m_port17_rdy & 0xef) | (u8)(state << 4);
 	if (m_port17 == 4)
 		m_dma->rdy_w(state);
 }
 
-WRITE_LINE_MEMBER( aussiebyte_state::sio2_rdyb_w )
+void aussiebyte_state::sio2_rdyb_w(int state)
 {
 	m_port17_rdy = (m_port17_rdy & 0xdf) | (u8)(state << 5);
 	if (m_port17 == 5)
@@ -370,13 +363,13 @@ static const z80_daisy_config daisy_chain_intf[] =
 
 ************************************************************/
 
-WRITE_LINE_MEMBER( aussiebyte_state::fdc_intrq_w )
+void aussiebyte_state::fdc_intrq_w(int state)
 {
 	u8 data = (m_port19 & 0xbf) | (state ? 0x40 : 0);
 	m_port19 = data;
 }
 
-WRITE_LINE_MEMBER( aussiebyte_state::fdc_drq_w )
+void aussiebyte_state::fdc_drq_w(int state)
 {
 	u8 data = (m_port19 & 0x7f) | (state ? 0x80 : 0);
 	m_port19 = data;
@@ -505,6 +498,7 @@ void aussiebyte_state::aussiebyte(machine_config &config)
 	m_maincpu->set_addrmap(AS_PROGRAM, &aussiebyte_state::mem_map);
 	m_maincpu->set_addrmap(AS_IO, &aussiebyte_state::io_map);
 	m_maincpu->set_daisy_config(daisy_chain_intf);
+	m_maincpu->busack_cb().set(m_dma, FUNC(z80dma_device::bai_w));
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
@@ -544,7 +538,7 @@ void aussiebyte_state::aussiebyte(machine_config &config)
 
 	Z80DMA(config, m_dma, 16_MHz_XTAL / 4);
 	m_dma->out_int_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
-	m_dma->out_busreq_callback().set(FUNC(aussiebyte_state::busreq_w));
+	m_dma->out_busreq_callback().set_inputline(m_maincpu, Z80_INPUT_LINE_BUSRQ);
 	// BAO, not used
 	m_dma->in_mreq_callback().set(FUNC(aussiebyte_state::memory_read_byte));
 	m_dma->out_mreq_callback().set(FUNC(aussiebyte_state::memory_write_byte));

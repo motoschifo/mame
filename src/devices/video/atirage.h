@@ -7,7 +7,7 @@
 #pragma once
 
 #include "machine/pci.h"
-#include "bus/isa/mach32.h"
+#include "video/ati_mach32.h"
 
 class atirage_device : public pci_device
 {
@@ -79,6 +79,27 @@ protected:
 	virtual void device_start() override;
 };
 
+class atirageiidvd_device : public atirage_device
+{
+public:
+	atirageiidvd_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+
+protected:
+	virtual void device_start() override;
+	virtual void device_reset() override;
+
+	virtual const tiny_rom_entry *device_rom_region() const override;
+	virtual void map_extra(uint64_t memory_window_start, uint64_t memory_window_end, uint64_t memory_offset, address_space *memory_space,
+	uint64_t io_window_start, uint64_t io_window_end, uint64_t io_offset, address_space *io_space) override;
+
+	u8 vram_r(offs_t offset);
+	void vram_w(offs_t offset, uint8_t data);
+	void legacy_io_map(address_map &map);
+
+private:
+	required_memory_region m_vga_rom;
+};
+
 class atiragepro_device : public atirage_device
 {
 public:
@@ -90,6 +111,7 @@ protected:
 
 DECLARE_DEVICE_TYPE(ATI_RAGEII, atirageii_device)
 DECLARE_DEVICE_TYPE(ATI_RAGEIIC, atirageiic_device)
+DECLARE_DEVICE_TYPE(ATI_RAGEIIDVD, atirageiidvd_device)
 DECLARE_DEVICE_TYPE(ATI_RAGEPRO, atiragepro_device)
 
 #endif

@@ -128,7 +128,7 @@ public:
 		m_track(*this, "TRACK%c", 'X')
 	{ }
 
-	DECLARE_READ_LINE_MEMBER(vblank_r);
+	int vblank_r();
 	void cloud9(machine_config &config);
 
 protected:
@@ -184,8 +184,6 @@ private:
 	void program_map(address_map &map);
 };
 
-
-// video
 
 /*************************************
  *
@@ -465,8 +463,6 @@ uint32_t cloud9_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap
 }
 
 
-// machine
-
 static constexpr double MASTER_CLOCK = 10'000'000;
 static constexpr double PIXEL_CLOCK = MASTER_CLOCK / 2;
 static constexpr uint16_t HTOTAL = 320;
@@ -505,7 +501,7 @@ TIMER_CALLBACK_MEMBER(cloud9_state::clock_irq)
 }
 
 
-READ_LINE_MEMBER(cloud9_state::vblank_r)
+int cloud9_state::vblank_r()
 {
 	int const scanline = m_screen->vpos();
 	return (~m_syncprom[scanline & 0xff] >> 1) & 1;

@@ -48,8 +48,7 @@ void i82439hx_host_device::set_ram_size(int _ram_size)
 void i82439hx_host_device::device_start()
 {
 	pci_host_device::device_start();
-	memory_space = &cpu->space(AS_PROGRAM);
-	io_space = &cpu->space(AS_IO);
+	set_spaces(&cpu->space(AS_PROGRAM), &cpu->space(AS_IO));
 
 	memory_window_start = 0;
 	memory_window_end   = 0xffffffff;
@@ -399,7 +398,7 @@ uint8_t i82439hx_host_device::errsyn_r()
 	return errsyn;
 }
 
-WRITE_LINE_MEMBER(i82439hx_host_device::smi_act_w)
+void i82439hx_host_device::smi_act_w(int state)
 {
 	// state is 0 when smm is not active
 	// but smiact_n reflects the state of the SMIACT# pin

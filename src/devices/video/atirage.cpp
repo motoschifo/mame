@@ -38,6 +38,7 @@
 
 DEFINE_DEVICE_TYPE(ATI_RAGEII, atirageii_device, "rageii", "ATI Rage II PCI")
 DEFINE_DEVICE_TYPE(ATI_RAGEIIC, atirageiic_device, "rageiic", "ATI Rage IIC PCI")
+DEFINE_DEVICE_TYPE(ATI_RAGEIIDVD, atirageiidvd_device, "rageiidvd", "ATI Rage II+ DVD PCI")
 DEFINE_DEVICE_TYPE(ATI_RAGEPRO, atiragepro_device, "ragepro", "ATI Rage Pro PCI")
 
 // register offsets
@@ -85,7 +86,7 @@ atirage_device::atirage_device(const machine_config &mconfig, device_type type, 
 	: pci_device(mconfig, type, tag, owner, clock),
 	m_mach64(*this, "vga"),
 	m_screen(*this, "screen"),
-	read_gpio(*this),
+	read_gpio(*this, 0),
 	write_gpio(*this)
 {
 	m_hres = m_vres = m_htotal = m_vtotal = m_format = 0;
@@ -101,6 +102,12 @@ atirageii_device::atirageii_device(const machine_config &mconfig, const char *ta
 
 atirageiic_device::atirageiic_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: atirage_device(mconfig, ATI_RAGEIIC, tag, owner, clock)
+{
+}
+
+atirageiidvd_device::atirageiidvd_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: atirage_device(mconfig, ATI_RAGEIIDVD, tag, owner, clock)
+	, m_vga_rom(*this, "vga_rom")
 {
 }
 
@@ -134,12 +141,9 @@ void atirage_device::config_map(address_map &map)
 
 void atirage_device::device_start()
 {
-	read_gpio.resolve_safe(0);
-	write_gpio.resolve_safe();
-
 	pci_device::device_start();
 
-	add_map(0x1000000, M_MEM, FUNC(atirage_device::mem_map));   // 16 MB memory map
+	add_map(0x1000000, M_MEM | M_PREF, FUNC(atirage_device::mem_map));   // 16 MB memory map
 	add_map(0x100, M_IO, FUNC(atirage_device::io_map));     // 256 byte I/O map
 	add_map(0x01000, M_MEM, FUNC(atirage_device::reg_map)); // 4K register map
 
@@ -205,6 +209,87 @@ void atirageiic_device::device_start()
 	m_regs0[CONFIG_CHIP_ID] = 0x56;
 	m_regs0[CONFIG_CHIP_ID+1] = 0x47;
 	m_regs0[CONFIG_CHIP_ID+3] = 0x3a;
+}
+
+// TODO: this core is currently hardwired to legacy x86 interface, as a testbed for p5txla
+void atirageiidvd_device::device_start()
+{
+	// Mach64 GT-B [3D Rage II+ DVD]
+	// TODO: verify subvendor ID & revision
+	set_ids(0x10024755, 0x00, 0x030000, 0x10026987);
+	atirage_device::device_start();
+	revision = 0x3a;
+	m_regs0[CONFIG_CHIP_ID] = 0x55;
+	m_regs0[CONFIG_CHIP_ID+1] = 0x47;
+	m_regs0[CONFIG_CHIP_ID+3] = 0x3a;
+//  m_regs0[CRTC_GEN_CNTL+3] = 0;
+
+	// TODO: opt-in Mach64 legacy x86 memory & i/o VGA bridge control
+	command = 0;
+
+	add_rom((u8 *)m_vga_rom->base(), 0x8000);
+	expansion_rom_base = 0xc0000;
+}
+
+void atirageiidvd_device::device_reset()
+{
+	atirage_device::device_reset();
+	// TODO: verify actual x86 BAR defaults
+	// p5txla starts up with (unmapped) writes at I/O $6100, eventually relocating BAR1 to $6300.
+	// 2mbsgr VGA BIOS (at least, PC=c1c2d) does an inefficient CONFIG_CHIP_ID scan of the I/O
+	// space thru all of $xxe0, instead of just using BLK_IO_BASE readback alias at VGA $3c3.
+	// On top, we need to remap BARs 0 & 2 on x86 because otherwise it will clash with real memory
+	// area, perhaps they are supposed to be disabled on startup?
+	set_map_address(0, 0xf0000000);
+	set_map_address(1, 0x6100);
+	set_map_address(2, 0xe0000000);
+	remap_cb();
+}
+
+ROM_START( atirageiidvd )
+	ROM_REGION32_LE( 0x10000, "vga_rom", ROMREGION_ERASEFF )
+	// Header, P/N then date
+	ROM_SYSTEM_BIOS( 0, "2mbsgr", "ATI Mach64 2mb 113-40109-100 1997/10/03" )
+	ROMX_LOAD( "2mbsgr.vbi", 0x0000, 0x8000, CRC(d800adfd) SHA1(17492b51b5ec158db618f2851ce8beca91d12aa8), ROM_BIOS(0) )
+	ROM_SYSTEM_BIOS( 1, "4mbsgr", "ATI Mach64 4mb 113-37914-103 1997/04/15" )
+	ROMX_LOAD( "4mbsgr.vbi", 0x0000, 0xc000, CRC(e974821f) SHA1(185557cec469f54e15cbe30241bd1af56ed303d2), ROM_BIOS(1) )
+	ROM_SYSTEM_BIOS( 2, "4mbedo", "ATI Mach64 GTB 4mb EDO 113-38801-101 1997/02/12" )
+	ROMX_LOAD( "4mbedo.vbi", 0x0000, 0x8800, CRC(0c344b72) SHA1(a068ef73d56b5fc200076283d32676b818404f1b), ROM_BIOS(2) )
+ROM_END
+
+const tiny_rom_entry *atirageiidvd_device::device_rom_region() const
+{
+	return ROM_NAME(atirageiidvd);
+}
+
+uint8_t atirageiidvd_device::vram_r(offs_t offset)
+{
+	return downcast<mach64_device *>(m_mach64.target())->mem_r(offset);
+}
+
+void atirageiidvd_device::vram_w(offs_t offset, uint8_t data)
+{
+	downcast<mach64_device *>(m_mach64.target())->mem_w(offset, data);
+}
+
+void atirageiidvd_device::legacy_io_map(address_map &map)
+{
+	map(0x0000, 0x02f).m(m_mach64, FUNC(mach64_device::io_map));
+}
+
+void atirageiidvd_device::map_extra(uint64_t memory_window_start, uint64_t memory_window_end, uint64_t memory_offset, address_space *memory_space,
+							uint64_t io_window_start, uint64_t io_window_end, uint64_t io_offset, address_space *io_space)
+{
+	if (BIT(command, 1))
+	{
+		memory_space->install_readwrite_handler(0xa0000, 0xbffff, read8sm_delegate(*this, FUNC(atirageiidvd_device::vram_r)), write8sm_delegate(*this, FUNC(atirageiidvd_device::vram_w)));
+	}
+
+	if (BIT(command, 0))
+	{
+		io_space->install_device(0x03b0, 0x03df, *this, &atirageiidvd_device::legacy_io_map);
+		io_space->install_readwrite_handler(0x01ce, 0x01cf, read8sm_delegate(*m_mach64, FUNC(mach64_device::ati_port_ext_r)), write8sm_delegate(*m_mach64, FUNC(mach64_device::ati_port_ext_w)));
+	}
 }
 
 void atiragepro_device::device_start()

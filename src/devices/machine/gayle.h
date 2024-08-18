@@ -79,13 +79,14 @@ public:
 	template<int N> auto ide_cs_w_cb() { return m_ide_cs_w_cb[N].bind(); }
 
 	// interface
-	DECLARE_WRITE_LINE_MEMBER( ide_interrupt_w );
+	void ide_interrupt_w(int state);
 
 	// credit card signals
-	DECLARE_WRITE_LINE_MEMBER( cc_cd_w );
-	DECLARE_WRITE_LINE_MEMBER( cc_bvd1_w );
-	DECLARE_WRITE_LINE_MEMBER( cc_bvd2_w );
-	DECLARE_WRITE_LINE_MEMBER( cc_wp_w );
+	void cc_cd1_w(int state);
+	void cc_cd2_w(int state);
+	void cc_bvd1_w(int state);
+	void cc_bvd2_w(int state);
+	void cc_wp_w(int state);
 
 	void register_map(address_map &map);
 	uint16_t gayle_id_r(offs_t offset, uint16_t mem_mask = ~0);
@@ -148,6 +149,7 @@ private:
 
 	// internal latched line state
 	uint8_t m_line_state;
+	std::array<int8_t, 2> m_cd;
 };
 
 // device type definition

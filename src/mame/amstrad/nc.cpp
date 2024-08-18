@@ -44,14 +44,13 @@
 
 #include "bus/centronics/ctronics.h"
 #include "bus/rs232/rs232.h"
+#include "bus/pccard/sram.h"
 #include "cpu/z80/z80.h"
 #include "imagedev/floppy.h"
 #include "machine/clock.h"
 #include "machine/i8251.h"
 #include "machine/mc146818.h"
 #include "machine/nvram.h"
-#include "machine/pccard.h"
-#include "machine/pccard_sram.h"
 #include "machine/ram.h"
 #include "machine/rp5c01.h"
 #include "machine/timer.h"
@@ -61,8 +60,6 @@
 #include "emupal.h"
 #include "screen.h"
 #include "speaker.h"
-
-#include "formats/pc_dsk.h"
 
 #define LOG_DEBUG   (1U << 1)
 #define LOG_IRQ     (1U << 2)
@@ -100,13 +97,17 @@ public:
 		m_mem_view2(*this, "block2"),
 		m_mem_view3(*this, "block3"),
 		m_keyboard(*this, "line%d", 0U),
-		m_battery(*this, "battery")
+		m_battery(*this, "battery"),
+		m_pcmcia_card_detect(1),
+		m_pcmcia_write_protect(1),
+		m_pcmcia_battery_voltage_1(1),
+		m_pcmcia_battery_voltage_2(1)
 	{
 	}
 
-	DECLARE_READ_LINE_MEMBER( pcmcia_card_detect_r ) { return m_pcmcia_card_detect; }
-	DECLARE_READ_LINE_MEMBER( pcmcia_write_protect_r ) { return m_pcmcia_write_protect; }
-	DECLARE_READ_LINE_MEMBER( pcmcia_battery_voltage_r ) { return m_pcmcia_battery_voltage_1 | m_pcmcia_battery_voltage_2; }
+	int pcmcia_card_detect_r() { return m_pcmcia_card_detect; }
+	int pcmcia_write_protect_r() { return m_pcmcia_write_protect; }
+	int pcmcia_battery_voltage_r() { return m_pcmcia_battery_voltage_1 && m_pcmcia_battery_voltage_2; }
 
 	void nc_base(machine_config &config);
 
@@ -123,7 +124,7 @@ protected:
 	virtual void poweroff_control_w(uint8_t data);
 	uint8_t irq_status_r();
 
-	DECLARE_WRITE_LINE_MEMBER(centronics_busy_w);
+	void centronics_busy_w(int state);
 
 	template<int N> uint8_t pcmcia_r(offs_t offset);
 	template<int N> void pcmcia_w(offs_t offset, uint8_t data);
@@ -177,10 +178,10 @@ private:
 
 	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
-	DECLARE_WRITE_LINE_MEMBER( pcmcia_card_detect_w ) { m_pcmcia_card_detect = state; }
-	DECLARE_WRITE_LINE_MEMBER( pcmcia_write_protect_w ) { m_pcmcia_write_protect = state; }
-	DECLARE_WRITE_LINE_MEMBER( pcmcia_battery_voltage_1_w ) { m_pcmcia_battery_voltage_1 = state; }
-	DECLARE_WRITE_LINE_MEMBER( pcmcia_battery_voltage_2_w ) { m_pcmcia_battery_voltage_2 = state; }
+	void pcmcia_card_detect_w(int state) { m_pcmcia_card_detect = state; }
+	void pcmcia_write_protect_w(int state) { m_pcmcia_write_protect = state; }
+	void pcmcia_battery_voltage_1_w(int state) { m_pcmcia_battery_voltage_1 = state; }
+	void pcmcia_battery_voltage_2_w(int state) { m_pcmcia_battery_voltage_2 = state; }
 
 	int m_sound_channel_periods[2]{};
 };
@@ -196,8 +197,8 @@ public:
 
 	DECLARE_INPUT_CHANGED_MEMBER( power_button );
 
-	DECLARE_READ_LINE_MEMBER( centronics_ack_r ) { return m_centronics_ack; }
-	DECLARE_READ_LINE_MEMBER( centronics_busy_r ) { return m_centronics_busy; }
+	int centronics_ack_r() { return m_centronics_ack; }
+	int centronics_busy_r() { return m_centronics_busy; }
 
 	void nc100(machine_config &config);
 	void nc150(machine_config &config);
@@ -214,9 +215,9 @@ private:
 	void irq_status_w(uint8_t data);
 	uint8_t keyboard_r(offs_t offset);
 
-	DECLARE_WRITE_LINE_MEMBER(uart_txrdy_w);
-	DECLARE_WRITE_LINE_MEMBER(uart_rxrdy_w);
-	DECLARE_WRITE_LINE_MEMBER(centronics_ack_w);
+	void uart_txrdy_w(int state);
+	void uart_rxrdy_w(int state);
+	void centronics_ack_w(int state);
 
 	int m_centronics_ack;
 };
@@ -257,7 +258,7 @@ private:
 	uint8_t keyboard_r(offs_t offset);
 
 	void fdc_int_w(int state);
-	DECLARE_WRITE_LINE_MEMBER(uart_rxrdy_w);
+	void uart_rxrdy_w(int state);
 	void centronics_ack_w(int state);
 
 	emu_timer *m_fdc_irq_timer;
@@ -328,7 +329,8 @@ void nc200_state::io_map(address_map &map)
 	map(0xa0, 0xa0).portr("battery");
 	map(0xb0, 0xb9).r(FUNC(nc200_state::keyboard_r));
 	map(0xc0, 0xc1).rw(m_uart, FUNC(i8251_device::read), FUNC(i8251_device::write));
-	map(0xd0, 0xd1).rw(m_rtc, FUNC(mc146818_device::read), FUNC(mc146818_device::write));
+	map(0xd0, 0xd0).w(m_rtc, FUNC(mc146818_device::address_w));
+	map(0xd1, 0xd1).rw(m_rtc, FUNC(mc146818_device::data_r), FUNC(mc146818_device::data_w));
 	map(0xe0, 0xe1).m(m_fdc, FUNC(upd765a_device::map));
 }
 
@@ -450,10 +452,10 @@ static INPUT_PORTS_START( nc100 )
 	PORT_CONFNAME(0x08, 0x00, "Main Battery")
 	PORT_CONFSETTING(   0x00, "Good")
 	PORT_CONFSETTING(   0x08, "Bad")
-	PORT_BIT(0x10, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_battery_voltage_r)
+	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_battery_voltage_r)
 	PORT_BIT(0x20, 0x00, IPT_UNKNOWN) // input voltage?
-	PORT_BIT(0x40, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_write_protect_r)
-	PORT_BIT(0x80, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_card_detect_r)
+	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_write_protect_r)
+	PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc100_state, pcmcia_card_detect_r)
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( nc100de )
@@ -745,12 +747,12 @@ static INPUT_PORTS_START( nc200 )
 	PORT_CONFSETTING(   0x00, "Good")
 	PORT_CONFSETTING(   0x04, "Bad")
 	PORT_BIT(0x08, 0x00, IPT_UNKNOWN)
-	PORT_BIT(0x10, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_battery_voltage_r)
+	PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_battery_voltage_r)
 	PORT_CONFNAME(0x20, 0x00, "Lithium Battery")
 	PORT_CONFSETTING(   0x00, "Good")
 	PORT_CONFSETTING(   0x20, "Bad")
-	PORT_BIT(0x40, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_write_protect_r)
-	PORT_BIT(0x80, IP_ACTIVE_LOW, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_card_detect_r)
+	PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_write_protect_r)
+	PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_CUSTOM) PORT_READ_LINE_MEMBER(nc200_state, pcmcia_card_detect_r)
 INPUT_PORTS_END
 
 
@@ -962,7 +964,7 @@ void nc200_state::card_wait_control_w(uint8_t data)
 //  CENTRONICS
 //**************************************************************************
 
-WRITE_LINE_MEMBER( nc_state::centronics_busy_w )
+void nc_state::centronics_busy_w(int state)
 {
 	m_centronics_busy = state;
 }
@@ -975,7 +977,7 @@ uint8_t nc200_state::centronics_busy_r()
 	return m_centronics_busy;
 }
 
-WRITE_LINE_MEMBER( nc100_state::centronics_ack_w )
+void nc100_state::centronics_ack_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "centronics_ack_w: %02x\n", state);
 
@@ -987,7 +989,7 @@ WRITE_LINE_MEMBER( nc100_state::centronics_ack_w )
 	update_interrupts();
 }
 
-WRITE_LINE_MEMBER( nc200_state::centronics_ack_w )
+void nc200_state::centronics_ack_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "centronics_ack_w: %02x\n", state);
 
@@ -1034,7 +1036,7 @@ void nc200_state::uart_control_w(uint8_t data)
 	nc_state::uart_control_w(data);
 }
 
-WRITE_LINE_MEMBER( nc100_state::uart_txrdy_w )
+void nc100_state::uart_txrdy_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "uart_txrdy_w: %02x\n", state);
 
@@ -1046,7 +1048,7 @@ WRITE_LINE_MEMBER( nc100_state::uart_txrdy_w )
 	m_uart_txrdy = state;
 }
 
-WRITE_LINE_MEMBER( nc100_state::uart_rxrdy_w )
+void nc100_state::uart_rxrdy_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "uart_rxrdy_w: %02x\n", state);
 
@@ -1058,7 +1060,7 @@ WRITE_LINE_MEMBER( nc100_state::uart_rxrdy_w )
 	m_uart_rxrdy = state;
 }
 
-WRITE_LINE_MEMBER( nc200_state::uart_rxrdy_w )
+void nc200_state::uart_rxrdy_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "uart_rxrdy_w: %02x\n", state);
 
@@ -1075,7 +1077,7 @@ WRITE_LINE_MEMBER( nc200_state::uart_rxrdy_w )
 //  FLOPPY
 //**************************************************************************
 
-WRITE_LINE_MEMBER( nc200_state::fdc_int_w )
+void nc200_state::fdc_int_w(int state)
 {
 	LOGMASKED(LOG_IRQ, "fdc_int_w: %02x\n", state);
 
@@ -1345,10 +1347,10 @@ void nc_state::nc_base(machine_config &config)
 	rs232.dsr_handler().set(m_uart, FUNC(i8251_device::write_dsr));
 
 	PCCARD_SLOT(config, m_pcmcia, pcmcia_devices, nullptr);
-	m_pcmcia->card_detect_cb().set(FUNC(nc_state::pcmcia_card_detect_w));
-	m_pcmcia->write_protect_cb().set(FUNC(nc_state::pcmcia_write_protect_w));
-	m_pcmcia->battery_voltage_1_cb().set(FUNC(nc_state::pcmcia_battery_voltage_1_w));
-	m_pcmcia->battery_voltage_2_cb().set(FUNC(nc_state::pcmcia_battery_voltage_2_w));
+	m_pcmcia->cd1().set(FUNC(nc_state::pcmcia_card_detect_w));
+	m_pcmcia->wp().set(FUNC(nc_state::pcmcia_write_protect_w));
+	m_pcmcia->bvd1().set(FUNC(nc_state::pcmcia_battery_voltage_1_w));
+	m_pcmcia->bvd2().set(FUNC(nc_state::pcmcia_battery_voltage_2_w));
 }
 
 void nc100_state::nc100(machine_config &config)

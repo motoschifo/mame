@@ -90,6 +90,9 @@ Chips:
 ***************************************************************************/
 
 #include "emu.h"
+
+#include "microtouchlayout.h"
+
 #include "cpu/m68000/m68000.h"
 #include "machine/ds1204.h"
 #include "machine/mc68681.h"
@@ -99,6 +102,7 @@ Chips:
 #include "machine/watchdog.h"
 #include "sound/okim6295.h"
 #include "video/cesblit.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "speaker.h"
@@ -129,18 +133,18 @@ public:
 	void tm(machine_config &config);
 	void tmds1204(machine_config &config);
 
-	DECLARE_READ_LINE_MEMBER(read_rand);
+	int read_rand();
 
-	DECLARE_WRITE_LINE_MEMBER(write_oki_bank0);
-	DECLARE_WRITE_LINE_MEMBER(write_oki_bank1);
+	void write_oki_bank0(int state);
+	void write_oki_bank1(int state);
 
 private:
-	DECLARE_WRITE_LINE_MEMBER(blitter_irq_callback);
+	void blitter_irq_callback(int state);
 
 	TIMER_DEVICE_CALLBACK_MEMBER(scanline_interrupt);
 	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 
-	DECLARE_WRITE_LINE_MEMBER(duart_irq_handler);
+	void duart_irq_handler(int state);
 
 	uint16_t rtc_r(offs_t offset);
 	void rtc_w(offs_t offset, uint16_t data);
@@ -161,7 +165,7 @@ private:
 	uint8_t m_rtc_ram[8]{};
 };
 
-WRITE_LINE_MEMBER(tmaster_state::blitter_irq_callback)
+void tmaster_state::blitter_irq_callback(int state)
 {
 //  logerror("%s: Blitter IRQ callback state = %x\n", machine().describe_context(), state);
 	m_maincpu->set_input_line(2, state);
@@ -185,7 +189,7 @@ uint32_t tmaster_state::screen_update(screen_device &screen, bitmap_ind16 &bitma
 
 ***************************************************************************/
 
-WRITE_LINE_MEMBER(tmaster_state::write_oki_bank0)
+void tmaster_state::write_oki_bank0(int state)
 {
 	if (state)
 		m_okibank |= 1;
@@ -195,7 +199,7 @@ WRITE_LINE_MEMBER(tmaster_state::write_oki_bank0)
 	m_oki->set_rom_bank(m_okibank);
 }
 
-WRITE_LINE_MEMBER(tmaster_state::write_oki_bank1)
+void tmaster_state::write_oki_bank1(int state)
 {
 	if (state)
 		m_okibank |= 2;
@@ -217,7 +221,7 @@ void tmaster_state::cpu_space_map(address_map &map)
 	map(0xfffff8, 0xfffff9).lr16(NAME([this] () -> u16 { return m_duart->get_irq_vector(); }));
 }
 
-WRITE_LINE_MEMBER(tmaster_state::duart_irq_handler)
+void tmaster_state::duart_irq_handler(int state)
 {
 	m_maincpu->set_input_line(4, state);
 }
@@ -264,7 +268,7 @@ void tmaster_state::rtc_w(offs_t offset, uint16_t data)
 
 ***************************************************************************/
 
-READ_LINE_MEMBER(tmaster_state::read_rand)
+int tmaster_state::read_rand()
 {
 	return machine().rand() & 1;
 }
@@ -410,11 +414,14 @@ void tmaster_state::tm(machine_config &config)
 	SPEAKER(config, "mono").front_center();
 
 	OKIM6295(config, m_oki, XTAL(24'000'000) / 16, okim6295_device::PIN7_HIGH).add_route(ALL_OUTPUTS, "mono", 1.0); /* 1.5Mhz? clock frequency & pin 7 not verified */
+
+	config.set_default_layout(layout_microtouch);
 }
 
 void tmaster_state::tmds1204(machine_config &config)
 {
 	tm(config);
+
 	DS1204(config, "ds1204", 0);
 }
 

@@ -379,7 +379,7 @@ static void super6_floppies(device_slot_interface &device)
 	device.option_add("525dd", FLOPPY_525_QD);
 }
 
-WRITE_LINE_MEMBER( super6_state::fdc_intrq_w )
+void super6_state::fdc_intrq_w(int state)
 {
 	if (state) m_maincpu->set_input_line(Z80_INPUT_LINE_WAIT, CLEAR_LINE);
 
@@ -387,7 +387,7 @@ WRITE_LINE_MEMBER( super6_state::fdc_intrq_w )
 	// m_maincpu->set_state_int(Z80_AF, 0x7f00);   // hack, see notes
 }
 
-WRITE_LINE_MEMBER( super6_state::fdc_drq_w )
+void super6_state::fdc_drq_w(int state)
 {
 	if (state) m_maincpu->set_input_line(Z80_INPUT_LINE_WAIT, CLEAR_LINE);
 
@@ -450,6 +450,7 @@ void super6_state::super6(machine_config &config)
 	m_maincpu->set_addrmap(AS_PROGRAM, &super6_state::super6_mem);
 	m_maincpu->set_addrmap(AS_IO, &super6_state::super6_io);
 	//m_maincpu->set_daisy_config(super6_daisy_chain);
+	m_maincpu->busack_cb().set(m_dma, FUNC(z80dma_device::bai_w));
 
 	// devices
 	Z80CTC(config, m_ctc, 24_MHz_XTAL / 4);
@@ -458,7 +459,7 @@ void super6_state::super6(machine_config &config)
 	m_ctc->intr_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
 
 	Z80DMA(config, m_dma, 24_MHz_XTAL / 6);
-	m_dma->out_busreq_callback().set(m_dma, FUNC(z80dma_device::bai_w));
+	m_dma->out_busreq_callback().set_inputline(m_maincpu, Z80_INPUT_LINE_BUSRQ);
 	m_dma->out_int_callback().set(m_ctc, FUNC(z80ctc_device::trg2));
 	m_dma->in_mreq_callback().set(FUNC(super6_state::memory_read_byte));
 	m_dma->out_mreq_callback().set(FUNC(super6_state::memory_write_byte));

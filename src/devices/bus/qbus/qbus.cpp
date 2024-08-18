@@ -12,9 +12,12 @@
 
 // Peripheral boards
 #include "dsd4432.h"
-#include "pc11.h"
-#include "qtx.h"
 #include "dvk_kgd.h"
+#include "dvk_mx.h"
+#include "pc11.h"
+#include "qg640.h"
+#include "qtx.h"
+#include "uknc_kmd.h"
 
 
 void qbus_cards(device_slot_interface &device)
@@ -23,6 +26,9 @@ void qbus_cards(device_slot_interface &device)
 	device.option_add("qts1", TTI_QTS1);
 	device.option_add("dsd4432", DSD4432);
 	device.option_add("kgd", DVK_KGD);
+	device.option_add("mx", DVK_MX);
+	device.option_add("mz", UKNC_KMD);
+	device.option_add("qg640", MATROX_QG640);
 }
 
 
@@ -75,12 +81,6 @@ void qbus_slot_device::device_start()
 	device_qbus_card_interface *dev = dynamic_cast<device_qbus_card_interface *>(get_card_device());
 	if (dev)
 		m_bus->add_card(*dev);
-
-	m_write_birq4.resolve_safe();
-	m_write_birq5.resolve_safe();
-	m_write_birq6.resolve_safe();
-	m_write_birq7.resolve_safe();
-	m_write_bdmr.resolve_safe();
 }
 
 
@@ -120,12 +120,6 @@ device_memory_interface::space_config_vector qbus_device::memory_space_config() 
 
 void qbus_device::device_start()
 {
-	// resolve callbacks
-	m_out_birq4_cb.resolve_safe();
-	m_out_birq5_cb.resolve_safe();
-	m_out_birq6_cb.resolve_safe();
-	m_out_birq7_cb.resolve_safe();
-	m_out_bdmr_cb.resolve_safe();
 }
 
 
@@ -135,6 +129,14 @@ void qbus_device::device_start()
 
 void qbus_device::device_reset()
 {
+}
+
+void qbus_device::init_w()
+{
+	for (device_qbus_card_interface &entry : m_device_list)
+	{
+		entry.init_w();
+	}
 }
 
 

@@ -489,7 +489,7 @@ void towns_state::towns_dma_w(offs_t offset, uint8_t data)
  *  Floppy Disc Controller (MB8877A)
  */
 
-WRITE_LINE_MEMBER( towns_state::mb8877a_irq_w )
+void towns_state::mb8877a_irq_w(int state)
 {
 	if(m_towns_fdc_irq6mask == 0)
 		state = 0;
@@ -497,7 +497,7 @@ WRITE_LINE_MEMBER( towns_state::mb8877a_irq_w )
 	if(IRQ_LOG) logerror("PIC: IRQ6 (FDC) set to %i\n",state);
 }
 
-WRITE_LINE_MEMBER( towns_state::mb8877a_drq_w )
+void towns_state::mb8877a_drq_w(int state)
 {
 	m_dma[0]->dmarq(state, 0);
 }
@@ -901,8 +901,11 @@ void towns_state::towns_sound_ctrl_w(offs_t offset, uint8_t data)
 // Joysticks are multiplexed, with fire buttons available when bits 0 and 1 of port 0x4d6 are high. (bits 2 and 3 for second port)
 uint8_t towns_state::towns_padport_r(offs_t offset)
 {
+	// Documentation indicates bit 7 is unused and should be ignored.
+	// Tatsujin Ou expects it to read as zero to navigate menus.
+	// Unclear whether it always reads as zero, or it's affected by something undocumented.
 	unsigned const pad = BIT(offset, 1);
-	return m_pad_ports[pad]->read() & (0x8f | (bitswap<3>(m_towns_pad_mask, pad + 4, (pad * 2) + 1, pad * 2) << 4));
+	return m_pad_ports[pad]->read() & (0x0f | (bitswap<3>(m_towns_pad_mask, pad + 4, (pad * 2) + 1, pad * 2) << 4));
 }
 
 void towns_state::towns_pad_mask_w(uint8_t data)
@@ -1350,9 +1353,16 @@ TIMER_CALLBACK_MEMBER(towns_state::towns_delay_cdda)
 	towns_cdrom_play_cdda(m_cdrom.target());
 }
 
+TIMER_CALLBACK_MEMBER(towns_state::towns_delay_seek)
+{
+	m_towns_cd.extra_status = 0;
+	towns_cd_set_status(0x04,0x00,0x00,0x00);
+}
+
 void towns_state::towns_cdrom_execute_command(cdrom_image_device* device)
 {
 	towns_cdrom_set_irq(TOWNS_CD_IRQ_MPU,0); // TODO: this isn't sufficiently tested
+	m_towns_seek_timer->adjust(attotime::never);
 	if(!device->exists() && (m_towns_cd.command != 0xa0))
 	{  // No CD in drive
 		if(m_towns_cd.command & 0x20)
@@ -1369,8 +1379,9 @@ void towns_state::towns_cdrom_execute_command(cdrom_image_device* device)
 			case 0x00:  // Seek
 				if(m_towns_cd.command & 0x20)
 				{
-					m_towns_cd.extra_status = 1;
+					m_towns_cd.extra_status = 0;
 					towns_cd_set_status(0x00,0x00,0x00,0x00);
+					m_towns_seek_timer->adjust(attotime::from_msec(500));
 				}
 				LOGMASKED(LOG_CD, "CD: Command 0x00: SEEK\n");
 				break;
@@ -1497,10 +1508,6 @@ uint8_t towns_state::towns_cdrom_r(offs_t offset)
 				{
 					switch(m_towns_cd.command & 0x9f)
 					{
-						case 0x00:  // seek
-							towns_cd_set_status(0x04,0x00,0x00,0x00);
-							m_towns_cd.extra_status = 0;
-							break;
 						case 0x02:  // read
 							if(m_towns_cd.extra_status == 2)
 								towns_cd_set_status(0x22,0x00,0x00,0x00);
@@ -1724,41 +1731,41 @@ void towns_state::towns_rtc_select_w(uint8_t data)
 	m_rtc->address_write_w(BIT(data, 0));
 }
 
-WRITE_LINE_MEMBER(towns_state::rtc_d0_w)
+void towns_state::rtc_d0_w(int state)
 {
 	m_rtc_d = (m_rtc_d & ~1) | (state ? 1 : 0);
 }
 
-WRITE_LINE_MEMBER(towns_state::rtc_d1_w)
+void towns_state::rtc_d1_w(int state)
 {
 	m_rtc_d = (m_rtc_d & ~2) | (state ? 2 : 0);
 }
 
-WRITE_LINE_MEMBER(towns_state::rtc_d2_w)
+void towns_state::rtc_d2_w(int state)
 {
 	m_rtc_d = (m_rtc_d & ~4) | (state ? 4 : 0);
 }
 
-WRITE_LINE_MEMBER(towns_state::rtc_d3_w)
+void towns_state::rtc_d3_w(int state)
 {
 	m_rtc_d = (m_rtc_d & ~8) | (state ? 8 : 0);
 }
 
-WRITE_LINE_MEMBER(towns_state::rtc_busy_w)
+void towns_state::rtc_busy_w(int state)
 {
 	// active low output
 	m_rtc_busy = !state;
 }
 
 // SCSI controller - I/O ports 0xc30 and 0xc32
-WRITE_LINE_MEMBER(towns_state::towns_scsi_irq)
+void towns_state::towns_scsi_irq(int state)
 {
 	m_pic_slave->ir0_w(state);
 	if(IRQ_LOG)
 		logerror("PIC: IRQ8 (SCSI) set to %i\n",state);
 }
 
-WRITE_LINE_MEMBER(towns_state::towns_scsi_drq)
+void towns_state::towns_scsi_drq(int state)
 {
 	m_dma[0]->dmarq(state, 1);  // SCSI HDs use channel 1
 }
@@ -1836,7 +1843,7 @@ uint8_t towns_state::towns_41ff_r()
 }
 
 // YM3438 interrupt (IRQ 13)
-WRITE_LINE_MEMBER(towns_state::towns_fm_irq)
+void towns_state::towns_fm_irq(int state)
 {
 	if(state)
 	{
@@ -1867,7 +1874,7 @@ RF5C68_SAMPLE_END_CB_MEMBER(towns_state::towns_pcm_irq)
 	}
 }
 
-WRITE_LINE_MEMBER(towns_state::towns_pit_out0_changed)
+void towns_state::towns_pit_out0_changed(int state)
 {
 	m_pit_out0 = state;
 
@@ -1882,7 +1889,7 @@ WRITE_LINE_MEMBER(towns_state::towns_pit_out0_changed)
 	m_pic_master->ir0_w(m_timer0 || m_timer1);
 }
 
-WRITE_LINE_MEMBER(towns_state::towns_pit_out1_changed)
+void towns_state::towns_pit_out1_changed(int state)
 {
 	m_pit_out1 = state;
 
@@ -1897,13 +1904,13 @@ WRITE_LINE_MEMBER(towns_state::towns_pit_out1_changed)
 	m_pic_master->ir0_w(m_timer0 || m_timer1);
 }
 
-WRITE_LINE_MEMBER( towns_state::pit_out2_changed )
+void towns_state::pit_out2_changed(int state)
 {
 	m_pit_out2 = state ? 1 : 0;
 	m_speaker->level_w(speaker_get_spk());
 }
 
-WRITE_LINE_MEMBER( towns_state::pit2_out1_changed )
+void towns_state::pit2_out1_changed(int state)
 {
 	m_i8251->write_rxc(state);
 	m_i8251->write_txc(state);
@@ -1940,26 +1947,26 @@ uint8_t towns_state::towns_serial_r(offs_t offset)
 	}
 }
 
-WRITE_LINE_MEMBER( towns_state::towns_serial_irq )
+void towns_state::towns_serial_irq(int state)
 {
 	m_serial_irq_source = state ? 0x01 : 0x00;
 	m_pic_master->ir2_w(state);
 	popmessage("Serial IRQ state: %i\n",state);
 }
 
-WRITE_LINE_MEMBER( towns_state::towns_rxrdy_irq )
+void towns_state::towns_rxrdy_irq(int state)
 {
 	if(m_serial_irq_enable & RXRDY_IRQ_ENABLE)
 		towns_serial_irq(state);
 }
 
-WRITE_LINE_MEMBER( towns_state::towns_txrdy_irq )
+void towns_state::towns_txrdy_irq(int state)
 {
 	if(m_serial_irq_enable & TXRDY_IRQ_ENABLE)
 		towns_serial_irq(state);
 }
 
-WRITE_LINE_MEMBER( towns_state::towns_syndet_irq )
+void towns_state::towns_syndet_irq(int state)
 {
 	if(m_serial_irq_enable & SYNDET_IRQ_ENABLE)
 		towns_serial_irq(state);
@@ -2353,12 +2360,116 @@ void towns_state::driver_start()
 	m_towns_intervaltimer2 = timer_alloc(FUNC(towns_state::intervaltimer2_timeout), this);
 	m_towns_status_timer = timer_alloc(FUNC(towns_state::towns_cd_status_ready), this);
 	m_towns_cdda_timer = timer_alloc(FUNC(towns_state::towns_delay_cdda), this);
+	m_towns_seek_timer = timer_alloc(FUNC(towns_state::towns_delay_seek), this);
 
-	memset(&m_video,0,sizeof(struct towns_video_controller));
-	memset(&m_towns_cd,0,sizeof(struct towns_cdrom_controller));
+	m_video = towns_video_controller();
+	m_towns_cd = towns_cdrom_controller();
 	m_towns_cd.status = 0x01;  // CDROM controller ready
 	m_towns_cd.buffer_ptr = -1;
 	m_towns_cd.read_timer = timer_alloc(FUNC(towns_state::towns_cdrom_read_byte), this);
+
+	save_item(NAME(m_ftimer));
+	save_item(NAME(m_freerun_timer));
+	save_item(NAME(m_intervaltimer2_period));
+	save_item(NAME(m_intervaltimer2_irqmask));
+	save_item(NAME(m_intervaltimer2_timeout_flag));
+	save_item(NAME(m_intervaltimer2_timeout_flag2));
+	save_item(NAME(m_nmi_mask));
+	save_item(NAME(m_compat_mode));
+	save_item(NAME(m_towns_system_port));
+	save_item(NAME(m_towns_ankcg_enable));
+	save_item(NAME(m_towns_mainmem_enable));
+	save_item(NAME(m_towns_ram_enable));
+	save_pointer(NAME(m_towns_vram), 0x20000);
+	save_pointer(NAME(m_towns_gfxvram), 0x80000);
+	save_pointer(NAME(m_towns_txtvram), 0x20000);;
+	save_item(NAME(m_towns_selected_drive));
+	save_item(NAME(m_towns_fdc_irq6mask));
+	save_pointer(NAME(m_towns_serial_rom), 256/8);
+	save_item(NAME(m_towns_srom_position));
+	save_item(NAME(m_towns_srom_clk));
+	save_item(NAME(m_towns_srom_reset));
+	save_item(NAME(m_towns_rtc_select));
+	save_item(NAME(m_towns_rtc_data));
+	save_item(NAME(m_towns_timer_mask));
+	save_item(NAME(m_towns_kb_status));
+	save_item(NAME(m_towns_kb_irq1_enable));
+	save_item(NAME(m_towns_kb_output));  // key output
+	save_item(NAME(m_towns_kb_extend));  // extended key output
+	save_item(NAME(m_towns_fm_irq_flag));
+	save_item(NAME(m_towns_pcm_irq_flag));
+	save_item(NAME(m_towns_pcm_channel_flag));
+	save_item(NAME(m_towns_pcm_channel_mask));
+	save_item(NAME(m_towns_pad_mask));
+	save_item(NAME(m_towns_volume));  // volume ports
+	save_item(NAME(m_towns_volume_select));
+	save_item(NAME(m_towns_scsi_control));
+	save_item(NAME(m_towns_scsi_status));
+	save_item(NAME(m_towns_spkrdata));
+	save_item(NAME(m_pit_out0));
+	save_item(NAME(m_pit_out1));
+	save_item(NAME(m_pit_out2));
+	save_item(NAME(m_serial_irq_source));
+
+	save_item(NAME(m_kb_prev));
+	save_item(NAME(m_prev_pad_mask));
+	save_item(NAME(m_prev_x));
+	save_item(NAME(m_prev_y));
+	save_item(NAME(m_rtc_d));
+	save_item(NAME(m_rtc_busy));
+	save_item(NAME(m_vram_mask));
+	save_item(NAME(m_vram_mask_addr));
+
+	save_item(STRUCT_MEMBER(m_towns_cd, command));
+	save_item(STRUCT_MEMBER(m_towns_cd, status));
+	save_item(STRUCT_MEMBER(m_towns_cd, cmd_status));
+	save_item(STRUCT_MEMBER(m_towns_cd, cmd_status_ptr));
+	save_item(STRUCT_MEMBER(m_towns_cd, extra_status));
+	save_item(STRUCT_MEMBER(m_towns_cd, parameter));
+	save_item(STRUCT_MEMBER(m_towns_cd, mpu_irq_enable));
+	save_item(STRUCT_MEMBER(m_towns_cd, dma_irq_enable));
+	save_item(STRUCT_MEMBER(m_towns_cd, buffer));
+	save_item(STRUCT_MEMBER(m_towns_cd, buffer_ptr));
+	save_item(STRUCT_MEMBER(m_towns_cd, lba_current));
+	save_item(STRUCT_MEMBER(m_towns_cd, lba_last));
+	save_item(STRUCT_MEMBER(m_towns_cd, cdda_current));
+	save_item(STRUCT_MEMBER(m_towns_cd, cdda_length));
+	save_item(STRUCT_MEMBER(m_towns_cd, software_tx));
+
+	save_item(STRUCT_MEMBER(m_video, towns_vram_wplane));
+	save_item(STRUCT_MEMBER(m_video, towns_vram_rplane));
+	save_item(STRUCT_MEMBER(m_video, towns_vram_page_sel));
+	save_item(STRUCT_MEMBER(m_video, towns_palette_select));
+	save_item(STRUCT_MEMBER(m_video, towns_palette_r));
+	save_item(STRUCT_MEMBER(m_video, towns_palette_g));
+	save_item(STRUCT_MEMBER(m_video, towns_palette_b));
+	save_item(STRUCT_MEMBER(m_video, towns_degipal));
+	save_item(STRUCT_MEMBER(m_video, towns_dpmd_flag));
+	save_item(STRUCT_MEMBER(m_video, towns_crtc_mix));
+	save_item(STRUCT_MEMBER(m_video, towns_crtc_sel));
+	save_item(STRUCT_MEMBER(m_video, towns_crtc_reg));
+	save_item(STRUCT_MEMBER(m_video, towns_video_sel));
+	save_item(STRUCT_MEMBER(m_video, towns_video_reg));
+	save_item(STRUCT_MEMBER(m_video, towns_sprite_sel));
+	save_item(STRUCT_MEMBER(m_video, towns_sprite_reg));
+	save_item(STRUCT_MEMBER(m_video, towns_sprite_flag));
+	save_item(STRUCT_MEMBER(m_video, towns_sprite_page));
+	save_item(STRUCT_MEMBER(m_video, towns_tvram_enable));
+	save_item(STRUCT_MEMBER(m_video, towns_kanji_offset));
+	save_item(STRUCT_MEMBER(m_video, towns_kanji_code_h));
+	save_item(STRUCT_MEMBER(m_video, towns_kanji_code_l));
+	save_item(STRUCT_MEMBER(m_video, towns_display_plane));
+	save_item(STRUCT_MEMBER(m_video, towns_display_page_sel));
+	save_item(STRUCT_MEMBER(m_video, towns_vblank_flag));
+	save_item(STRUCT_MEMBER(m_video, towns_layer_ctrl));
+	save_item(NAME(m_video.towns_crtc_layerscr[0].min_x));
+	save_item(NAME(m_video.towns_crtc_layerscr[0].max_x));
+	save_item(NAME(m_video.towns_crtc_layerscr[0].min_y));
+	save_item(NAME(m_video.towns_crtc_layerscr[0].max_y));
+	save_item(NAME(m_video.towns_crtc_layerscr[1].min_x));
+	save_item(NAME(m_video.towns_crtc_layerscr[1].max_x));
+	save_item(NAME(m_video.towns_crtc_layerscr[1].min_y));
+	save_item(NAME(m_video.towns_crtc_layerscr[1].max_y));
 
 	save_pointer(m_video.towns_crtc_reg,"CRTC registers",32);
 	save_pointer(m_video.towns_video_reg,"Video registers",2);

@@ -104,8 +104,6 @@ void at45db041_device::device_start()
 	save_item(NAME(m_pin.wp));
 	save_item(NAME(m_pin.reset));
 	save_item(NAME(m_pin.busy));
-
-	write_so.resolve_safe();
 }
 
 
@@ -164,8 +162,8 @@ void at45db041_device::nvram_default()
 
 bool at45db041_device::nvram_read(util::read_stream &file)
 {
-	size_t actual;
-	return !file.read(&m_data[0], m_size, actual) && actual == m_size;
+	auto const [err, actual] = read(file, &m_data[0], m_size);
+	return !err && (actual == m_size);
 }
 
 //-------------------------------------------------
@@ -175,8 +173,8 @@ bool at45db041_device::nvram_read(util::read_stream &file)
 
 bool at45db041_device::nvram_write(util::write_stream &file)
 {
-	size_t actual;
-	return !file.write(&m_data[0], m_size, actual) && actual == m_size;
+	auto const [err, actual] = write(file, &m_data[0], m_size);
+	return !err;
 }
 
 uint8_t at45db041_device::read_byte()
@@ -323,19 +321,19 @@ void at45db041_device::write_byte(uint8_t data)
 	}
 }
 
-READ_LINE_MEMBER(at45db041_device::so_r)
+int at45db041_device::so_r()
 {
 	if (m_pin.cs == 0) return 0;
 	return m_pin.so;
 }
 
-WRITE_LINE_MEMBER(at45db041_device::si_w)
+void at45db041_device::si_w(int state)
 {
 	if (m_pin.cs == 0) return;
 	m_pin.si = state;
 }
 
-WRITE_LINE_MEMBER(at45db041_device::cs_w)
+void at45db041_device::cs_w(int state)
 {
 	// check if changed
 	if (m_pin.cs == state) return;
@@ -358,7 +356,7 @@ WRITE_LINE_MEMBER(at45db041_device::cs_w)
 	m_pin.cs = state;
 }
 
-WRITE_LINE_MEMBER(at45db041_device::sck_w)
+void at45db041_device::sck_w(int state)
 {
 	// check if changed
 	if (m_pin.sck == state) return;

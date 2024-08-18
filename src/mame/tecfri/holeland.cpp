@@ -64,14 +64,12 @@ protected:
 	tilemap_t *m_bg_tilemap = nullptr;
 	uint8_t m_palette_offset = 0U;
 
-	DECLARE_WRITE_LINE_MEMBER(coin_counter_w);
+	void coin_counter_w(int state);
 
 	void videoram_w(offs_t offset, uint8_t data);
 	void colorram_w(offs_t offset, uint8_t data);
 	void pal_offs_w(uint8_t data);
 	void scroll_w(uint8_t data);
-	DECLARE_WRITE_LINE_MEMBER(flipscreen_x_w);
-	DECLARE_WRITE_LINE_MEMBER(flipscreen_y_w);
 
 	void io_map(address_map &map);
 };
@@ -113,8 +111,6 @@ private:
 	void draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect);
 	void prg_map(address_map &map);
 };
-
-// video
 
 /***************************************************************************
 
@@ -200,16 +196,6 @@ void base_state::pal_offs_w(uint8_t data)
 void base_state::scroll_w(uint8_t data)
 {
 	m_bg_tilemap->set_scrollx(0, data);
-}
-
-WRITE_LINE_MEMBER(base_state::flipscreen_x_w)
-{
-	flip_screen_x_set(state);
-}
-
-WRITE_LINE_MEMBER(base_state::flipscreen_y_w)
-{
-	flip_screen_y_set(state);
 }
 
 
@@ -300,9 +286,7 @@ uint32_t crzrally_state::screen_update(screen_device &screen, bitmap_ind16 &bitm
 }
 
 
-// machine
-
-WRITE_LINE_MEMBER(base_state::coin_counter_w)
+void base_state::coin_counter_w(int state)
 {
 	machine().bookkeeping().coin_counter_w(0, state);
 }
@@ -564,8 +548,8 @@ void holeland_state::holeland(machine_config &config)
 	LS259(config, m_latch); // 3J
 	m_latch->parallel_out_cb().set(FUNC(holeland_state::pal_offs_w)).mask(0x03);
 	m_latch->q_out_cb<5>().set(FUNC(holeland_state::coin_counter_w));
-	m_latch->q_out_cb<6>().set(FUNC(holeland_state::flipscreen_x_w));
-	m_latch->q_out_cb<7>().set(FUNC(holeland_state::flipscreen_y_w));
+	m_latch->q_out_cb<6>().set(FUNC(holeland_state::flip_screen_x_set));
+	m_latch->q_out_cb<7>().set(FUNC(holeland_state::flip_screen_y_set));
 
 	WATCHDOG_TIMER(config, "watchdog");
 

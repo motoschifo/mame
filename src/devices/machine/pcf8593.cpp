@@ -134,8 +134,8 @@ void pcf8593_device::nvram_default()
 
 bool pcf8593_device::nvram_read(util::read_stream &file)
 {
-	size_t actual;
-	return !file.read(m_data, sizeof(m_data), actual) && actual == sizeof(m_data);
+	auto const [err, actual] = read(file, m_data, sizeof(m_data));
+	return !err && (actual == sizeof(m_data));
 }
 
 
@@ -146,8 +146,8 @@ bool pcf8593_device::nvram_read(util::read_stream &file)
 
 bool pcf8593_device::nvram_write(util::write_stream &file)
 {
-	size_t actual;
-	return !file.write(m_data, sizeof(m_data), actual) && actual == sizeof(m_data);
+	auto const [err, actual] = write(file, m_data, sizeof(m_data));
+	return !err;
 }
 
 
@@ -156,7 +156,7 @@ bool pcf8593_device::nvram_write(util::write_stream &file)
     pcf8593_pin_scl
 -------------------------------------------------*/
 
-WRITE_LINE_MEMBER(pcf8593_device::scl_w)
+void pcf8593_device::scl_w(int state)
 {
 	// send bit
 	// FIXME: Processing on the rising edge of the clock causes sda output to
@@ -238,7 +238,7 @@ WRITE_LINE_MEMBER(pcf8593_device::scl_w)
     pcf8593_pin_sda_w
 -------------------------------------------------*/
 
-WRITE_LINE_MEMBER(pcf8593_device::sda_w)
+void pcf8593_device::sda_w(int state)
 {
 	// clock is high
 	if (m_pin_scl)
@@ -272,7 +272,7 @@ WRITE_LINE_MEMBER(pcf8593_device::sda_w)
     pcf8593_pin_sda_r
 -------------------------------------------------*/
 
-READ_LINE_MEMBER(pcf8593_device::sda_r)
+int pcf8593_device::sda_r()
 {
 	return m_inp;
 }

@@ -16,17 +16,9 @@ ROM_END
 const int st_kbd_device::mouse_xya[3][4] = { { 0, 0, 0, 0 }, { 1, 1, 0, 0 }, { 0, 1, 1, 0 } };
 const int st_kbd_device::mouse_xyb[3][4] = { { 0, 0, 0, 0 }, { 0, 1, 1, 0 }, { 1, 1, 0, 0 } };
 
-void st_kbd_device::map(address_map &map)
-{
-	map(0x0000, 0x001f).m(m_cpu, FUNC(hd6301_cpu_device::m6801_io));
-	map(0x0080, 0x00ff).ram();
-	map(0xf000, 0xffff).rom().region("cpu", 0);
-}
-
 void st_kbd_device::device_add_mconfig(machine_config &config)
 {
 	HD6301V1(config, m_cpu, 4_MHz_XTAL);
-	m_cpu->set_addrmap(AS_PROGRAM, &st_kbd_device::map);
 	m_cpu->in_p1_cb().set(FUNC(st_kbd_device::port1_r));
 	m_cpu->in_p2_cb().set(FUNC(st_kbd_device::port2_r));
 	m_cpu->out_p2_cb().set(FUNC(st_kbd_device::port2_w));
@@ -49,6 +41,7 @@ st_kbd_device::st_kbd_device(const machine_config &mconfig, const char *tag, dev
 	m_joy(*this, "JOY%u", 0U),
 	m_mousex(*this, "MOUSEX"),
 	m_mousey(*this, "MOUSEY"),
+	m_mouseb(*this, "MOUSEB"),
 	m_config(*this, "config"),
 	m_keylatch(0),
 	m_mouse(0),
@@ -65,7 +58,6 @@ st_kbd_device::st_kbd_device(const machine_config &mconfig, const char *tag, dev
 void st_kbd_device::device_start()
 {
 	m_led.resolve();
-	m_rx_cb.resolve();
 
 	save_item(NAME(m_keylatch));
 	save_item(NAME(m_mouse));
@@ -147,11 +139,18 @@ uint8_t st_kbd_device::port2_r()
 {
 	//  bit     description
 	//  0       JOY 1-5
-	//  1       JOY 0-6
-	//  2       JOY 1-6
+	//  1       JOY 0-6 / mouse button 1
+	//  2       JOY 1-6 / mouse button 2
 	//  3       serial from cpu
 
-	return (m_joy[1]->read() & 0x06) | (m_tx << 3);
+	uint8_t data;
+
+	if ((m_config->read() & 0x01) == 0)
+		data = m_mouseb->read();
+	else
+		data = m_joy[0]->read();
+
+	return (data & 0x06) | (m_tx << 3);
 }
 
 void st_kbd_device::port2_w(uint8_t data)
@@ -358,6 +357,10 @@ static INPUT_PORTS_START(stkbd)
 
 	PORT_START("MOUSEY")
 	PORT_BIT( 0xff, 0x00, IPT_MOUSE_Y ) PORT_SENSITIVITY(100) PORT_KEYDELTA(5) PORT_MINMAX(0, 255) PORT_PLAYER(1)
+
+	PORT_START("MOUSEB")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON1) PORT_NAME("Mouse Button 1") PORT_CODE(MOUSECODE_BUTTON1)
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1) PORT_NAME("Mouse Button 2") PORT_CODE(MOUSECODE_BUTTON2)
 INPUT_PORTS_END
 
 ioport_constructor st_kbd_device::device_input_ports() const

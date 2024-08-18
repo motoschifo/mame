@@ -33,10 +33,13 @@ public:
 	// Q-Bus interface
 	virtual void biaki_w(int state) { }
 	virtual void bdmgi_w(int state) { }
+	virtual void init_w() { device_reset(); }
 
 protected:
 	// construction/destruction
 	device_qbus_card_interface(const machine_config &mconfig, device_t &device);
+
+	virtual void device_reset() { }
 
 	virtual int z80daisy_irq_state() { return 0; }
 	virtual int z80daisy_irq_ack() { return -1; }
@@ -79,12 +82,14 @@ public:
 	void add_card(device_qbus_card_interface &card);
 	void install_device(offs_t start, offs_t end, read16sm_delegate rhandler, write16sm_delegate whandler, uint32_t mask=0xffffffff);
 
-	DECLARE_WRITE_LINE_MEMBER(birq4_w) { m_out_birq4_cb(state); }
-	DECLARE_WRITE_LINE_MEMBER(birq5_w) { m_out_birq5_cb(state); }
-	DECLARE_WRITE_LINE_MEMBER(birq6_w) { m_out_birq6_cb(state); }
-	DECLARE_WRITE_LINE_MEMBER(birq7_w) { m_out_birq7_cb(state); }
+	void init_w();
 
-	DECLARE_WRITE_LINE_MEMBER(bdmr_w) { m_out_bdmr_cb(state); }
+	void birq4_w(int state) { m_out_birq4_cb(state); }
+	void birq5_w(int state) { m_out_birq5_cb(state); }
+	void birq6_w(int state) { m_out_birq6_cb(state); }
+	void birq7_w(int state) { m_out_birq7_cb(state); }
+
+	void bdmr_w(int state) { m_out_bdmr_cb(state); }
 
 	const address_space_config m_program_config;
 
@@ -132,13 +137,12 @@ public:
 	qbus_slot_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	// computer interface
-	DECLARE_WRITE_LINE_MEMBER( biaki_w ) { if (m_card) m_card->biaki_w(state); }
-	DECLARE_WRITE_LINE_MEMBER( bdmgi_w ) { if (m_card) m_card->bdmgi_w(state); }
+	void biaki_w(int state) { if (m_card) m_card->biaki_w(state); }
+	void bdmgi_w(int state) { if (m_card) m_card->bdmgi_w(state); }
 
 protected:
 	// device_t implementation
 	virtual void device_start() override;
-	virtual void device_reset() override { if (m_card) get_card_device()->reset(); }
 
 	devcb_write_line m_write_birq4;
 	devcb_write_line m_write_birq5;

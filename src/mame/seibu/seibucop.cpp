@@ -192,9 +192,6 @@ raiden2cop_device::raiden2cop_device(const machine_config &mconfig, const char *
 	memset(cop_itoa_digits, 0, sizeof(uint8_t)*10);
 
 	memset(cop_regs, 0, sizeof(uint32_t)*8);
-
-
-	memset(cop_collision_info, 0, sizeof(colinfo)*2);
 }
 
 
@@ -285,9 +282,6 @@ void raiden2cop_device::device_start()
 	// legacy
 	save_item(NAME(m_LEGACY_r0));
 	save_item(NAME(m_LEGACY_r1));
-
-	m_videoramout_cb.resolve_safe();
-	m_paletteramout_cb.resolve_safe();
 
 	m_host_space = &m_host_cpu->space(AS_PROGRAM);
 	m_host_endian = m_host_space->endianness() == ENDIANNESS_BIG; // m_cpu_is_68k

@@ -171,7 +171,7 @@ void grandcentral_device::device_add_mconfig(machine_config &config)
 {
 	macio_device::device_add_mconfig(config);
 
-	DBDMA_CHANNEL(config, m_dma_scsi1, 0, m_pci_memory);
+	DBDMA_CHANNEL(config, m_dma_scsi1, 0);
 	m_dma_scsi1->irq_callback().set(FUNC(macio_device::set_irq_line<10>));
 }
 
@@ -195,46 +195,45 @@ void macio_device::config_map(address_map &map)
 //  macio_device - constructor
 //-------------------------------------------------
 
-macio_device::macio_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: pci_device(mconfig, type, tag, owner, clock),
-	  write_irq(*this),
-	  write_pb4(*this),
-	  write_pb5(*this),
-	  write_cb2(*this),
-	  read_pb3(*this),
-	  read_codec(*this),
-	  write_codec(*this),
-	  m_maincpu(*this, finder_base::DUMMY_TAG),
-	  m_via1(*this, "via1"),
-	  m_fdc(*this, "fdc"),
-	  m_floppy(*this, "fdc:%d", 0U),
-	  m_scc(*this, "scc"),
-	  m_dma_scsi(*this, "dma_scsi0"),
-	  m_dma_floppy(*this, "dma_floppy"),
-	  m_dma_sccatx(*this, "dma_scca_tx"),
-	  m_dma_sccarx(*this, "dma_scca_rx"),
-	  m_dma_sccbtx(*this, "dma_sccb_tx"),
-	  m_dma_sccbrx(*this, "dma_sccb_rx"),
-	  m_dma_audio_in(*this, "dma_audin"),
-	  m_dma_audio_out(*this, "dma_audout"),
-	  m_pci_memory(*this, ":pci:00.0", AS_DATA),
-	  m_cur_floppy(nullptr),
-	  m_hdsel(0)
+macio_device::macio_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock) :
+	pci_device(mconfig, type, tag, owner, clock),
+	write_irq(*this),
+	write_pb4(*this),
+	write_pb5(*this),
+	write_cb2(*this),
+	read_pb3(*this, 0),
+	read_codec(*this, 0),
+	write_codec(*this),
+	m_maincpu(*this, finder_base::DUMMY_TAG),
+	m_via1(*this, "via1"),
+	m_fdc(*this, "fdc"),
+	m_floppy(*this, "fdc:%d", 0U),
+	m_scc(*this, "scc"),
+	m_dma_scsi(*this, "dma_scsi0"),
+	m_dma_floppy(*this, "dma_floppy"),
+	m_dma_sccatx(*this, "dma_scca_tx"),
+	m_dma_sccarx(*this, "dma_scca_rx"),
+	m_dma_sccbtx(*this, "dma_sccb_tx"),
+	m_dma_sccbrx(*this, "dma_sccb_rx"),
+	m_dma_audio_in(*this, "dma_audin"),
+	m_dma_audio_out(*this, "dma_audout"),
+	m_cur_floppy(nullptr),
+	m_hdsel(0)
 {
 	m_toggle = 0;
 }
 
-grandcentral_device::grandcentral_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: macio_device(mconfig, GRAND_CENTRAL, tag, owner, clock),
+grandcentral_device::grandcentral_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock) :
+	macio_device(mconfig, GRAND_CENTRAL, tag, owner, clock),
 	m_dma_scsi1(*this, "dma_scsi1")
 {
 }
 
-ohare_device::ohare_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: macio_device(mconfig, type, tag, owner, clock),
-	  device_nvram_interface(mconfig, *this),
-	  m_dma_ata0(*this, "dma_ata0"),
-	  m_dma_ata1(*this, "dma_ata1")
+ohare_device::ohare_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock) :
+	macio_device(mconfig, type, tag, owner, clock),
+	device_nvram_interface(mconfig, *this),
+	m_dma_ata0(*this, "dma_ata0"),
+	m_dma_ata1(*this, "dma_ata1")
 {
 }
 
@@ -264,24 +263,18 @@ paddington_device::paddington_device(const machine_config &mconfig, const char *
 
 void macio_device::common_init()
 {
-	write_irq.resolve_safe();
-	write_pb4.resolve_safe();
-	write_pb5.resolve_safe();
-	write_cb2.resolve_safe();
-	read_pb3.resolve_safe(0);
-	read_codec.resolve_safe(0);
-	write_codec.resolve_safe();
-
-	m_dma_scsi->set_address_space(m_pci_memory);
-	m_dma_floppy->set_address_space(m_pci_memory);
-	m_dma_sccatx->set_address_space(m_pci_memory);
-	m_dma_sccarx->set_address_space(m_pci_memory);
-	m_dma_sccbtx->set_address_space(m_pci_memory);
-	m_dma_sccbrx->set_address_space(m_pci_memory);
-	m_dma_audio_in->set_address_space(m_pci_memory);
-	m_dma_audio_out->set_address_space(m_pci_memory);
-
 	pci_device::device_start();
+
+	address_space *bm = get_pci_busmaster_space();
+	m_dma_scsi->set_address_space(bm);
+	m_dma_floppy->set_address_space(bm);
+	m_dma_sccatx->set_address_space(bm);
+	m_dma_sccarx->set_address_space(bm);
+	m_dma_sccbtx->set_address_space(bm);
+	m_dma_sccbrx->set_address_space(bm);
+	m_dma_audio_in->set_address_space(bm);
+	m_dma_audio_out->set_address_space(bm);
+
 	command = 2; // enable our memory range
 	revision = 1;
 
@@ -304,7 +297,7 @@ void grandcentral_device::device_start()
 	add_map(0x20000, M_MEM, FUNC(grandcentral_device::map));    // Grand Central only has 128K of BAR space, the others have 512K
 	set_ids(0x106b0002, 0x01, 0xff000001, 0x000000);
 
-	m_dma_scsi1->set_address_space(m_pci_memory);
+	m_dma_scsi1->set_address_space(get_pci_busmaster_space());
 }
 
 void ohare_device::device_start()
@@ -314,8 +307,8 @@ void ohare_device::device_start()
 	set_ids(0x106b0007, 0x01, 0xff0000, 0x000000);
 	save_item(NAME(m_nvram));
 
-	m_dma_ata0->set_address_space(m_pci_memory);
-	m_dma_ata1->set_address_space(m_pci_memory);
+	m_dma_ata0->set_address_space(get_pci_busmaster_space());
+	m_dma_ata1->set_address_space(get_pci_busmaster_space());
 }
 
 void heathrow_device::device_start()
@@ -353,7 +346,7 @@ u8 macio_device::via_in_b()
 	return read_pb3() << 3;
 }
 
-WRITE_LINE_MEMBER(macio_device::via_out_cb2)
+void macio_device::via_out_cb2(int state)
 {
 	write_cb2(state & 1);
 }
@@ -377,12 +370,12 @@ void macio_device::via_out_b(u8 data)
 	write_pb5(BIT(data, 5));
 }
 
-WRITE_LINE_MEMBER(macio_device::cb1_w)
+void macio_device::cb1_w(int state)
 {
 	m_via1->write_cb1(state);
 }
 
-WRITE_LINE_MEMBER(macio_device::cb2_w)
+void macio_device::cb2_w(int state)
 {
 	m_via1->write_cb2(state);
 }
@@ -575,7 +568,7 @@ void macio_device::recalc_irqs()
 	}
 }
 
-template<int bit> WRITE_LINE_MEMBER(macio_device::set_irq_line)
+template<int bit> void macio_device::set_irq_line(int state)
 {
 	if (bit < 32)
 	{
@@ -682,8 +675,8 @@ void ohare_device::nvram_default()
 
 bool ohare_device::nvram_read(util::read_stream &file)
 {
-	size_t actual;
-	if (!file.read(m_nvram, 0x8000, actual) && actual == 0x8000)
+	auto const [err, actual] = read(file, m_nvram, 0x8000);
+	if (!err && (actual == 0x8000))
 	{
 		return true;
 	}
@@ -692,8 +685,8 @@ bool ohare_device::nvram_read(util::read_stream &file)
 
 bool ohare_device::nvram_write(util::write_stream &file)
 {
-	size_t actual;
-	return !file.write(m_nvram, 0x8000, actual) && actual == 0x8000;
+	auto const [err, actual] = write(file, m_nvram, 0x8000);
+	return !err;
 }
 
 // Audio support

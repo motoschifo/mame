@@ -34,13 +34,13 @@ public:
 	u8 response_r();
 	void dac_w(offs_t offset, u16 data, u16 mem_mask = ~0);
 	void ataxx_dac_control(offs_t offset, u16 data, u16 mem_mask = ~0);
-	DECLARE_WRITE_LINE_MEMBER(i80186_tmr0_w);
-	DECLARE_WRITE_LINE_MEMBER(i80186_tmr1_w);
+	void i80186_tmr0_w(int state);
+	void i80186_tmr1_w(int state);
 
-	DECLARE_WRITE_LINE_MEMBER(pit0_2_w);
-	DECLARE_WRITE_LINE_MEMBER(pit1_0_w);
-	DECLARE_WRITE_LINE_MEMBER(pit1_1_w);
-	DECLARE_WRITE_LINE_MEMBER(pit1_2_w);
+	void pit0_2_w(int state);
+	void pit1_0_w(int state);
+	void pit1_1_w(int state);
+	void pit1_2_w(int state);
 
 protected:
 	leland_80186_sound_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock);
@@ -49,9 +49,10 @@ protected:
 	virtual void device_start() override;
 	virtual void device_reset() override;
 	virtual void device_add_mconfig(machine_config &config) override;
-	int m_type = 0;
+	int m_type;
 
-	enum {
+	enum
+	{
 		TYPE_LELAND,
 		TYPE_REDLINE,
 		TYPE_ATAXX,
@@ -71,19 +72,19 @@ protected:
 	void leland_80186_map_program(address_map &map);
 
 private:
-	void delayed_response_r(int param);
 	void set_clock_line(int which, int state) { m_clock_active = state ? (m_clock_active | (1<<which)) : (m_clock_active & ~(1<<which)); }
 
 	// internal state
-	u16 m_peripheral = 0;
-	u8 m_last_control = 0;
-	u8 m_clock_active = 0;
-	u8 m_clock_tick = 0;
-	u16 m_sound_command = 0;
-	u16 m_sound_response = 0;
-	u32 m_ext_start = 0;
-	u32 m_ext_stop = 0;
-	u8 m_ext_active = 0;
+	u16 m_peripheral;
+	u8 m_last_control;
+	u8 m_clock_active;
+	u8 m_clock_tick;
+	u16 m_sound_command;
+	u16 m_sound_response;
+	bool m_response_sync;
+	u32 m_ext_start;
+	u32 m_ext_stop;
+	u8 m_ext_active;
 
 	required_device<cpu_device> m_master;
 

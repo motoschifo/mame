@@ -571,7 +571,7 @@ void snes_state::wrio_write(uint8_t data)
 	}
 }
 
-WRITE_LINE_MEMBER(snes_state::snes_extern_irq_w)
+void snes_state::snes_extern_irq_w(int state)
 {
 	m_maincpu->set_input_line(G65816_LINE_IRQ, state);
 }
@@ -727,7 +727,8 @@ uint8_t snes_state::snes_r_bank1(offs_t offset)
 			}
 			else
 			{
-				logerror("(PC=%06x) snes_r_bank1: Unmapped external chip read: %X\n", m_maincpu->pc(), offset);
+				if (!machine().side_effects_disabled())
+					logerror("(PC=%06x) snes_r_bank1: Unmapped external chip read: %X\n", m_maincpu->pc(), offset);
 				value = snes_open_bus_r();                              /* Reserved */
 			}
 		}
@@ -774,7 +775,8 @@ uint8_t snes_state::snes_r_bank2(offs_t offset)
 				}
 				else
 				{
-					logerror("(PC=%06x) snes_r_bank2: Unmapped external chip read: %X\n", m_maincpu->pc(), offset);
+					if (!machine().side_effects_disabled())
+						logerror("(PC=%06x) snes_r_bank2: Unmapped external chip read: %X\n", m_maincpu->pc(), offset);
 					value = snes_open_bus_r();                              /* Reserved */
 				}
 			}

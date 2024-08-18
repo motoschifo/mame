@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:R. Belmont, Karl Stenerud, hap
+// copyright-holders:R. Belmont, Karl Stenerud
 /*
     Mitsubishi M37702/37710/37720 CPU Emulator
 
@@ -336,9 +336,9 @@ void m37732s4_device::map(address_map &map)
 m37710_cpu_device::m37710_cpu_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock, address_map_constructor map_delegate)
 	: cpu_device(mconfig, type, tag, owner, clock)
 	, m_program_config("program", ENDIANNESS_LITTLE, 16, 24, 0, map_delegate)
-	, m_port_in_cb(*this)
+	, m_port_in_cb(*this, 0xff)
 	, m_port_out_cb(*this)
-	, m_analog_cb(*this)
+	, m_analog_cb(*this, 0)
 {
 }
 
@@ -1341,10 +1341,6 @@ void m37710_cpu_device::device_start()
 
 	space(AS_PROGRAM).cache(m_cache);
 	space(AS_PROGRAM).specific(m_program);
-
-	m_port_in_cb.resolve_all_safe(0xff);
-	m_port_out_cb.resolve_all_safe();
-	m_analog_cb.resolve_all_safe(0);
 
 	m_ICount = 0;
 
