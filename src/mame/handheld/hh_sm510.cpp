@@ -36,7 +36,7 @@ TODO:
   gnw_mariocmt, gnw_mariocmta, gnw_mariotj, gnw_mbaway, gnw_mmousep,
   gnw_pinball, gnw_popeyep, gnw_sbuster, gnw_snoopyp, gnw_zelda
 
-********************************************************************************
+================================================================================
 
 Misc Nintendo Game & Watch notes:
 
@@ -121,7 +121,7 @@ The "Game Watch" wristwatches are by Nelsonic, not Nintendo.
 Bassmate Computer (BM-501) is on identical hardware as G&W Multi Screen,
 but it's not part of the game series.
 
-********************************************************************************
+================================================================================
 
 Regarding Электроника (Elektronika, translated: Electronics): It is not
 actually a company. It was a USSR brand name for consumer electronics,
@@ -164,7 +164,7 @@ The MCUs used were not imported from Sharp, but cloned by USSR, renamed to
 
 void hh_sm510_state::machine_start()
 {
-	// resolve handlers
+	// resolve outputs
 	m_out_x.resolve();
 
 	// determine number of input lines (set it in the subclass constructor if different)
@@ -6874,7 +6874,7 @@ public:
 	void tgaiden(machine_config &config);
 
 protected:
-	virtual void machine_start() override;
+	virtual void machine_start() override ATTR_COLD;
 
 private:
 	// R2 connects to a single LED behind the screen
@@ -11585,6 +11585,99 @@ ROM_END
 
 /*******************************************************************************
 
+  Tronica: Diver's Adventure (model DA-37), Clever Chicken (model CC-38V)
+  * PCB labels: DA-37 260383 32-541-1 (DA-37)
+                CC38V 210483 32-545-1 (CC-38V)
+  * Sharp SM510 labels (no decap): 0029 235D TRONICA (DA-37)
+                                   0029 238C TRONICA (CC-38V)
+  * lcd screen with custom segments, 1-bit sound
+
+  DA-37 and CC-38V are the exact same MCU, but with different graphics. The
+  player moves horizontally in DA-37 and vertically in CC-38V.
+
+*******************************************************************************/
+
+class trdivadv_state : public hh_sm510_state
+{
+public:
+	trdivadv_state(const machine_config &mconfig, device_type type, const char *tag) :
+		hh_sm510_state(mconfig, type, tag)
+	{ }
+
+	void trdivadv(machine_config &config);
+	void trclchick(machine_config &config);
+};
+
+// inputs
+
+static INPUT_PORTS_START( trdivadv )
+	PORT_START("IN.0") // S1
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+
+	PORT_START("IN.1") // S2
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_SELECT ) PORT_CHANGED_CB(input_changed) PORT_NAME("Time")
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_START2 ) PORT_CHANGED_CB(input_changed) PORT_NAME("Game B")
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_START1 ) PORT_CHANGED_CB(input_changed) PORT_NAME("Game A")
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_SERVICE2 ) PORT_CHANGED_CB(input_changed) PORT_NAME("Alarm")
+
+	PORT_START("B")
+	PORT_CONFNAME( 0x01, 0x01, "Invincibility (Cheat)") // factory test, unpopulated on PCB
+	PORT_CONFSETTING(    0x01, DEF_STR( Off ) )
+	PORT_CONFSETTING(    0x00, DEF_STR( On ) )
+
+	PORT_START("ACL")
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_SERVICE1 ) PORT_CHANGED_CB(acl_button) PORT_NAME("ACL")
+INPUT_PORTS_END
+
+static INPUT_PORTS_START( trclchick )
+	PORT_INCLUDE( trdivadv )
+
+	PORT_MODIFY("IN.0") // S1
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN ) PORT_CHANGED_CB(input_changed) PORT_16WAY
+INPUT_PORTS_END
+
+// config
+
+void trdivadv_state::trdivadv(machine_config &config)
+{
+	sm510_common(config, 1520, 1080);
+}
+
+void trdivadv_state::trclchick(machine_config &config)
+{
+	sm510_common(config, 811, 1080);
+}
+
+// roms
+
+ROM_START( trdivadv )
+	ROM_REGION( 0x1000, "maincpu", 0 )
+	ROM_LOAD( "0029_235d", 0x0000, 0x1000, CRC(8977a1cf) SHA1(9ac413efedcff8b53b859420c0575c66e7be6e73) )
+
+	ROM_REGION( 165418, "screen", 0)
+	ROM_LOAD( "trdivadv.svg", 0, 165418, CRC(727040f1) SHA1(2318d6973a165eedcd369bd11342eca7efd24c39) )
+ROM_END
+
+ROM_START( trclchick )
+	ROM_REGION( 0x1000, "maincpu", 0 )
+	ROM_LOAD( "0029_238c", 0x0000, 0x1000, CRC(8977a1cf) SHA1(9ac413efedcff8b53b859420c0575c66e7be6e73) )
+
+	ROM_REGION( 122284, "screen", 0)
+	ROM_LOAD( "trclchick.svg", 0, 122284, CRC(c8e67d54) SHA1(d3d113c7bcb597fafddb0fab5410808360ad9a4b) )
+ROM_END
+
+
+
+
+
+/*******************************************************************************
+
   VTech Electronic Number Muncher
   * Sharp SM511 under epoxy (die label 772)
   * lcd screen with custom segments(no background), 1-bit sound
@@ -11877,6 +11970,8 @@ SYST( 1983, trthuball,    trsrescue,   0,      trthuball,    trsrescue,    trsre
 SYST( 1983, trsgkeep,     0,           0,      trsgkeep,     trsgkeep,     trsgkeep_state,     empty_init, "Tronica", "Super Goal Keeper", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
 SYST( 1982, trspacmis,    0,           0,      trspacmis,    trspacmis,    trspacmis_state,    empty_init, "Tronica", "Space Mission (Tronica)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
 SYST( 1982, trspider,     trspacmis,   0,      trspider,     trspacmis,    trspacmis_state,    empty_init, "Tronica", "Spider (Tronica)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
+SYST( 1983, trdivadv,     0,           0,      trdivadv,     trdivadv,     trdivadv_state,     empty_init, "Tronica", "Diver's Adventure", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
+SYST( 1983, trclchick,    trdivadv,    0,      trclchick,    trclchick,    trdivadv_state,     empty_init, "Tronica", "Clever Chicken", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
 
 // misc
 SYST( 1989, nummunch,     0,           0,      nummunch,     nummunch,     nummunch_state,     empty_init, "VTech", "Electronic Number Muncher", MACHINE_SUPPORTS_SAVE )

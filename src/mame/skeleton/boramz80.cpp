@@ -15,6 +15,8 @@ I8255 PPI
 AY-8910 sound chip
 on 0211 PCB: 2x 8-DIP banks
 on 0300 III PCB: 4x 8-DIP banks
+
+Some PCBs have been seen mixing different sets of GFX ROMs with the same program ROM.
 */
 
 
@@ -45,6 +47,8 @@ public:
 	{ }
 
 	void pk(machine_config &config) ATTR_COLD;
+
+	void init_tpkborama();
 
 protected:
 	virtual void video_start() override ATTR_COLD;
@@ -261,8 +265,110 @@ ROM_START( tpkboram )
 	ROM_LOAD( "10.pg8", 0x38000, 0x8000, CRC(4a293afa) SHA1(be532e6a476f78638e7f558bf8093e1914bc3688) )
 ROM_END
 
+// this runs on a newer ATPK-BORAM PK-0500 PCB. Given all GFX match tpkboram, it's probably a newer revision.
+// code is encrypted
+ROM_START( tpkborama )
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "223.rom", 0x0000, 0x8000, CRC(1d776d37) SHA1(6918cddb0b47d28cf8145823f869dfd2296c0eed) )
+
+	ROM_REGION( 0x4000, "chars", 0 ) // these are same as tpkboram
+	ROM_LOAD( "1.cg1", 0x0000, 0x2000, CRC(69f44d04) SHA1(2f98805e4b70ce3426078f35ff260a3bc97fab86) )
+	ROM_LOAD( "2.cg2", 0x2000, 0x2000, CRC(c1adf009) SHA1(0d5d8b39d40c807b9b5ed7418ba871c4d683286a) )
+
+	ROM_REGION( 0x40000, "tiles", 0 ) // these are all 1st and 2nd half identical, but same as tpkboram if split
+	ROM_LOAD( "3.pg1",  0x00000, 0x8000, CRC(612c5b39) SHA1(9682167b1fbbcd34b71c2628641b646a2993f61b) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "4.pg2",  0x08000, 0x8000, CRC(14ee6437) SHA1(a046b3efb14a400d201f7ce1c3ee0e01badb46a6) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "5.pg3",  0x10000, 0x8000, CRC(ce87f0c5) SHA1(96379856182bb0c81c805906551ec2e4aa2eb1d5) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "6.pg4",  0x18000, 0x8000, CRC(0a8a6106) SHA1(ac88f1ef2eb39cd24a236b2f18e85367c0736ae8) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "7.pg5",  0x20000, 0x8000, CRC(484a0eec) SHA1(6e32da2d4d78fb4c4bae2d2da945a71231051d5f) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "8.pg6",  0x28000, 0x8000, CRC(772d8996) SHA1(bd0412d0656a26a80b0f00ff5d6bcff2c4adb6c7) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "9.pg7",  0x30000, 0x8000, CRC(ff052a99) SHA1(7523ab2eeef1e44107710c8a68897daa7bf2ce12) )
+	ROM_IGNORE(                  0x8000 )
+	ROM_LOAD( "10.pg8", 0x38000, 0x8000, CRC(61a4e0f3) SHA1(8d9f0efd3b691eaf93c933c63ba6aa34ebad71b1) )
+	ROM_IGNORE(                  0x8000 )
+ROM_END
+
+ROM_START( pkrboram ) // ATPK-BORAM PK-0500 PCB
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "ra.rom", 0x0000, 0x8000, CRC(cce7a355) SHA1(76f1f2960bd8ea2bedae9bb414159452a70855e6) )
+
+	ROM_REGION( 0x4000, "chars", 0 )
+	ROM_LOAD( "1.cg1", 0x0000, 0x2000, CRC(436a6371) SHA1(ab8b7664c54c169599ec1a016e4b6c56aa2d74a7) )
+	ROM_LOAD( "2.cg2", 0x2000, 0x2000, CRC(eb33de7c) SHA1(8a9b9ee2349227cfcd9def2c7e85d598069fbb1f) )
+
+	ROM_REGION( 0x80000, "tiles", 0 )
+	ROM_LOAD( "3.pg1",  0x00000, 0x10000, CRC(db3c2a23) SHA1(de0c5f118e646e9339980dba48bac287f644ea09) )
+	ROM_LOAD( "4.pg2",  0x10000, 0x10000, CRC(3494f28f) SHA1(0cd221c5475c59e82af63d756ee5ecb4a3fbc710) )
+	ROM_LOAD( "5.pg3",  0x20000, 0x10000, CRC(0a892a90) SHA1(194bf0e3b7514cc5a9b05ac9f4c55dc1c5934a76) )
+	ROM_LOAD( "6.pg4",  0x30000, 0x10000, CRC(0f8dfc3e) SHA1(b2eecc7dd09d3e486b90732a2097bea1a9d1ab70) )
+	ROM_LOAD( "7.pg5",  0x40000, 0x10000, CRC(09a0893f) SHA1(712f04a8091228d679a7bd94f2a9884a76b62596) )
+	ROM_LOAD( "8.pg6",  0x50000, 0x10000, CRC(1aadfd49) SHA1(3a453b0dfc47a2b67c778faaec3844983bf8f307) )
+	ROM_LOAD( "9.pg7",  0x60000, 0x10000, CRC(1d27ac28) SHA1(c8ebaea66d136425970c2335b9d8e16402433b53) )
+	ROM_LOAD( "10.pg8", 0x70000, 0x10000, CRC(2c810312) SHA1(df055c7828da2b49bcbd22721309011b7d2143f9) )
+ROM_END
+
+ROM_START( tpkg2 ) // ATPK-BORAM PK-0500 PCB, same GFX as pkrboram
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "g21.rom", 0x0000, 0x8000, CRC(1cc7f79f) SHA1(1813d493f50eb971f460426aa618c1a7b2558fc7) )
+
+	ROM_REGION( 0x4000, "chars", 0 )
+	ROM_LOAD( "1.cg1", 0x0000, 0x2000, CRC(436a6371) SHA1(ab8b7664c54c169599ec1a016e4b6c56aa2d74a7) )
+	ROM_LOAD( "2.cg2", 0x2000, 0x2000, CRC(eb33de7c) SHA1(8a9b9ee2349227cfcd9def2c7e85d598069fbb1f) )
+
+	ROM_REGION( 0x80000, "tiles", 0 )
+	ROM_LOAD( "3.pg1",  0x00000, 0x10000, CRC(db3c2a23) SHA1(de0c5f118e646e9339980dba48bac287f644ea09) )
+	ROM_LOAD( "4.pg2",  0x10000, 0x10000, CRC(3494f28f) SHA1(0cd221c5475c59e82af63d756ee5ecb4a3fbc710) )
+	ROM_LOAD( "5.pg3",  0x20000, 0x10000, CRC(0a892a90) SHA1(194bf0e3b7514cc5a9b05ac9f4c55dc1c5934a76) )
+	ROM_LOAD( "6.pg4",  0x30000, 0x10000, CRC(0f8dfc3e) SHA1(b2eecc7dd09d3e486b90732a2097bea1a9d1ab70) )
+	ROM_LOAD( "7.pg5",  0x40000, 0x10000, CRC(09a0893f) SHA1(712f04a8091228d679a7bd94f2a9884a76b62596) )
+	ROM_LOAD( "8.pg6",  0x50000, 0x10000, CRC(1aadfd49) SHA1(3a453b0dfc47a2b67c778faaec3844983bf8f307) )
+	ROM_LOAD( "9.pg7",  0x60000, 0x10000, CRC(1d27ac28) SHA1(c8ebaea66d136425970c2335b9d8e16402433b53) )
+	ROM_LOAD( "10.pg8", 0x70000, 0x10000, CRC(2c810312) SHA1(df055c7828da2b49bcbd22721309011b7d2143f9) )
+ROM_END
+
+ROM_START( unkboram ) // ATPK-BORAM PK-0500 PCB
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "11.rom", 0x0000, 0x8000, CRC(822af541) SHA1(621c88bdc2ddca90127eb7ab10ca4ef6ec0cded0) )
+
+	ROM_REGION( 0x4000, "chars", 0 )
+	ROM_LOAD( "1.cg1", 0x0000, 0x2000, CRC(aa0614ec) SHA1(33f31683a6bd1268e11ad9159fe70d7eaf5edb15) )
+	ROM_LOAD( "2.cg2", 0x2000, 0x2000, CRC(025fa9e1) SHA1(fd6d0ad764968ee80355b3fd5156eae89f1d3da8) )
+
+	ROM_REGION( 0x80000, "tiles", 0 )
+	ROM_LOAD( "3.pg1",  0x00000, 0x10000, CRC(24206619) SHA1(862403d89d372e3cbffebc37f141748b6543871a) )
+	ROM_LOAD( "4.pg2",  0x10000, 0x10000, CRC(327be2a3) SHA1(69b62f50b83528f616378df1c72f35c74dd59022) )
+	ROM_LOAD( "5.pg3",  0x20000, 0x10000, CRC(6866c07c) SHA1(7271bdabbdce2cf08d7c45e1e5556bf05ebe1e61) )
+	ROM_LOAD( "6.pg4",  0x30000, 0x10000, CRC(c4a928ae) SHA1(ae59254a7cd5bfc5866d25c16671278b84aeb04f) )
+	ROM_LOAD( "7.pg5",  0x40000, 0x10000, CRC(050a1387) SHA1(5a1152d53ed91e24993a662db59a55754d79bfae) )
+	ROM_LOAD( "8.pg6",  0x50000, 0x10000, CRC(456e3284) SHA1(f61b3c50bc83949bb12b223e7d2bce7d4daa1bd1) )
+	ROM_LOAD( "9.pg7",  0x60000, 0x10000, CRC(fba98b86) SHA1(bcf667c8703aa06410c9d8d310fe479db5b28a81) )
+	ROM_LOAD( "10.pg8", 0x70000, 0x10000, CRC(c8648897) SHA1(8f024d76b706fde3774d053be6aa307043ce4c06) )
+ROM_END
+
+
+void boramz80_state::init_tpkborama()
+{
+	uint8_t *rom = memregion("maincpu")->base();
+
+	for (int i = 0; i < 0x8000; i++)
+	{
+		// TODO
+		rom[i] = rom[i];
+	}
+}
+
 } // anonymous namespace
 
 
-GAME( 1987, pkboram,  0, pk, pkboram,  boramz80_state, empty_init, ROT0, "Boram", "PK - New Exciting Poker!", MACHINE_IS_SKELETON ) // PK-BORAM 0211 aug.04.1987. BORAM CORP
-GAME( 1988, tpkboram, 0, pk, tpkboram, boramz80_state, empty_init, ROT0, "Boram", "Turbo PK",                 MACHINE_IS_SKELETON ) // PK-TURBO jan.29.1988. BORAM CORP.
+GAME( 1987, pkboram,   0,        pk, pkboram,  boramz80_state, empty_init,     ROT0, "Boram", "PK - New Exciting Poker!",        MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // PK-BORAM 0211 aug.04.1987. BORAM CORP
+GAME( 1988, tpkboram,  0,        pk, tpkboram, boramz80_state, empty_init,     ROT0, "Boram", "PK Turbo",                        MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // PK-TURBO jan.29.1988. BORAM CORP.
+GAME( 1998, tpkborama, tpkboram, pk, tpkboram, boramz80_state, init_tpkborama, ROT0, "Boram", "PK Turbo (Ver 2.3B2, encrypted)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // dep inctype-23B1998 0519Ver 2.3B2
+GAME( 1990, pkrboram,  0,        pk, tpkboram, boramz80_state, empty_init,     ROT0, "Boram", "PK Rainbow (v 1.5)",              MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // PK RAINBOW v1.5 BORAM Corp. 1990.11.06�
+GAME( 1992, tpkg2,     0,        pk, tpkboram, boramz80_state, empty_init,     ROT0, "Boram", "PK Turbo Great 2",                MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // PK TURBO GREAT2 1992.06.04 BORAM CORP.
+GAME( 19??, unkboram,  0,        pk, tpkboram, boramz80_state, empty_init,     ROT0, "Boram", "unknown Boram poker game",        MACHINE_NO_SOUND | MACHINE_NOT_WORKING ) // PKS v100 BORAM CORP

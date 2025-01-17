@@ -1,6 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:Dan Boris, Mirko Buffoni, Aaron Giles, Couriersud
-/***************************************************************************
+/*******************************************************************************
 
     Intel MCS-48/UPI-41 Portable Emulator
 
@@ -10,13 +10,42 @@
     TODO:
     - add CMOS devices, 1 new opcode (01 IDL)
     - add special 8022 opcodes (RAD, SEL AN0, SEL AN1, RETI)
-    - according to the user manual, some opcodes(dis/enable timer/interrupt)
-      don't increment the timer, does it affect the prescaler too?
-      Most likely, timer input (prescaler overflow or T1 edge) still occurs,
-      just that m_timer increment is delayed 1 opcode.
-    - IRQ timing is hacked due to WY-100 needing to take JNI branch before servicing interrupt
+    - IRQ and/or timer increment timing is wrong? See test below. After IRQ,
+      A = 0x20 on MAME, A = 0x22 on the real 8048 as tested by bataais.
 
-****************************************************************************
+      stop tcnt
+      mov a,0xff
+      mov t,a
+      inc a
+
+      en tcnti
+      strt t
+
+      inc a
+      inc a
+      inc a
+      (etc.)
+
+      With the following test, on MAME, A = 0xff after 30 NOPs, A = 0 after 31
+      NOPs. On the real 8048, A = 0xff after 31 NOPs, A = 0 after 32 NOPs.
+      It can mean that STRT T has a 1 cycle delay, or simply that MOV A,T gets
+      the timer value pre-increment.
+
+      stop tcnt
+      mov a,0xff
+      mov t,a
+      strt t
+
+      nop
+      nop
+      nop
+      (etc.)
+      mov a,t
+
+    - IRQ timing is hacked due to WY-100 needing to take JNI branch before
+      servicing interrupt (see m_irq_polled), probably related to note above?
+
+********************************************************************************
 
     Note that the default internal divisor for this chip is by 3 and
     then again by 5, or by 15 total.
@@ -31,17 +60,17 @@
     8648    64   1k   27  (OTPROM)
     8748    64   1k   27  (EPROM)
     8884    64   1k
-    N7751   64   1k       (8048, speech synthesizer in internal ROM)
+    UPD7751 64   1k       (8048, speech synthesizer in internal ROM)
 
     8039   128    0   27  (external ROM)
     8049   128   2k   27  (ROM)
     8749   128   2k   27  (EPROM)
     M58715 128    0       (external ROM)
 
-    8040   256   4k   27  (external ROM)
+    8040   256    0   27  (external ROM)
     8050   256   4k   27  (ROM)
 
-****************************************************************************
+********************************************************************************
 
     UPI-41/42 chips are MCS-48 derived, with some opcode changes:
 
@@ -78,16 +107,16 @@
     8742   128   2k       (EPROM)
     8742AH 256   2k       (EPROM)
 
-***************************************************************************/
+*******************************************************************************/
 
 #include "emu.h"
 #include "mcs48.h"
 #include "mcs48dsm.h"
 
 
-/***************************************************************************
+/*******************************************************************************
     CONSTANTS
-***************************************************************************/
+*******************************************************************************/
 
 // timer/counter enable bits
 #define TIMER_ENABLED   0x01
@@ -121,9 +150,9 @@
 #define I8048_FEATURE   (MB_FEATURE | EXT_BUS_FEATURE)
 
 
-/***************************************************************************
+/*******************************************************************************
     MACROS
-***************************************************************************/
+*******************************************************************************/
 
 // r0-r7 map to memory via the regptr
 #define R0              m_regptr[0]
@@ -136,9 +165,9 @@
 #define R7              m_regptr[7]
 
 
-/***************************************************************************
+/*******************************************************************************
     DEVICE TYPES
-***************************************************************************/
+*******************************************************************************/
 
 DEFINE_DEVICE_TYPE(I8021,   i8021_device,   "i8021",   "Intel 8021")
 DEFINE_DEVICE_TYPE(I8022,   i8022_device,   "i8022",   "Intel 8022")
@@ -151,6 +180,7 @@ DEFINE_DEVICE_TYPE(I8049,   i8049_device,   "i8049",   "Intel 8049")
 DEFINE_DEVICE_TYPE(I8749,   i8749_device,   "i8749",   "Intel 8749")
 DEFINE_DEVICE_TYPE(I8040,   i8040_device,   "i8040",   "Intel 8040")
 DEFINE_DEVICE_TYPE(I8050,   i8050_device,   "i8050",   "Intel 8050")
+
 DEFINE_DEVICE_TYPE(I8041A,  i8041a_device,  "i8041a",  "Intel 8041A")
 DEFINE_DEVICE_TYPE(I8741A,  i8741a_device,  "i8741a",  "Intel 8741A")
 DEFINE_DEVICE_TYPE(I8041AH, i8041ah_device, "i8041ah", "Intel 8041AH")
@@ -159,14 +189,15 @@ DEFINE_DEVICE_TYPE(I8042,   i8042_device,   "i8042",   "Intel 8042")
 DEFINE_DEVICE_TYPE(I8742,   i8742_device,   "i8742",   "Intel 8742")
 DEFINE_DEVICE_TYPE(I8042AH, i8042ah_device, "i8042ah", "Intel 8042AH")
 DEFINE_DEVICE_TYPE(I8742AH, i8742ah_device, "i8742ah", "Intel 8742AH")
-DEFINE_DEVICE_TYPE(MB8884,  mb8884_device,  "mb8884",  "MB8884")
-DEFINE_DEVICE_TYPE(N7751,   n7751_device,   "n7751",   "NEC uPD7751")
-DEFINE_DEVICE_TYPE(M58715,  m58715_device,  "m58715",  "M58715")
+
+DEFINE_DEVICE_TYPE(MB8884,  mb8884_device,  "mb8884",  "Fujitsu MB8884")
+DEFINE_DEVICE_TYPE(UPD7751, upd7751_device, "upd7751", "NEC uPD7751")
+DEFINE_DEVICE_TYPE(M58715,  m58715_device,  "m58715",  "Mitsubishi M58715")
 
 
-/***************************************************************************
+/*******************************************************************************
     CONSTRUCTOR
-***************************************************************************/
+*******************************************************************************/
 
 mcs48_cpu_device::mcs48_cpu_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int rom_size, int ram_size, u8 feature_mask, const mcs48_cpu_device::mcs48_ophandler *opcode_table)
 	: cpu_device(mconfig, type, tag, owner, clock)
@@ -262,8 +293,8 @@ mb8884_device::mb8884_device(const machine_config &mconfig, const char *tag, dev
 {
 }
 
-n7751_device::n7751_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: mcs48_cpu_device(mconfig, N7751, tag, owner, clock, 1024, 64, I8048_FEATURE, s_mcs48_opcodes)
+upd7751_device::upd7751_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: mcs48_cpu_device(mconfig, UPD7751, tag, owner, clock, 1024, 64, I8048_FEATURE, s_mcs48_opcodes)
 {
 }
 
@@ -338,9 +369,9 @@ std::unique_ptr<util::disasm_interface> mcs48_cpu_device::create_disassembler()
 }
 
 
-/***************************************************************************
+/*******************************************************************************
     ADDRESS MAPS
-***************************************************************************/
+*******************************************************************************/
 
 void mcs48_cpu_device::program_map(address_map &map)
 {
@@ -362,9 +393,9 @@ void mcs48_cpu_device::data_map(address_map &map)
 }
 
 
-/***************************************************************************
+/*******************************************************************************
     INLINE FUNCTIONS
-***************************************************************************/
+*******************************************************************************/
 
 /*-------------------------------------------------
     opcode_fetch - fetch an opcode byte
@@ -586,9 +617,9 @@ void mcs48_cpu_device::expander_operation(expander_op operation, u8 port)
 
 
 
-/***************************************************************************
+/*******************************************************************************
     OPCODE HANDLERS
-***************************************************************************/
+*******************************************************************************/
 
 #define OPHANDLER(_name) void mcs48_cpu_device::_name()
 
@@ -596,7 +627,7 @@ void mcs48_cpu_device::expander_operation(expander_op operation, u8 port)
 OPHANDLER( illegal )
 {
 	burn_cycles(1);
-	logerror("MCS-48 PC:%04X - Illegal opcode = %02x\n", m_prevpc, program_r(m_prevpc));
+	logerror("Illegal opcode = %02x @ %04X\n", program_r(m_prevpc), m_prevpc);
 }
 
 OPHANDLER( add_a_r0 )       { burn_cycles(1); execute_add(R0); }
@@ -871,7 +902,6 @@ OPHANDLER( out_dbb_a )
 		port_w(2, m_p2 |= P2_OBF);
 }
 
-
 OPHANDLER( ret )            { burn_cycles(2); pull_pc(); }
 OPHANDLER( retr )
 {
@@ -935,9 +965,9 @@ OPHANDLER( xrl_a_n )        { burn_cycles(2); m_a ^= argument_fetch(); }
 
 
 
-/***************************************************************************
+/*******************************************************************************
     OPCODE TABLES
-***************************************************************************/
+*******************************************************************************/
 
 #define OP(_a) &mcs48_cpu_device::_a
 
@@ -1087,9 +1117,9 @@ const mcs48_cpu_device::mcs48_ophandler mcs48_cpu_device::s_i8022_opcodes[256] =
 
 
 
-/***************************************************************************
+/*******************************************************************************
     INITIALIZATION/RESET
-***************************************************************************/
+*******************************************************************************/
 
 void mcs48_cpu_device::device_config_complete()
 {
@@ -1242,9 +1272,9 @@ void mcs48_cpu_device::device_reset()
 }
 
 
-/***************************************************************************
+/*******************************************************************************
     EXECUTION
-***************************************************************************/
+*******************************************************************************/
 
 /*-------------------------------------------------
     check_irqs - check for and process IRQs
@@ -1311,7 +1341,7 @@ void mcs48_cpu_device::burn_cycles(int count)
 			m_prescaler += count;
 			m_timer += m_prescaler >> 5;
 			m_prescaler &= 0x1f;
-			timerover = (oldtimer != 0 && m_timer == 0);
+			timerover = m_timer < oldtimer;
 		}
 
 		// if the counter is enabled, poll the T1 test input once for each cycle
@@ -1372,9 +1402,9 @@ void mcs48_cpu_device::execute_run()
 
 
 
-/***************************************************************************
+/*******************************************************************************
     DATA ACCESS HELPERS
-***************************************************************************/
+*******************************************************************************/
 
 /*-------------------------------------------------
     upi41_master_r - master CPU data/status
@@ -1427,9 +1457,9 @@ void upi41_cpu_device::upi41_master_w(offs_t offset, u8 data)
 }
 
 
-/***************************************************************************
+/*******************************************************************************
     GENERAL CONTEXT ACCESS
-***************************************************************************/
+*******************************************************************************/
 
 /*-------------------------------------------------
     mcs48_import_state - import state from the

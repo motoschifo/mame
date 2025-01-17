@@ -61,10 +61,10 @@ public:
 	int botss_hwchk_r();
 
 protected:
-	virtual void machine_start() override;
-	virtual void machine_reset() override;
-	virtual void video_start() override;
-	virtual void video_reset() override;
+	virtual void machine_start() override ATTR_COLD;
+	virtual void machine_reset() override ATTR_COLD;
+	virtual void video_start() override ATTR_COLD;
+	virtual void video_reset() override ATTR_COLD;
 
 private:
 	enum planes
@@ -177,7 +177,6 @@ private:
 	INTERRUPT_GEN_MEMBER(vblank);
 	TIMER_CALLBACK_MEMBER(mac_done_callback);
 	void upd7759_w(uint8_t data);
-	void duart_irq_handler(int state);
 	uint8_t duart_input_r();
 	void duart_output_w(uint8_t data);
 	void duart_txb(int state);
@@ -193,13 +192,13 @@ private:
 	int clip_triangle(micro3d_vtx *v, micro3d_vtx *vout, int num_vertices, enum planes plane);
 	void draw_triangles(uint32_t attr);
 
-	void cpu_space_map(address_map &map);
-	void drmath_data(address_map &map);
-	void drmath_prg(address_map &map);
-	void hostmem(address_map &map);
-	void soundmem_io(address_map &map);
-	void soundmem_prg(address_map &map);
-	void vgbmem(address_map &map);
+	void cpu_space_map(address_map &map) ATTR_COLD;
+	void drmath_data(address_map &map) ATTR_COLD;
+	void drmath_prg(address_map &map) ATTR_COLD;
+	void hostmem(address_map &map) ATTR_COLD;
+	void soundmem_io(address_map &map) ATTR_COLD;
+	void soundmem_prg(address_map &map) ATTR_COLD;
+	void vgbmem(address_map &map) ATTR_COLD;
 };
 
 #endif // MAME_MISC_MICRO3D_H
