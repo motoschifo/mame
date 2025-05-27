@@ -346,8 +346,8 @@ void maclc_state::maclc_base(machine_config &config)
 	NSCSI_CONNECTOR(config, "scsi:3").option_set("cdrom", NSCSI_CDROM_APPLE).machine_config(
 		[](device_t *device)
 		{
-			device->subdevice<cdda_device>("cdda")->add_route(0, "^^lspeaker", 1.0);
-			device->subdevice<cdda_device>("cdda")->add_route(1, "^^rspeaker", 1.0);
+			device->subdevice<cdda_device>("cdda")->add_route(0, "^^speaker", 1.0, 0);
+			device->subdevice<cdda_device>("cdda")->add_route(1, "^^speaker", 1.0, 1);
 		});
 	NSCSI_CONNECTOR(config, "scsi:4", mac_scsi_devices, nullptr);
 	NSCSI_CONNECTOR(config, "scsi:5", mac_scsi_devices, nullptr);
@@ -386,24 +386,24 @@ void maclc_state::maclc_base(machine_config &config)
 	rs232b.dcd_handler().set(m_scc, FUNC(z80scc_device::dcdb_w));
 	rs232b.cts_handler().set(m_scc, FUNC(z80scc_device::ctsb_w));
 
-	SPEAKER(config, "lspeaker").front_left();
-	SPEAKER(config, "rspeaker").front_right();
+	SPEAKER(config, "speaker", 2).front();
 
 	APPLE_DFAC(config, m_dfac, 22257);
-	m_dfac->add_route(0, "lspeaker", 1.0);
-	m_dfac->add_route(1, "rspeaker", 1.0);
+	m_dfac->add_route(0, "speaker", 1.0, 0);
+	m_dfac->add_route(1, "speaker", 1.0, 1);
 
 	V8(config, m_v8, C15M);
 	m_v8->set_maincpu_tag("maincpu");
 	m_v8->set_rom_tag("bootrom");
 	m_v8->hdsel_callback().set(FUNC(maclc_state::hdsel_w));
 	m_v8->hmmu_enable_callback().set(FUNC(maclc_state::set_hmmu));
-	m_v8->add_route(0, m_dfac, 1.0);
-	m_v8->add_route(1, m_dfac, 1.0);
+	m_v8->add_route(0, m_dfac, 1.0, 0);
+	m_v8->add_route(1, m_dfac, 1.0, 1);
 
 	nubus_device &nubus(NUBUS(config, "pds", 0));
 	nubus.set_space(m_maincpu, AS_PROGRAM);
 	nubus.set_address_mask(0x80ffffff);
+	nubus.set_bus_mode(nubus_device::nubus_mode_t::LC_PDS);
 	// V8 supports interrupts for slots $C, $D, and $E, but the LC, LC II, and Color Classic
 	// only hook the slot $E IRQ up to the PDS slot.  ($C/$D/$E are 0/1/2 on the schematics).
 	nubus.out_irqe_callback().set(m_v8, FUNC(v8_device::slot2_irq_w));
@@ -493,8 +493,8 @@ void maclc_state::maccclas(machine_config &config)
 	m_v8->pb4_callback().set(m_cuda, FUNC(cuda_device::set_byteack));
 	m_v8->pb5_callback().set(m_cuda, FUNC(cuda_device::set_tip));
 	m_v8->cb2_callback().set(m_cuda, FUNC(cuda_device::set_via_data));
-	m_v8->add_route(0, "lspeaker", 1.0);
-	m_v8->add_route(1, "rspeaker", 1.0);
+	m_v8->add_route(0, "speaker", 1.0, 0);
+	m_v8->add_route(1, "speaker", 1.0, 1);
 
 	config.device_remove("dfac");
 
@@ -538,8 +538,8 @@ void maclc_state::mactv(machine_config &config)
 	m_v8->pb4_callback().set(m_cuda, FUNC(cuda_device::set_byteack));
 	m_v8->pb5_callback().set(m_cuda, FUNC(cuda_device::set_tip));
 	m_v8->cb2_callback().set(m_cuda, FUNC(cuda_device::set_via_data));
-	m_v8->add_route(0, "lspeaker", 1.0);
-	m_v8->add_route(1, "rspeaker", 1.0);
+	m_v8->add_route(0, "speaker", 1.0, 0);
+	m_v8->add_route(1, "speaker", 1.0, 1);
 
 	config.device_remove("dfac");
 
@@ -569,8 +569,8 @@ void maclc_state::macclas2(machine_config &config)
 	m_v8->pb4_callback().set(m_egret, FUNC(egret_device::set_via_full));
 	m_v8->pb5_callback().set(m_egret, FUNC(egret_device::set_sys_session));
 	m_v8->cb2_callback().set(m_egret, FUNC(egret_device::set_via_data));
-	m_v8->add_route(0, m_dfac, 1.0);
-	m_v8->add_route(1, m_dfac, 1.0);
+	m_v8->add_route(0, m_dfac, 1.0, 0);
+	m_v8->add_route(1, m_dfac, 1.0, 1);
 
 	// Classic II doesn't have an LC PDS slot (and its ROM has the Slot Manager disabled)
 	config.device_remove("pds");
@@ -601,6 +601,24 @@ ROM_START( macclas2 )
 	ROM_LOAD32_BYTE( "341-0866__5be9__=c=apple_91.rommh.27c010.u24", 0x000001, 0x020000, CRC(eae68c36) SHA1(e6ce79647dfe7e66590a012836d0b6e985ff672b) )
 	ROM_LOAD32_BYTE( "341-0865__821e__=c=apple_91.romml.27c010.u23", 0x000002, 0x020000, CRC(cb306c01) SHA1(4d6e409995fd9a4aa9afda0fd790a5b09b1c2aca) )
 	ROM_LOAD32_BYTE( "341-0864__6fc6__=c=apple_91.romll.27c010.u22", 0x000003, 0x020000, CRC(21a51e72) SHA1(bb513c1a5b8a41c7534d66aeacaeea47f58dae92) )
+
+	/*
+	    There is a genuine bug in this ROM where a JMP through a table uses an index past the size of the
+	    table and the processor ends up in the middle of another instruction.  On a real 68030, the resulting
+	    illegal instruction does some still-not-100%-understood things to the registers that cause things to
+	    work by accident.  While that is still being investigated, we can at least patch the ROM so that
+	    booting when the system is in 32-bit mode works properly.
+
+	    This first patch changes the bad table JMP to an RTS; the ROM in the IIvx and IIvi has the correct
+	    number of table entries for the Classic II's boxflag and shows that the desired result is to do
+	    nothing.
+	*/
+	ROM_FILL(0x43b6e, 1, 0x4e)
+	ROM_FILL(0x43b6f, 1, 0x75)
+
+	// This second patch fixes the ROM checksum to compensate for the patch we just made.
+	ROM_FILL(0x00002, 1, 0x66)
+	ROM_FILL(0x00003, 1, 0x88)
 ROM_END
 
 ROM_START(maccclas)

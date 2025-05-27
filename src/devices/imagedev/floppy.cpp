@@ -610,7 +610,10 @@ std::pair<std::error_condition, const floppy_image_format_t *> floppy_image_devi
 		}
 	}
 
-	return{ std::error_condition(), best_format };
+	if(best_format)
+		return{ std::error_condition(), best_format };
+	else
+		return{ image_error::INVALIDIMAGE, nullptr };
 }
 
 void floppy_image_device::init_floppy_load(bool write_supported)
@@ -1592,18 +1595,17 @@ void floppy_sound_device::step(int zone)
 //  sound_stream_update - update the sound stream
 //-------------------------------------------------
 
-void floppy_sound_device::sound_stream_update(sound_stream &stream, std::vector<read_stream_view> const &inputs, std::vector<write_stream_view> &outputs)
+void floppy_sound_device::sound_stream_update(sound_stream &stream)
 {
 	// We are using only one stream, unlike the parent class
 	// Also, there is no need for interpolation, as we only expect
 	// one sample rate of 44100 for all samples
 
 	int16_t out;
-	auto &samplebuffer = outputs[0];
 	int m_idx = 0;
 	int sampleend = 0;
 
-	for (int sampindex = 0; sampindex < samplebuffer.samples(); sampindex++)
+	for (int sampindex = 0; sampindex < stream.samples(); sampindex++)
 	{
 		out = 0;
 
@@ -1697,7 +1699,7 @@ void floppy_sound_device::sound_stream_update(sound_stream &stream, std::vector<
 		}
 
 		// Write to the stream buffer
-		samplebuffer.put_int(sampindex, out, 32768);
+		stream.put_int(0, sampindex, out, 32768);
 	}
 }
 

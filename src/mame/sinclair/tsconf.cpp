@@ -170,7 +170,6 @@ void tsconf_state::video_start()
 void tsconf_state::machine_start()
 {
 	spectrum_128_state::machine_start();
-	m_maincpu->space(AS_PROGRAM).specific(m_program);
 
 	// reconfigure ROMs
 	memory_region *rom = memregion("maincpu");
@@ -278,6 +277,10 @@ void tsconf_state::tsconf(machine_config &config)
 
 	m_maincpu->set_vblank_int("screen", FUNC(tsconf_state::tsconf_vblank_interrupt));
 
+	SPI_SDCARD(config, m_sdcard, 0);
+	m_sdcard->set_prefer_sdhc();
+	m_sdcard->spi_miso_callback().set(FUNC(tsconf_state::tsconf_spi_miso_w));
+
 	zxbus_device &zxbus(ZXBUS(config, "zxbus", 0));
 	zxbus.set_iospace("maincpu", AS_IO);
 	ZXBUS_SLOT(config, "zxbus1", 0, "zxbus", zxbus_cards, nullptr);
@@ -296,26 +299,21 @@ void tsconf_state::tsconf(machine_config &config)
 	m_dma->on_ready_callback().set(FUNC(tsconf_state::dma_ready));
 
 	BETA_DISK(config, m_beta, 0);
-	SPI_SDCARD(config, m_sdcard, 0);
-	m_sdcard->set_prefer_sdhc();
-	m_sdcard->spi_miso_callback().set(FUNC(tsconf_state::tsconf_spi_miso_w));
-
-	SPEAKER(config, "lspeaker").front_left();
-	SPEAKER(config, "rspeaker").front_right();
+	SPEAKER(config, "speakers", 2).front();
 
 	config.device_remove("ay8912");
 	YM2149(config, m_ay[0], 14_MHz_XTAL / 8)
-		.add_route(0, "lspeaker", 0.50)
-		.add_route(1, "lspeaker", 0.25)
-		.add_route(1, "rspeaker", 0.25)
-		.add_route(2, "rspeaker", 0.50);
+		.add_route(0, "speakers", 0.50, 0)
+		.add_route(1, "speakers", 0.25, 0)
+		.add_route(1, "speakers", 0.25, 1)
+		.add_route(2, "speakers", 0.50, 1);
 	YM2149(config, m_ay[1], 14_MHz_XTAL / 8)
-		.add_route(0, "lspeaker", 0.50)
-		.add_route(1, "lspeaker", 0.25)
-		.add_route(1, "rspeaker", 0.25)
-		.add_route(2, "rspeaker", 0.50);
+		.add_route(0, "speakers", 0.50, 0)
+		.add_route(1, "speakers", 0.25, 0)
+		.add_route(1, "speakers", 0.25, 1)
+		.add_route(2, "speakers", 0.50, 1);
 
-	DAC_8BIT_R2R(config, m_dac, 0).add_route(ALL_OUTPUTS, "mono", 0.75);;
+	DAC_8BIT_R2R(config, m_dac, 0).add_route(ALL_OUTPUTS, "mono", 0.75);
 
 	PALETTE(config, "palette", palette_device::BLACK, 256);
 	m_screen->set_raw(14_MHz_XTAL / 2, 448, with_hblank(0), 448, 320, with_vblank(0), 320);

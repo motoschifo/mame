@@ -426,11 +426,10 @@ void neogs_device::device_add_mconfig(machine_config &config)
 	m_sdcard->set_prefer_sdhc();
 	m_sdcard->spi_miso_callback().set([this](int state) { m_spi_data_in_latch <<= 1; m_spi_data_in_latch |= state; });
 
-	SPEAKER(config, "lspeaker").front_left();
-	SPEAKER(config, "rspeaker").front_right();
+	SPEAKER(config, "speaker", 2).front();
 
-	DAC_16BIT_R2R_TWOS_COMPLEMENT(config, m_dac[0], 0).add_route(ALL_OUTPUTS, "lspeaker", 0.75); // TDA1543
-	DAC_16BIT_R2R_TWOS_COMPLEMENT(config, m_dac[1], 0).add_route(ALL_OUTPUTS, "rspeaker", 0.75);
+	DAC_16BIT_R2R_TWOS_COMPLEMENT(config, m_dac[0], 0).add_route(ALL_OUTPUTS, "speaker", 0.75, 0); // TDA1543
+	DAC_16BIT_R2R_TWOS_COMPLEMENT(config, m_dac[1], 0).add_route(ALL_OUTPUTS, "speaker", 0.75, 1);
 }
 
 const tiny_rom_entry *neogs_device::device_rom_region() const
@@ -440,9 +439,9 @@ const tiny_rom_entry *neogs_device::device_rom_region() const
 
 void neogs_device::neogsmap(address_map &map)
 {
-	map(0x000bb, 0x000bb).mirror(0xff00).rw(FUNC(neogs_device::neogs_status_r), FUNC(neogs_device::neogs_command_w));
-	map(0x000b3, 0x000b3).mirror(0xff00).rw(FUNC(neogs_device::neogs_data_r), FUNC(neogs_device::neogs_data_w));
-	map(0x00033, 0x00033).mirror(0xff00).w(FUNC(neogs_device::neogs_ctrl_w));
+	map(0x00bb, 0x00bb).mirror(0xff00).rw(FUNC(neogs_device::neogs_status_r), FUNC(neogs_device::neogs_command_w));
+	map(0x00b3, 0x00b3).mirror(0xff00).rw(FUNC(neogs_device::neogs_data_r), FUNC(neogs_device::neogs_data_w));
+	map(0x0033, 0x0033).mirror(0xff00).w(FUNC(neogs_device::neogs_ctrl_w));
 }
 
 void neogs_device::device_start()

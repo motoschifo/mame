@@ -518,18 +518,17 @@ void namcond1_state::namcond1(machine_config &config)
 	V 261 26 224 3 0
 	*/
 	screen.set_raw(XTAL(49'152'000) / 8, 804 / 2, 108 / 2, (108 + 576) / 2, 261, 26, 26 + 224);
-	screen.set_screen_update("ygv608", FUNC(ygv608_device::update_screen));
+	screen.set_screen_update("ygv608", FUNC(ygv608_device::screen_update));
 	screen.set_palette("ygv608");
 
 	// sound hardware
-	SPEAKER(config, "lspeaker").front_left();
-	SPEAKER(config, "rspeaker").front_right();
+	SPEAKER(config, "speaker", 2).front();
 
 	c352_device &c352(C352(config, "c352", XTAL(49'152'000) / 2, 288));
-	c352.add_route(0, "lspeaker", 1.00);
-	c352.add_route(1, "rspeaker", 1.00);
-	//c352.add_route(2, "lspeaker", 1.00); // Second DAC not present.
-	//c352.add_route(3, "rspeaker", 1.00);
+	c352.add_route(0, "speaker", 1.00, 0);
+	c352.add_route(1, "speaker", 1.00, 1);
+	//c352.add_route(2, "speaker", 1.00); // Second DAC not present.
+	//c352.add_route(3, "speaker", 1.00);
 
 	AT28C16(config, "at28c16", 0);
 }

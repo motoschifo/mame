@@ -1,5 +1,5 @@
-// license:BSD-3-Clause
 // copyright-holders:R. Belmont
+// license:BSD-3-Clause
 /****************************************************************************
 
     drivers/macquadra605.cpp
@@ -189,8 +189,8 @@ void quadra605_state::macqd605(machine_config &config)
 	NSCSI_CONNECTOR(config, "scsi:3").option_set("cdrom", NSCSI_CDROM_APPLE).machine_config(
 		[](device_t *device)
 		{
-			device->subdevice<cdda_device>("cdda")->add_route(0, "^^primetime:lspeaker", 1.0);
-			device->subdevice<cdda_device>("cdda")->add_route(1, "^^primetime:rspeaker", 1.0);
+			device->subdevice<cdda_device>("cdda")->add_route(0, "^^primetime:speaker", 1.0, 0);
+			device->subdevice<cdda_device>("cdda")->add_route(1, "^^primetime:speaker", 1.0, 1);
 		});
 	NSCSI_CONNECTOR(config, "scsi:4", mac_scsi_devices, nullptr);
 	NSCSI_CONNECTOR(config, "scsi:5", mac_scsi_devices, nullptr);
@@ -225,6 +225,7 @@ void quadra605_state::macqd605(machine_config &config)
 
 	nubus_device &nubus(NUBUS(config, "pds", 0));
 	nubus.set_space(m_maincpu, AS_PROGRAM);
+	nubus.set_bus_mode(nubus_device::nubus_mode_t::QUADRA_DAFB);
 	nubus.out_irqe_callback().set(m_primetime, FUNC(primetime_device::via2_irq_w<0x20>));
 	NUBUS_SLOT(config, "lcpds", "pds", mac_pdslc_cards, nullptr);
 
