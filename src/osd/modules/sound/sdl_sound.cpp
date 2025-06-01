@@ -95,6 +95,9 @@ int sound_sdl::init(osd_interface &osd, const osd_options &options)
 	char const *const audio_driver = SDL_GetCurrentAudioDriver();
 	osd_printf_verbose("Audio: Driver is %s\n", audio_driver ? audio_driver : "not initialized");
 
+	if(options.audio_latency() > 0.0f)
+		osd_printf_verbose("Audio: %s module does not support audio_latency option\n", name());
+
 	// Capture is not implemented in SDL2, and the enumeration
 	// interface is different in SDL3
 	int dev_count = SDL_GetNumAudioDevices(0);
@@ -105,7 +108,9 @@ int sound_sdl::init(osd_interface &osd, const osd_options &options)
 		if(!err)
 			m_devices.emplace_back(name, spec.freq, spec.channels);
 	}
-	char *def_name;
+	m_default_sink = 0;
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+	char *def_name = nullptr;
 	SDL_AudioSpec def_spec;
 	if(!SDL_GetDefaultAudioInfo(&def_name, &def_spec, 0)) {
 		uint32_t idx;
@@ -114,14 +119,15 @@ int sound_sdl::init(osd_interface &osd, const osd_options &options)
 			m_devices.emplace_back(def_name, def_spec.freq, def_spec.channels, true);
 		m_default_sink = idx+1;
 		SDL_free(def_name);
-	} else
-		m_default_sink = 0;
+	}
+#endif
 	return 0;
 }
 
 void sound_sdl::exit()
 {
 	SDL_QuitSubSystem(SDL_INIT_AUDIO);
+	m_devices.clear();
 }
 
 uint32_t sound_sdl::get_generation()
@@ -166,6 +172,7 @@ osd::audio_info sound_sdl::get_information()
 	result.m_generation = 1;
 	for(uint32_t node = 0; node != m_devices.size(); node++) {
 		result.m_nodes[node].m_name = m_devices[node].m_name;
+		result.m_nodes[node].m_display_name = m_devices[node].m_name;
 		result.m_nodes[node].m_id = node + 1;
 		uint32_t freq = m_devices[node].m_freq;
 		result.m_nodes[node].m_rate = audio_rate_range{ freq, freq, freq };

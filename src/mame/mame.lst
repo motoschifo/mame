@@ -15211,6 +15211,7 @@ speedway
 speedwaya
 sstar97
 sstar97a
+sstar97b
 sstar97jb
 superb2k
 tigerslt
@@ -18082,6 +18083,7 @@ dream9
 d9flower
 d9flowera
 specd9
+specd9105g
 
 @source:excellent/gcpinbal.cpp
 gcpinbal
@@ -18635,6 +18637,12 @@ bioplayc
 maniacsp
 lastkm
 lastkma
+sltpcycld
+sltpcycle
+sltpcyclf
+sltpstepb
+sltpstepc
+sltpstepd
 squash
 squasha
 squashb
@@ -18671,14 +18679,8 @@ sltpcycl
 sltpcycla
 sltpcyclb
 sltpcyclc
-sltpcycld
-sltpcycle
-sltpcyclf
 sltpstep
 sltpstepa
-sltpstepb
-sltpstepc
-sltpstepd
 snowboar
 snowboara
 srollnd
@@ -18692,6 +18694,9 @@ touchgonnac
 touchgoun
 wrally2
 wrally2a
+wrally2b
+wrally2c
+wrally2d
 
 @source:gaelco/gaelco3d.cpp
 footbpow
@@ -18727,6 +18732,7 @@ glass
 glass10
 glass10a
 glasskr
+glassp
 
 @source:gaelco/goldart.cpp
 goldart
@@ -18771,6 +18777,9 @@ mastboyob
 mastboyoc
 mastboyod
 
+@source:gaelco/mastboyo_ms.cpp
+mastboyom
+
 @source:gaelco/radikaldarts.cpp
 radikaldrt
 
@@ -18792,8 +18801,10 @@ ringball
 splashms
 
 @source:gaelco/targeth.cpp
+quickshts
 targeth
 targetha
+targethb
 targeth10
 
 @source:gaelco/thoop2.cpp
@@ -18807,13 +18818,22 @@ thoop2e
 @source:gaelco/wrally.cpp
 wrally
 wrallya
+wrallyac
 wrallyat
 wrallyata
 wrallyb
 wrallyc
+wrallyd
+wrallye
+
+@source:gaelco/wrally_ms.cpp
+wrallymp
 
 @source:gaelco/xorworld.cpp
 xorworld
+
+@source:gaelco/xorworld_ms.cpp
+xorworldm
 
 @source:galaxian/dambustr.cpp
 dambustr
@@ -19623,6 +19643,7 @@ uchitari
 vesarif
 vespovar
 vfutbol
+vinnpukh
 
 @source:handheld/hh_smc1k.cpp
 tkkongq
@@ -20630,6 +20651,7 @@ lhzb
 lhzba
 lhzb2
 lhzb2a
+lhzb2b
 mgcs
 mgcsa
 mgcsb
@@ -20659,6 +20681,7 @@ xypmda
 @source:igs/igs_fear.cpp
 fearless
 icescape
+mjzb
 superkds
 
 @source:igs/igs_m027.cpp
@@ -20677,6 +20700,7 @@ cjddzps
 cjddzs
 cjddzsa
 cjdh6th
+cjsxp
 cjtljp
 extradrw
 fruitpar
@@ -20703,6 +20727,7 @@ oceanpar101us
 olympic5
 olympic5107us
 qlgs
+royal5p
 sdwx
 slqz3
 tct2p
@@ -20730,6 +20755,7 @@ crzybugs200us
 crzybugs202us
 haunthig
 haunthig101us
+jking04
 tripfev
 tripfev105us
 tripfev107us
@@ -29706,6 +29732,7 @@ cb4
 cb4a
 cb5
 cb5_11
+cb5_13
 crzybell
 dynastye
 mystjb
@@ -37544,12 +37571,12 @@ sfightiia
 sfightiib
 shaqattq
 shaqattq2
+smbmush
 smbp
 smbpa
 smbpb
 smbpc
 smbpv
-smbmush
 snspares
 snspares1
 snspares2
@@ -41436,6 +41463,7 @@ stactics
 astrass
 bakubaku
 batmanfr
+chalgolf
 choroqhr
 colmns97
 cotton2
@@ -46449,6 +46477,7 @@ gameu90
 gameu108
 gormiti
 imgame
+jak_bj
 jak_prr
 jak_spmm
 myac220
@@ -46461,6 +46490,7 @@ tkmag220
 paccon
 lazertag
 jak_s500
+jak_sinv
 jak_smwm
 jak_pf
 jak_prft
@@ -46641,9 +46671,12 @@ icanpian
 jak_batm
 jak_cind
 jak_ctah
+jak_dond
 jak_dpma
 jak_dwa
 jak_gdg
+jak_hm1m
+jak_hmbb
 jak_hsm
 jak_marv
 jak_mk
@@ -46665,6 +46698,7 @@ jak_spd3
 jak_spdv
 jak_supm
 jak_wall
+jak_wof2
 
 @source:tvgames/spg2xx_jakks_gkr.cpp
 jak_capc
@@ -47793,6 +47827,7 @@ lucky74b
 lucky88w
 
 @source:wing/pinkiri8.cpp
+janmu
 janshi
 pinkiri8
 ronjan

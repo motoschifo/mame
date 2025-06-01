@@ -115,7 +115,7 @@ int sound_pa::init(osd_interface &osd, osd_options const &options)
 		{  0.0,  0.0, -0.5 },
 		{ -0.2,  0.0,  0.0 },
 		{  0.2,  0.0,  0.0 },
-		{  0.0,  0.0, -1.0 },
+		{  0.0,  0.0, 10.0 },
 	};
 
 	static const uint32_t positions[9][9] = {
@@ -143,6 +143,7 @@ int sound_pa::init(osd_interface &osd, osd_options const &options)
 		const PaHostApiInfo *ai = Pa_GetHostApiInfo(di->hostApi);
 		auto &node = m_info.m_nodes[dev];
 		node.m_name = util::string_format("%s: %s", ai->name, di->name);
+		node.m_display_name = util::string_format("%s: %s", ai->name, di->name);
 		node.m_id = dev + 1;
 		node.m_rate.m_default_rate = node.m_rate.m_min_rate = node.m_rate.m_max_rate = di->defaultSampleRate;
 		node.m_sinks = di->maxOutputChannels;
@@ -162,7 +163,7 @@ int sound_pa::init(osd_interface &osd, osd_options const &options)
 	m_info.m_default_source = dc(Pa_GetDefaultInputDevice());
 
 	m_stream_id = 1;
-	m_audio_latency = options.audio_latency();
+	m_audio_latency = options.audio_latency() / sound_manager::STREAMS_UPDATE_FREQUENCY;
 	m_machine = &downcast<osd_common_t &>(osd).machine();
 
 	return 0;
@@ -171,6 +172,7 @@ int sound_pa::init(osd_interface &osd, osd_options const &options)
 void sound_pa::exit()
 {
 	Pa_Terminate();
+	m_info.m_nodes.clear();
 }
 
 uint32_t sound_pa::get_generation()
