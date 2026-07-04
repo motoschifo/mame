@@ -21,7 +21,7 @@
 ***********************************/
 
 #include "emu.h"
-#include "cpu/mcs51/mcs51.h"
+#include "cpu/mcs51/i80c52.h"
 #include "sound/okim6295.h"
 #include "video/mc6845.h"
 #include "emupal.h"
@@ -50,7 +50,7 @@ public:
 		m_lamps(*this, "lamp%u", 0U)
 	{ }
 
-	void cardline(machine_config &config);
+	void cardline(machine_config &config) ATTR_COLD;
 
 protected:
 	virtual void machine_start() override ATTR_COLD;
@@ -73,7 +73,7 @@ private:
 	MC6845_BEGIN_UPDATE(crtc_begin_update);
 	MC6845_UPDATE_ROW(crtc_update_row);
 
-	void mem_io(address_map &map) ATTR_COLD;
+	void mem_data(address_map &map) ATTR_COLD;
 	void mem_prg(address_map &map) ATTR_COLD;
 
 	required_shared_ptr<uint8_t> m_videoram;
@@ -92,12 +92,11 @@ private:
 
 void cardline_state::machine_start()
 {
-	m_lamps.resolve();
 	m_video = 0;
 	m_hsync_q = 1;
 
 	for (int i = 0; i < 0x2000; i++)
-		m_maincpu.target()->space(AS_IO).write_byte(i, 0x73);
+		m_maincpu.target()->space(AS_DATA).write_byte(i, 0x73);
 
 	save_item(NAME(m_video));
 	save_item(NAME(m_hsync_q));
@@ -220,7 +219,7 @@ void cardline_state::mem_prg(address_map &map)
 	map(0x0000, 0xffff).rom();
 }
 
-void cardline_state::mem_io(address_map &map)
+void cardline_state::mem_data(address_map &map)
 {
 	map(0x0000, 0x1fff).ram();
 	map(0x2003, 0x2003).portr("IN0");
@@ -269,11 +268,15 @@ static INPUT_PORTS_START( cardline )
 	PORT_DIPNAME( 0x08, 0x00, DEF_STR( Unknown ) )
 	PORT_DIPSETTING(    0x08, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
-	PORT_BIT( 0xf5, IP_ACTIVE_HIGH, IPT_CUSTOM ) // h/w status bits
-
-	PORT_START("VBLANK")
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_CUSTOM ) PORT_READ_LINE_DEVICE_MEMBER("screen", FUNC(screen_device::vblank)) // VBLANK_Q
-	PORT_BIT( 0xef, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	// TODO: h/w status bits (will throw errors during POST if low)
+	// Rough translation:
+	// - Coin Counter Coin In
+	// - Coin Counter Coin Out
+	// - <fill me>
+	// - Payout
+	// - Lamp
+	// - Hopper
+	PORT_BIT( 0xf5, IP_ACTIVE_HIGH, IPT_CUSTOM )
 INPUT_PORTS_END
 
 static GFXDECODE_START( gfx_cardline )
@@ -316,17 +319,14 @@ void cardline_state::cardline(machine_config &config)
 	I80C32(config, m_maincpu, MASTER_CLOCK);
 	m_maincpu->set_port_forced_input(1, 0x10);
 	m_maincpu->set_addrmap(AS_PROGRAM, &cardline_state::mem_prg);
-	m_maincpu->set_addrmap(AS_IO, &cardline_state::mem_io);
+	m_maincpu->set_addrmap(AS_DATA, &cardline_state::mem_data);
 	m_maincpu->port_in_cb<1>().set(FUNC(cardline_state::hsync_r));
 	m_maincpu->port_out_cb<1>().set(FUNC(cardline_state::video_w));
 	//m_maincpu->set_vblank_int("screen", FUNC(cardline_state::irq1_line_hold));
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
-	screen.set_refresh_hz(60);
-	screen.set_vblank_time(ATTOSECONDS_IN_USEC(0));
-	screen.set_size(64*8, 35*8);
-	screen.set_visarea(0*8, 64*8-1, 0*8, 32*8-1);
+	screen.set_raw(MASTER_CLOCK, 760, 0, 511, 280, 0, 255);
 	//screen.set_screen_update(FUNC(cardline_state::screen_update_cardline));
 	//screen.set_palette(m_palette);
 	screen.set_screen_update("crtc", FUNC(mc6845_device::screen_update));

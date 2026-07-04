@@ -9,9 +9,6 @@
 
 #include "sound/okim6295.h"
 #include "sound/ymopm.h"
-#include "cpu/m68000/m68000.h"
-#include "machine/cxd1095.h"
-#include "machine/gen_latch.h"
 #include "emupal.h"
 #include "tilemap.h"
 
@@ -22,7 +19,6 @@ public:
 		: driver_device(mconfig, type, tag)
 		, m_maincpu(*this, "maincpu")
 		, m_audiocpu(*this, "audiocpu")
-		, m_subcpu(*this, "sub")
 		, m_ym2151(*this, "ymsnd")
 		, m_oki(*this, "oki")
 		, m_sprites(*this, "sprites")
@@ -41,7 +37,6 @@ public:
 protected:
 	required_device<cpu_device> m_maincpu;
 	required_device<cpu_device> m_audiocpu;
-	required_device<m68000_base_device> m_subcpu;
 	optional_device<ym2151_device> m_ym2151;
 	required_device<okim6295_device> m_oki;
 	required_device<tzbx15_device> m_sprites;
@@ -58,7 +53,7 @@ protected:
 	static constexpr int CLOCK_1 = 16'000'000;
 	static constexpr int CLOCK_2 = 50'000'000;
 
-	INTERRUPT_GEN_MEMBER(v30_interrupt);
+	IRQ_CALLBACK_MEMBER(v30_vector_r);
 	TILE_GET_INFO_MEMBER(get_text_tile_info);
 
 	void hd6445_crt_w(offs_t offset, uint8_t data);

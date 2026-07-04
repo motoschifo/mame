@@ -22,7 +22,7 @@ namespace ui {
 class menu_audio_effect_compressor : public menu
 {
 public:
-	menu_audio_effect_compressor(mame_ui_manager &mui, render_container &container, u16 chain, u16 entry, audio_effect *effect);
+	menu_audio_effect_compressor(mame_ui_manager &mui, render_target &target, u16 chain, u16 entry, audio_effect *effect);
 	virtual ~menu_audio_effect_compressor() override;
 
 protected:
@@ -33,7 +33,7 @@ protected:
 
 private:
 	enum {
-		MODE,
+		MODE = 1,
 		ATTACK,
 		RELEASE,
 		RATIO,
@@ -45,7 +45,8 @@ private:
 		FEEDBACK,
 		INERTIA,
 		INERTIA_DECAY,
-		CEILING
+		CEILING,
+		RESET_ALL
 	};
 
 	u16 m_chain, m_entry;
@@ -54,12 +55,16 @@ private:
 	virtual void populate() override;
 	virtual bool handle(event const *ev) override;
 
-	static std::string format_nodec(float val);
-	static std::string format_1dec(float val);
 	static std::string format_2dec(float val);
 	static std::string format_db(float val);
+	static std::string format_ms(float val);
+	static std::string format_ratio(float val);
+	static std::string format_release(float val);
+
 	u32 flag_mode() const;
 	static u32 flag_lim(float value, float min, float max, bool isset);
+	static u32 flag_lim_special(float value, float min, bool isset);
+
 	static float max(float a, float b) { return a > b ? a : b; }
 	static float min(float a, float b) { return a < b ? a : b; }
 };

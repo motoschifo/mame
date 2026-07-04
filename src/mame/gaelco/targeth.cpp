@@ -68,7 +68,7 @@ DS5002FP Box contains:
 
 #include "gaelco_ds5002fp.h"
 
-#include "cpu/mcs51/mcs51.h"
+#include "cpu/mcs51/ds5002fp.h"
 #include "cpu/m68000/m68000.h"
 #include "machine/74259.h"
 #include "sound/okim6295.h"
@@ -77,6 +77,8 @@ DS5002FP Box contains:
 #include "screen.h"
 #include "speaker.h"
 #include "tilemap.h"
+
+#include "endianness.h"
 
 
 namespace {
@@ -352,7 +354,7 @@ void targeth_state::main_map(address_map &map)
 	map(0x700002, 0x700003).portr("DSW1");
 	map(0x700006, 0x700007).portr("SYSTEM");                          // Coins, Start & Fire buttons
 	map(0x700008, 0x700009).portr("SERVICE");                         // Service & Guns Reload?
-	map(0x70000a, 0x70000b).r(FUNC(targeth_state::service_mirror_r)); // targeth10a reads the service switch here instead
+	map(0x70000a, 0x70000b).r(FUNC(targeth_state::service_mirror_r)); // quickshts reads the service switch here instead
 	map(0x70000a, 0x70000b).select(0x000070).w(FUNC(targeth_state::output_latch_w));
 	map(0x70000d, 0x70000d).w(FUNC(targeth_state::oki_bankswitch_w));
 	map(0x70000f, 0x70000f).rw("oki", FUNC(okim6295_device::read), FUNC(okim6295_device::write));

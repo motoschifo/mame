@@ -45,7 +45,7 @@ public:
 private:
 	struct position_info {
 		pa_channel_position_t m_position;
-		std::array<double, 3> m_coords;
+		osd::channel_position m_coords;
 	};
 
 	static const position_info position_infos[];
@@ -61,7 +61,7 @@ private:
 		// Audio node info
 		std::vector<pa_channel_position_t> m_position_codes;
 		std::vector<std::string> m_position_names;
-		std::vector<std::array<double, 3>> m_positions;
+		std::vector<osd::channel_position> m_positions;
 		uint32_t m_sink_port_count, m_source_port_count;
 
 		osd::audio_rate_range m_rate;
@@ -80,7 +80,7 @@ private:
 		std::vector<float> m_volumes;
 		abuffer m_buffer;
 
-		stream_info(sound_pulse *pulse, uint32_t osdid, uint32_t channels) : m_pulse(pulse), m_osdid(osdid), m_pulse_id(0), m_channels(channels), m_stream(nullptr), m_volumes(channels), m_buffer(channels) {}
+		stream_info(sound_pulse *pulse, uint32_t osdid, uint32_t channels, uint32_t rate) : m_pulse(pulse), m_osdid(osdid), m_pulse_id(0), m_channels(channels), m_stream(nullptr), m_volumes(channels), m_buffer(channels, rate) {}
 	};
 
 	std::map<uint32_t, node_info> m_nodes;
@@ -122,15 +122,15 @@ private:
 // Try to more or less map to speaker.h positions
 
 const sound_pulse::position_info sound_pulse::position_infos[] = {
-	{ PA_CHANNEL_POSITION_MONO,         {  0.0,  0.0,  1.0 } },
-	{ PA_CHANNEL_POSITION_FRONT_LEFT,   { -0.2,  0.0,  1.0 } },
-	{ PA_CHANNEL_POSITION_FRONT_RIGHT,  {  0.2,  0.0,  1.0 } },
-	{ PA_CHANNEL_POSITION_FRONT_CENTER, {  0.0,  0.0,  1.0 } },
-	{ PA_CHANNEL_POSITION_LFE,          {  0.0, -0.5,  1.0 } },
-	{ PA_CHANNEL_POSITION_REAR_LEFT,    { -0.2,  0.0, -0.5 } },
-	{ PA_CHANNEL_POSITION_REAR_RIGHT,   {  0.2,  0.0, -0.5 } },
-	{ PA_CHANNEL_POSITION_REAR_CENTER,  {  0.0,  0.0, -0.5 } },
-	{ PA_CHANNEL_POSITION_MAX,          {  0.0,  0.0, 10.0 } }
+	{ PA_CHANNEL_POSITION_MONO,         osd::channel_position::FC() },
+	{ PA_CHANNEL_POSITION_FRONT_LEFT,   osd::channel_position::FL() },
+	{ PA_CHANNEL_POSITION_FRONT_RIGHT,  osd::channel_position::FR() },
+	{ PA_CHANNEL_POSITION_FRONT_CENTER, osd::channel_position::FC() },
+	{ PA_CHANNEL_POSITION_LFE,          osd::channel_position::LFE() },
+	{ PA_CHANNEL_POSITION_REAR_LEFT,    osd::channel_position::RL() },
+	{ PA_CHANNEL_POSITION_REAR_RIGHT,   osd::channel_position::RR() },
+	{ PA_CHANNEL_POSITION_REAR_CENTER,  osd::channel_position::RC() },
+	{ PA_CHANNEL_POSITION_MAX,          osd::channel_position::ONREQ() },
 };
 
 
@@ -448,7 +448,7 @@ uint32_t sound_pulse::stream_sink_open(uint32_t node, std::string name, uint32_t
 	node_info &snode = m_nodes.find(ni->second)->second;
 
 	uint32_t id = m_stream_current_id++;
-	auto &stream = m_streams.emplace(id, stream_info(this, id, snode.m_sink_port_count)).first->second;
+	auto &stream = m_streams.emplace(id, stream_info(this, id, snode.m_sink_port_count, rate)).first->second;
 
 	pa_sample_spec ss;
 #ifdef LSB_FIRST

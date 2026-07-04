@@ -6,12 +6,12 @@
 
     6502 derived sound/sub CPU for VT3xx series chips
 
-	has some additional opcodes for reading/writing the 24-bit 'onebus'
-	with an extra register to store the upper 8-bits of the access address
+    has some additional opcodes for reading/writing the 24-bit 'onebus'
+    with an extra register to store the upper 8-bits of the access address
 
-	- should this instead derive from the rp2a03 as is the case for the
-	  main CPUs on many of the VT chips, or is using the m6502 as a base
-	  correct in this case?
+    - should this instead derive from the rp2a03 as is the case for the
+      main CPUs on many of the VT chips, or is using the m6502 as a base
+      correct in this case?
 
 ***************************************************************************/
 
@@ -70,13 +70,13 @@ device_memory_interface::space_config_vector vt3xx_spu_device::memory_space_conf
 {
 	if(has_configured_map(AS_OPCODES))
 		return space_config_vector {
-			std::make_pair(AS_PROGRAM, &program_config),
-			std::make_pair(AS_OPCODES, &sprogram_config),
+			std::make_pair(AS_PROGRAM, &m_program_config),
+			std::make_pair(AS_OPCODES, &m_sprogram_config),
 			std::make_pair(5, &m_extdata_config),
 		};
 	else
 		return space_config_vector {
-			std::make_pair(AS_PROGRAM, &program_config),
+			std::make_pair(AS_PROGRAM, &m_program_config),
 			std::make_pair(5, &m_extdata_config),
 		};
 }

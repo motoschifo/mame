@@ -27,7 +27,6 @@ TODO:
   per segment, adding pwm_display_device right now has no added value
 - add nstarfox sound effect chip emulation
 - naltair IPT_DIAL should be 1-way, it's not supposed to rotate left
-- add svg screen for nsmw
 - Currently there is no accurate way to dump the SM511/SM512 melody ROM
   electronically. For the ones that weren't decapped, they were read by
   playing back all melody data and reconstructing it to ROM. Visual(decap)
@@ -161,16 +160,13 @@ The MCUs used were not imported from Sharp, but cloned by USSR, renamed to
 #include "elbaskb.lh"
 
 //#include "hh_sm510_test.lh" // common test-layout - use external artwork
-#include "hh_sm500_test.lh" // "
+//#include "hh_sm500_test.lh" // "
 
 
 // machine start/reset
 
 void hh_sm510_state::machine_start()
 {
-	// resolve outputs
-	m_out_x.resolve();
-
 	// determine number of input lines (set it in the subclass constructor if different)
 	if (m_inp_lines == 0 && m_inp_fixed < 0)
 	{
@@ -4899,18 +4895,11 @@ public:
 	void elbaskb(machine_config &config);
 
 protected:
-	virtual void machine_start() override ATTR_COLD;
 	virtual void update_display() override;
 
 private:
 	output_finder<4> m_digits;
 };
-
-void elbaskb_state::machine_start()
-{
-	hh_sm510_state::machine_start();
-	m_digits.resolve();
-}
 
 // handlers
 
@@ -6641,13 +6630,11 @@ INPUT_PORTS_END
 void gamewatch_state::nsmb3(machine_config &config)
 {
 	sm530_common(config, 1203, 1080);
-	config.set_default_layout(layout_hh_sm500_test);
 }
 
 void gamewatch_state::nsmw(machine_config &config)
 {
-	sm530_common(config, 1000, 1000);
-	config.set_default_layout(layout_hh_sm500_test);
+	sm530_common(config, 1190, 1080);
 }
 
 // roms
@@ -6670,8 +6657,8 @@ ROM_START( nsmw )
 	ROM_REGION( 0x100, "maincpu:melody", 0 )
 	ROM_LOAD( "636.melody", 0x000, 0x100, CRC(5df99e13) SHA1(98d5f78b5bcf59a232ccb5c61210568948c4501b) )
 
-	ROM_REGION( 100000, "screen", 0)
-	ROM_LOAD( "nsmw.svg", 0, 100000, NO_DUMP )
+	ROM_REGION( 401273, "screen", 0)
+	ROM_LOAD( "nsmw.svg", 0, 401273, CRC(72cb618d) SHA1(cecf9bb7ad21896c9a68ca606359f2b6f9c08d5d) )
 ROM_END
 
 
@@ -7198,20 +7185,11 @@ public:
 
 	void tgaiden(machine_config &config);
 
-protected:
-	virtual void machine_start() override ATTR_COLD;
-
 private:
 	// R2 connects to a single LED behind the screen
 	output_finder<> m_led_out;
 	void led_w(u8 data) { m_led_out = data >> 1 & 1; }
 };
-
-void tgaiden_state::machine_start()
-{
-	hh_sm510_state::machine_start();
-	m_led_out.resolve();
-}
 
 // inputs
 
@@ -12426,7 +12404,7 @@ SYST( 1991, kgarfld,      0,           0,      kgarfld,      kgarfld,      kgarf
 
 // Nelsonic Game Watch series
 SYST( 1990, nsmb3,        0,           0,      nsmb3,        gamewatch,    gamewatch_state,    empty_init, "Nelsonic", "Super Mario Bros. 3 (Nelsonic)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
-SYST( 1991, nsmw,         0,           0,      nsmw,         gamewatch,    gamewatch_state,    empty_init, "Nelsonic", "Super Mario World (Nelsonic)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK | MACHINE_NOT_WORKING )
+SYST( 1991, nsmw,         0,           0,      nsmw,         gamewatch,    gamewatch_state,    empty_init, "Nelsonic", "Super Mario World (Nelsonic)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK )
 SYST( 1993, nstarfox,     0,           0,      nstarfox,     nstarfox,     nstarfox_state,     empty_init, "Nelsonic", "Star Fox (Nelsonic)", MACHINE_SUPPORTS_SAVE | MACHINE_REQUIRES_ARTWORK | MACHINE_IMPERFECT_SOUND )
 
 // Tiger 7-xxx/78-xxx models

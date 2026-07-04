@@ -19,6 +19,7 @@
 #include "emu.h"
 #include "tatsumi.h"
 
+#include "cpu/m68000/m68000.h"
 #include "cpu/nec/nec.h"
 #include "cpu/z80/z80.h"
 #include "machine/i8255.h"
@@ -35,6 +36,7 @@ class roundup5_state : public tatsumi_state
 public:
 	roundup5_state(const machine_config &mconfig, device_type type, const char *tag)
 		: tatsumi_state(mconfig, type, tag)
+		, m_subcpu(*this, "sub")
 		, m_vregs(*this, "vregs")
 		, m_bg_scrollx(*this, "bg_scrollx")
 		, m_bg_scrolly(*this, "bg_scrolly")
@@ -68,6 +70,8 @@ private:
 
 	void draw_road(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void draw_landscape(bitmap_rgb32 &bitmap, const rectangle &cliprect, uint8_t type);
+
+	required_device<cpu_device> m_subcpu;
 
 	required_shared_ptr<uint16_t> m_vregs;
 	required_shared_ptr<uint16_t> m_bg_scrollx;
@@ -688,7 +692,7 @@ void roundup5_state::roundup5(machine_config &config)
 	/* basic machine hardware */
 	V30(config, m_maincpu, roundup5_state::CLOCK_1 / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &roundup5_state::roundup5_v30_map);
-	m_maincpu->set_vblank_int("screen", FUNC(roundup5_state::v30_interrupt));
+	m_maincpu->set_irq_acknowledge_callback(FUNC(roundup5_state::v30_vector_r));
 
 	M68000(config, m_subcpu, roundup5_state::CLOCK_2 / 4);
 	m_subcpu->set_addrmap(AS_PROGRAM, &roundup5_state::roundup5_68000_map);
@@ -707,6 +711,7 @@ void roundup5_state::roundup5(machine_config &config)
 	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
 	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 272, 0, 240); // TODO: Hook up CRTC
 	screen.set_screen_update(FUNC(roundup5_state::screen_update));
+	screen.screen_vblank().set_inputline(m_maincpu, 0);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x800); // confirmed TZB315, even if it has the smaller CLUT like Apache 3 / TZB215
 	m_sprites->set_sprite_palette_base(512);

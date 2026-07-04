@@ -244,11 +244,10 @@ void mikie_state::draw_sprites(bitmap_ind16 &bitmap, const rectangle &cliprect)
 			flipy = !flipy;
 		}
 
-
 		m_gfxdecode->gfx(gfxbank)->transpen(bitmap, cliprect,
-		code, color,
-		flipx, flipy,
-		sx, sy, 0);
+				code, color,
+				flipx, flipy,
+				sx, sy, 0);
 	}
 }
 
@@ -280,7 +279,7 @@ void mikie_state::sh_irqtrigger_w(int state)
 	if (state)
 	{
 		// setting bit 0 low then high triggers IRQ on the sound CPU
-		m_audiocpu->set_input_line_and_vector(0, HOLD_LINE, 0xff); // Z80
+		m_audiocpu->set_input_line(0, HOLD_LINE); // Z80 IM1
 	}
 }
 
@@ -610,7 +609,7 @@ ROM_END
  *
  *************************************/
 
-GAME( 1984, mikie,   0,     mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Mikie",                        MACHINE_SUPPORTS_SAVE )
-GAME( 1984, mikiej,  mikie, mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Shinnyuushain Tooru-kun",      MACHINE_SUPPORTS_SAVE )
-GAME( 1984, mikiek,  mikie, mikie, mikie, mikie_state, empty_init, ROT270, "bootleg", "Shin-ip Sawon - Seok Dol-i",   MACHINE_SUPPORTS_SAVE ) // 新入社員 - 石돌이 (신입사원 - 석돌이)
-GAME( 1984, mikiehs, mikie, mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Mikie (High School Graffiti)", MACHINE_SUPPORTS_SAVE )
+GAME( 1984, mikie,   0,     mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Mikie",                              MACHINE_SUPPORTS_SAVE )
+GAME( 1984, mikiej,  mikie, mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Shinnyuu Shain Tooru-kun (Japan)",   MACHINE_SUPPORTS_SAVE )
+GAME( 1984, mikiek,  mikie, mikie, mikie, mikie_state, empty_init, ROT270, "bootleg", "Shin-ip Sawon - Seok Dol-i (Korea)", MACHINE_SUPPORTS_SAVE ) // 新入社員 - 石돌이 (신입사원 - 석돌이)
+GAME( 1984, mikiehs, mikie, mikie, mikie, mikie_state, empty_init, ROT270, "Konami",  "Mikie (High School Graffiti)",       MACHINE_SUPPORTS_SAVE )

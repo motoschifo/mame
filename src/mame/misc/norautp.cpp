@@ -822,45 +822,46 @@ public:
 	norautp_state(const machine_config &mconfig, device_type type, const char *tag) :
 		driver_device(mconfig, type, tag),
 		m_maincpu(*this, "maincpu"),
-		m_nvram(*this, "nvram"),
 		m_ppi8255(*this, "ppi8255_%u", 0),
 		m_discrete(*this, "discrete"),
 		m_gfxdecode(*this, "gfxdecode"),
 		m_screen(*this, "screen"),
 		m_palette(*this, "palette"),
 		m_hopper(*this, "hopper"),
+		m_nvram(*this, "nvram"),
 		m_decrypted_opcodes(*this, "decrypted_opcodes"),
 		m_lamps(*this, "lamp%u", 0U)
 	{ }
 
-	void noraut_base(machine_config &config);
-	void gtipkra(machine_config &config);
-	void kimble(machine_config &config);
-	void kimbldhl(machine_config &config);
-	void norautp(machine_config &config);
-	void norautu(machine_config &config);
-	void norautx4(machine_config &config);
-	void norautpl(machine_config &config);
-	void tpoker2(machine_config &config);
-	void nortest1(machine_config &config);
-	void ssjkrpkr(machine_config &config);
-	void dphl(machine_config &config);
-	void dphla(machine_config &config);
-	void dphlxtnd(machine_config &config);
-	void drhl(machine_config &config);
-	void norautxp(machine_config &config);
-	void noraut3(machine_config &config);
-	void cgidjp(machine_config &config);
-	void cdrawpkr(machine_config &config);
-	void krampcb4(machine_config &config);
+	void gtipkra(machine_config &config) ATTR_COLD;
+	void kimble(machine_config &config) ATTR_COLD;
+	void kimbldhl(machine_config &config) ATTR_COLD;
+	void norautp(machine_config &config) ATTR_COLD;
+	void norautu(machine_config &config) ATTR_COLD;
+	void norautx4(machine_config &config) ATTR_COLD;
+	void norautpl(machine_config &config) ATTR_COLD;
+	void tpoker2(machine_config &config) ATTR_COLD;
+	void nortest1(machine_config &config) ATTR_COLD;
+	void ssjkrpkr(machine_config &config) ATTR_COLD;
+	void dphl(machine_config &config) ATTR_COLD;
+	void dphla(machine_config &config) ATTR_COLD;
+	void dphlxtnd(machine_config &config) ATTR_COLD;
+	void drhl(machine_config &config) ATTR_COLD;
+	void norautxp(machine_config &config) ATTR_COLD;
+	void noraut3(machine_config &config) ATTR_COLD;
+	void cgidjp(machine_config &config) ATTR_COLD;
+	void cdrawpkr(machine_config &config) ATTR_COLD;
+	void krampcb4(machine_config &config) ATTR_COLD;
 
-	void init_enc();
-	void init_unka();
-	void init_kram4();
+	void init_enc() ATTR_COLD;
+	void init_unka() ATTR_COLD;
+	void init_kram4() ATTR_COLD;
 
 protected:
 	virtual void machine_start() override ATTR_COLD;
 	virtual void video_start() override ATTR_COLD;
+
+	void noraut_base(machine_config &config) ATTR_COLD;
 
 private:
 	void ppi2_obf_w(int state);
@@ -910,17 +911,15 @@ private:
 
 	std::unique_ptr<uint16_t[]> m_np_vram;
 	required_device<cpu_device> m_maincpu;
-	required_device<nvram_device> m_nvram;
 	required_device_array<i8255_device, 3> m_ppi8255;
 	required_device<discrete_sound_device> m_discrete;
 	required_device<gfxdecode_device> m_gfxdecode;
 	required_device<screen_device> m_screen;
 	required_device<palette_device> m_palette;
 	required_device<ticket_dispenser_device> m_hopper;
+	required_shared_ptr<uint8_t> m_nvram;
 	optional_shared_ptr<uint8_t> m_decrypted_opcodes;
 	output_finder<12> m_lamps;
-
-	std::unique_ptr<uint8_t[]> m_nvram8;
 
 	bool m_display_line_control = false;
 	bool m_nvunlock = false;
@@ -935,9 +934,6 @@ private:
 
 void norautp_state::machine_start()
 {
-	m_lamps.resolve();
-	m_nvram8 = std::make_unique<uint8_t[]>(TP_NVRAM_SIZE);
-	m_nvram->set_base(m_nvram8.get(),TP_NVRAM_SIZE);
 	save_item(NAME(m_videoram));
 	save_item(NAME(m_nvunlock));
 }
@@ -1237,17 +1233,17 @@ void norautp_state::nvram_w(offs_t offset, uint8_t data)
 	if((offset >= 0x700) && (offset < 0x70a))
 	{
 		if(m_nvunlock)
-			m_nvram8[offset] = data;
+			m_nvram[offset] = data;
 		else
 			logerror("nvram(w) locked: offs:%04x - data: %02x\n", offset, data);
 	}
 	else
-		m_nvram8[offset] = data;
+		m_nvram[offset] = data;
 
-	m_nvram8[0x721] = 0x00;
-	m_nvram8[0x725] = 0x01;
+	m_nvram[0x721] = 0x00;
+	m_nvram[0x725] = 0x01;
 	if((offset == 0x724) && (data == 6))
-		m_nvram8[0x724] = 0xff;
+		m_nvram[0x724] = 0xff;
 
 	m_nvunlock = false;
 }
@@ -1258,19 +1254,19 @@ uint8_t norautp_state::nvram_r(offs_t offset)
 //  for testing purposes
 //  sets: tpoker2a, tpoker2b
 
-	m_nvram8[0x70b] = 0xa8;
-	m_nvram8[0x70c] = 0xb8;
-	m_nvram8[0x70d] = 0xc8;
-	m_nvram8[0x70e] = 0xd8;
-	m_nvram8[0x70f] = 0xe8;
+	m_nvram[0x70b] = 0xa8;
+	m_nvram[0x70c] = 0xb8;
+	m_nvram[0x70d] = 0xc8;
+	m_nvram[0x70e] = 0xd8;
+	m_nvram[0x70f] = 0xe8;
 
-	m_nvram8[0x710] = 0x20;
-	m_nvram8[0x711] = 0x30;
-	m_nvram8[0x712] = 0x40;
-	m_nvram8[0x713] = 0x50;
-	m_nvram8[0x714] = 0x60;
+	m_nvram[0x710] = 0x20;
+	m_nvram[0x711] = 0x30;
+	m_nvram[0x712] = 0x40;
+	m_nvram[0x713] = 0x50;
+	m_nvram[0x714] = 0x60;
 
-	return m_nvram8[offset];
+	return m_nvram[offset];
 }
 
 
@@ -1336,7 +1332,7 @@ void norautp_state::norautp_map(address_map &map)
 {
 	map.global_mask(0x3fff);
 	map(0x0000, 0x1fff).rom();
-	map(0x2000, 0x27ff).ram().share("nvram");   // 6116
+	map(0x2000, 0x27ff).ram().share(m_nvram);   // 6116
 }
 
 void norautp_state::decrypted_opcodes_map(address_map &map)
@@ -1373,26 +1369,26 @@ void norautp_state::nortest1_map(address_map &map)
 {
 	map.global_mask(0x7fff);
 	map(0x0000, 0x2fff).rom();
-	map(0x5000, 0x57ff).ram().share("nvram");
+	map(0x5000, 0x57ff).ram().share(m_nvram);
 }
 
 void norautp_state::norautxp_map(address_map &map)
 {
 	map.global_mask(0x7fff);
 	map(0x0000, 0x3fff).rom();  // need to be checked
-	map(0x6000, 0x67ff).ram().share("nvram");  // HM6116
+	map(0x6000, 0x67ff).ram().share(m_nvram);  // HM6116
 }
 
 void norautp_state::norautx4_map(address_map &map)
 {
 	map(0x0000, 0x3fff).rom();
-	map(0x6000, 0x67ff).ram().share("nvram");  // 6116
+	map(0x6000, 0x67ff).ram().share(m_nvram);  // 6116
 }
 
 void norautp_state::noraut3_map(address_map &map)
 {
 	map(0x0000, 0x3fff).rom().region("maincpu", 0x4000);
-	map(0x6000, 0x67ff).ram().share("nvram");  // 6116
+	map(0x6000, 0x67ff).ram().share(m_nvram);  // 6116
 	map(0x8000, 0xbfff).rom().region("maincpu", 0xc000);
 }
 
@@ -1405,7 +1401,7 @@ void norautp_state::noraut3_decrypted_opcodes_map(address_map &map)
 void norautp_state::kimble_map(address_map &map)
 {
 	map(0x0000, 0xbfff).rom();
-	map(0xc000, 0xc7ff).ram().share("nvram");
+	map(0xc000, 0xc7ff).ram().share(m_nvram);
 	map(0xc800, 0xcfff).ram();  // working RAM?
 }
 
@@ -1413,7 +1409,7 @@ void norautp_state::cgidjp_map(address_map &map)
 {
 	map.global_mask(0x3fff);
 	map(0x0000, 0x1fff).rom().region("maincpu", 0x2000);
-	map(0x2000, 0x27ff).ram().share("nvram");   // 6116
+	map(0x2000, 0x27ff).ram().share(m_nvram);   // 6116
 }
 
 void norautp_state::cgidjp_opcodes_map(address_map &map)
@@ -1429,15 +1425,15 @@ void norautp_state::dphl_map(address_map &map)
 {
 	map.global_mask(0x7fff);  // A15 not connected
 	map(0x0000, 0x3fff).rom();
-	map(0x5000, 0x53ff).ram().share("nvram");  // should be 2x 0x100 segments (4x 2111)
+	map(0x5000, 0x53ff).ram().share(m_nvram);  // should be 2x 0x100 segments (4x 2111)
 }
 
 void norautp_state::gtipa_map(address_map &map)
 {
 	//map.global_mask(0x7fff);  // A15 not connected
 	map(0x0000, 0x3fff).rom();
-	map(0xc000, 0xc3ff).ram().share("nvram");
-	map(0xd000, 0xd3ff).ram().share("nvram");
+	map(0xc000, 0xc3ff).ram().share(m_nvram);
+	map(0xd000, 0xd3ff).ram().share(m_nvram);
 
 }
 
@@ -1445,27 +1441,27 @@ void norautp_state::dphla_map(address_map &map)
 {
 	map.global_mask(0x3fff);
 	map(0x0000, 0x1fff).rom();
-	map(0x2000, 0x23ff).ram().share("nvram");
+	map(0x2000, 0x23ff).ram().share(m_nvram);
 }
 
 void norautp_state::dphlxtnd_map(address_map &map)
 {
 	map(0x0000, 0xbfff).rom();
-	map(0xc000, 0xc3ff).ram().share("nvram");  // should be 2x 0x100 segments (4x 2111)
+	map(0xc000, 0xc3ff).ram().share(m_nvram);  // should be 2x 0x100 segments (4x 2111)
 }
 
 void norautp_state::ssjkrpkr_map(address_map &map)
 {
 	map.global_mask(0x7fff);
 	map(0x0000, 0x1fff).rom();
-	map(0x4000, 0x43ff).ram().share("nvram");
+	map(0x4000, 0x43ff).ram().share(m_nvram);
 }
 
 void norautp_state::tpoker2_map(address_map &map)
 {
 	map(0x0000, 0x6fff).rom();
 	map(0x7000, 0x7fff).ram();
-	map(0x8000, 0x87ff).rw(FUNC(norautp_state::nvram_r), FUNC(norautp_state::nvram_w));
+	map(0x8000, 0x87ff).rw(FUNC(norautp_state::nvram_r), FUNC(norautp_state::nvram_w)).share(m_nvram);
 }
 
 /*
@@ -1478,27 +1474,27 @@ void norautp_state::tpoker2_map(address_map &map)
   Create dynamic code in RAM at $C276 to handle the I/O through the PPI8255's.
   Also initialize the devices and handle the handshaking lines in the same way.
 
-  The code read on port $62, when is suppossed to be set as output.
+  The code read on port $62, when is supposed to be set as output.
 
 */
 void norautp_state::kimbldhl_map(address_map &map)
 {
 	map(0x0000, 0x7fff).rom();
-	map(0xc000, 0xc7ff).ram().share("nvram");
+	map(0xc000, 0xc7ff).ram().share(m_nvram);
 }
 
 void norautp_state::drhl_map(address_map &map)
 {
 	map.global_mask(0x7fff);  // A15 not connected
 	map(0x0000, 0x3fff).rom();
-	map(0x5000, 0x53ff).ram().share("nvram");
+	map(0x5000, 0x53ff).ram().share(m_nvram);
 	map(0x5400, 0x57ff).ram();
 }
 
 void norautp_state::krampcb4_map(address_map &map)
 {
 	map(0x0000, 0x3fff).rom();
-	map(0xa000, 0xa7ff).ram().share("nvram");
+	map(0xa000, 0xa7ff).ram().share(m_nvram);
 //  map(0xff00, 0xffff).ram();
 }
 
@@ -1560,7 +1556,7 @@ static INPUT_PORTS_START( norautp )
 
 	PORT_START("IN2")   // Only 3 lines: PPI-2; PC0-PC2
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER )       PORT_CODE(KEYCODE_J) PORT_NAME("IN2-1")
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_GAMBLE_SERVICE ) PORT_NAME("Readout")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_SERVICE1 )    PORT_NAME("Readout")
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER )       PORT_CODE(KEYCODE_L) PORT_NAME("Low Level Hopper")
 
 	PORT_START("DSW1")
@@ -1598,7 +1594,7 @@ static INPUT_PORTS_START( norautrh )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_GAMBLE_BET )  PORT_NAME("Bet / Change Card")
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_COIN1 ) PORT_IMPULSE(2)  // Coin A
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_COIN2 ) PORT_IMPULSE(2)  // Coin B
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_GAMBLE_SERVICE ) PORT_NAME("Readout")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SERVICE1 )    PORT_NAME("Readout")
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_GAMBLE_HIGH ) PORT_NAME("Hi")
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_GAMBLE_LOW )  PORT_NAME("Lo")
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_GAMBLE_PAYOUT )
@@ -1656,7 +1652,7 @@ static INPUT_PORTS_START( norautpn )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_GAMBLE_BET )  PORT_NAME("Bet / Change Card")
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_COIN1 ) PORT_IMPULSE(2)  // Coin A
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_COIN2 ) PORT_IMPULSE(2)  // Coin B
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_GAMBLE_SERVICE ) PORT_NAME("Readout")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SERVICE1 )    PORT_NAME("Readout")
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_GAMBLE_HIGH ) PORT_NAME("Hi")
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_GAMBLE_LOW )  PORT_NAME("Lo")
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_GAMBLE_PAYOUT )
@@ -2540,19 +2536,19 @@ void norautp_state::noraut_base(machine_config &config)
 
 	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
-	I8255(config, m_ppi8255[0], 0);
+	I8255(config, m_ppi8255[0]);
 	// (60-63) Mode 0 - Port A set as input
 	m_ppi8255[0]->in_pa_callback().set_ioport("DSW1");
 	m_ppi8255[0]->out_pb_callback().set(FUNC(norautp_state::mainlamps_w));
 	m_ppi8255[0]->out_pc_callback().set(FUNC(norautp_state::counterlamps_w));
 
-	I8255(config, m_ppi8255[1], 0);
+	I8255(config, m_ppi8255[1]);
 	// (a0-a3) Mode 0 - Ports A & B set as input
 	m_ppi8255[1]->in_pa_callback().set_ioport("IN0");
 	m_ppi8255[1]->in_pb_callback().set_ioport("IN1");
 	m_ppi8255[1]->out_pc_callback().set(FUNC(norautp_state::soundlamps_w));
 
-	I8255(config, m_ppi8255[2], 0);
+	I8255(config, m_ppi8255[2]);
 	m_ppi8255[2]->out_pb_callback().set(FUNC(norautp_state::ppi2_b_w));
 	// (c0-c3) Group A Mode 2 (5-lines handshacked bidirectional port).
 	// PPI-2 is configured as mixed mode2 and mode0 output.
@@ -2781,9 +2777,10 @@ void norautp_state::tpoker2(machine_config &config)
 	m_maincpu->set_addrmap(AS_PROGRAM, &norautp_state::tpoker2_map);
 	m_maincpu->set_addrmap(AS_IO, &norautp_state::norautp_portmap);
 	m_maincpu->set_vblank_int("screen", FUNC(norautp_state::irq0_line_hold));
+
 	m_screen->set_screen_update(FUNC(norautp_state::screen_update_dphl));
 
-	PALETTE(config.replace(), "palette", FUNC(norautp_state::bp_based_palette), 512);
+	PALETTE(config.replace(), m_palette, FUNC(norautp_state::bp_based_palette), 512);
 
 	// sound hardware
 	m_discrete->set_intf(dphl_discrete);
@@ -4570,6 +4567,42 @@ ROM_START( dphljp )  // close to GTI Poker
 	ROM_LOAD( "japan_6301.u51", 0x0000, 0x0100, CRC(88302127) SHA1(aed1273974917673405f1234ab64e6f8b3856c34) )
 ROM_END
 
+
+/*
+PCB:
+
+"AMERICADE
+S2507 DOMINO
+HI/LO DOUBLE UP"
+
+Smaller PCB:
+
+AMERICADE 3523
+
+8080A CPU
+
+2716 EPROMs
+
+Two 2111 SRAM
+
+Two 5101 SRAM
+*/
+ROM_START( dphlac )  // close to dphljp. Only first program ROM and PROM differ.
+	ROM_REGION( 0x10000, "maincpu", 0 )
+	ROM_LOAD( "hilob.u6",  0x0000, 0x0800, CRC(b87134a7) SHA1(598115ee2f2f653cc10b24db160ecb2f43a90dd0) )
+	ROM_RELOAD(            0x0800, 0x0800 )
+	ROM_LOAD( "hiloa.u9",  0x1000, 0x0800, CRC(ccaad5cb) SHA1(5f6ca497ccb7c535714a6e24df00f2831a7840c1) )
+	ROM_RELOAD(            0x1800, 0x0800 )
+	ROM_LOAD( "hiloc.u11", 0x2000, 0x0800, CRC(9f9c67d5) SHA1(cd11849b245406821af7ac3554805c9dd89645b2) )
+
+	ROM_REGION( 0x1000,  "gfx", 0 )
+	ROM_FILL(                  0x0000, 0x0800, 0xff )
+	ROM_LOAD( "colorhilo.new", 0x0800, 0x0800, CRC(412fc492) SHA1(094ea0ffd0c22274cfe164f07c009ffe022331fd) )
+
+	ROM_REGION( 0x0100,  "proms", 0 )
+	ROM_LOAD( "82s129.u17", 0x0000, 0x0100, CRC(e4b8c299) SHA1(deda332faf02e15b16df1cbe86ba689ee9dd8035) )
+ROM_END
+
 /*
 
   Kimble Double HI-LO (8080).
@@ -4805,7 +4838,7 @@ ROM_END
   Different to the cleco shitty stuff
 
 */
-ROM_START( gtipokrba )  //   
+ROM_START( gtipokrba )  //
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "88_2732a.u12", 0x0000, 0x1000, CRC(e78a10d7) SHA1(e0ac382b02a1fc490b5d08344a20f2eaa3899002) )
 	ROM_LOAD( "88_2732a.u18", 0x1000, 0x1000, CRC(4c3c5b15) SHA1(0584c0a6b52465686967f98ea3bd86c22b5bd526) )
@@ -5639,7 +5672,7 @@ ROM_END
 ROM_START( krampcb9 )  // norusa42
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "nosticker_db_27c256.u12", 0x0000, 0x8000, CRC(32e0b8ab) SHA1(8055231b8911a7bc519f8204f8b0045958ef84f2) )
-	
+
 	ROM_REGION( 0x1000, "gfx",0 )
 	ROM_LOAD( "u31_2732a.u31", 0x0000, 0x1000, CRC(d0291d61) SHA1(4db617f1683bd07b0e124a0566691535f56b66de) )
 
@@ -5650,7 +5683,7 @@ ROM_END
 ROM_START( topdraw )  // norusa36
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "nosticker_db_am27c256.u12", 0x0000, 0x8000, CRC(e451df9c) SHA1(30a2c42d87301df5fb82a59326c9754007737325) )
-	
+
 	ROM_REGION( 0x1000, "gfx",0 )
 	ROM_LOAD( "u-31_top_draw_2732a.u31", 0x0000, 0x1000, CRC(d0291d61) SHA1(4db617f1683bd07b0e124a0566691535f56b66de) )
 
@@ -5661,7 +5694,7 @@ ROM_END
 ROM_START( topdrawa )  // norusa38
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "nosticker_db_m27c256.u12", 0x0000, 0x8000, CRC(38bfabf6) SHA1(afe1f962c7546b8fb891953efbdf68a11e8dd45a) )
-	
+
 	ROM_REGION( 0x1000, "gfx",0 )
 	ROM_LOAD( "nosticker_m2732a.u31", 0x0000, 0x1000, CRC(d0291d61) SHA1(4db617f1683bd07b0e124a0566691535f56b66de) )
 
@@ -5672,7 +5705,7 @@ ROM_END
 ROM_START( topdrawb )  // norusa40
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "nosticker_db_m27c256.u12", 0x0000, 0x8000, CRC(8e195061) SHA1(ed25fe65b164e048c3ba5078a7e443b696141807) )
-	
+
 	ROM_REGION( 0x1000, "gfx",0 )
 	ROM_LOAD( "nosticker_2732a.u31", 0x0000, 0x1000, CRC(d0291d61) SHA1(4db617f1683bd07b0e124a0566691535f56b66de) )
 
@@ -5685,7 +5718,7 @@ ROM_END
 ROM_START( topdrawba )  // norusa48
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "xx_db_nm27c256.u12", 0x0000, 0x8000, CRC(8e195061) SHA1(ed25fe65b164e048c3ba5078a7e443b696141807) )
-	
+
 	ROM_REGION( 0x1000, "gfx",0 )
 	ROM_LOAD( "top_draw_u-31_bucks.u31", 0x0000, 0x1000, CRC(d0291d61) SHA1(4db617f1683bd07b0e124a0566691535f56b66de) )
 
@@ -5703,7 +5736,7 @@ ROM_END
   Looks generic noraut hardware, but with one daughterboard
   having a program ROM, a MCU, a PLD, and a Dallas or MK48Z02
 
-*/  
+*/
 ROM_START(tpoker1 )
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "nosticker_db_27256.ic2", 0x0000, 0x8000, CRC(55eb90a8) SHA1(9460cb028f3186c7c09c18db1b413088812e7eef) )
@@ -6769,6 +6802,7 @@ GAMEL( 1997, ddellf97e, ddellf97, norautxp, delv18ap, norautp_state, empty_init,
 GAMEL( 1982, dphl,      0,        dphl,      dphl,      norautp_state, empty_init, ROT0, "M.Kramer Manufacturing.",     "Draw Poker HI-LO (M.Kramer)",       0,                          layout_noraut10 )
 GAMEL( 1983, dphla,     0,        dphla,     dphla,     norautp_state, empty_init, ROT0, "<unknown>",                   "Joker Poker (Kramer, alt)",         0,                          layout_noraut10 )
 GAMEL( 1983, dphljp,    0,        dphl,      dphl,      norautp_state, empty_init, ROT0, "<unknown>",                   "Draw Poker HI-LO (Japanese)",       0,                          layout_noraut10 )
+GAMEL( 1983, dphlac,    0,        dphl,      dphl,      norautp_state, empty_init, ROT0, "Americade",                   "Draw Poker HI-LO (Americade)",      MACHINE_NOT_WORKING,        layout_noraut10 )
 GAMEL( 198?, newhilop,  0,        dphl,      newhilop,  norautp_state, empty_init, ROT0, "Song Won?",                   "New Hi-Low Poker",                  0,                          layout_noraut10 )
 GAMEL( 198?, pkii_dm,   0,        dphl,      newhilop,  norautp_state, empty_init, ROT0, "<unknown>",                   "Draw Poker HI-LO (PKII/DM)",        0,                          layout_noraut10 )
 GAMEL( 1983, krampcb2,  0,        dphl,      dphla,     norautp_state, empty_init, ROT0, "bootleg",                     "Draw Poker HI-LO (bootleg, set 1)", 0,                          layout_noraut10 )
@@ -6783,26 +6817,26 @@ GAMEL( 1983, gtipokrc,  gtipoker, dphl,      gtipoker,  norautp_state, empty_ini
 GAMEL( 1983, gtipokrd,  gtipoker, dphl,      gtipoker,  norautp_state, empty_init, ROT0, "Game Technology Inc.",        "GTI Double or Nothing Draw Poker (GoT PCB, set 3)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING, layout_noraut10 )  // encrypted
 
 GAMEL( 1983, smshilo,   0,        dphl,      dphl,      norautp_state, empty_init, ROT0, "SMS Manufacturing Corp.",     "HI-LO Double Up Joker Poker (set 1)", 0,                          layout_noraut10 )
-GAMEL( 1983, smshiloa,  0,        dphl,      dphl,      norautp_state, empty_init, ROT0, "SMS Manufacturing Corp.",     "HI-LO Double Up Joker Poker (set 2)", MACHINE_NOT_WORKING,        layout_noraut10 )
+GAMEL( 1983, smshiloa,  smshilo,  dphl,      dphl,      norautp_state, empty_init, ROT0, "SMS Manufacturing Corp.",     "HI-LO Double Up Joker Poker (set 2)", MACHINE_NOT_WORKING,        layout_noraut10 )
 GAMEL( 1986, drhl,      0,        drhl,      drhl,      norautp_state, empty_init, ROT0, "Drews Inc.",                  "Drews Revenge (v.2.89, set 1)",     0,                          layout_noraut10 )
 GAMEL( 1986, drhla,     drhl,     drhl,      drhl,      norautp_state, empty_init, ROT0, "Drews Inc.",                  "Drews Revenge (v.2.89, set 2)",     0,                          layout_noraut10 )
 GAMEL( 1982, ssjkrpkr,  0,        ssjkrpkr,  ssjkrpkr,  norautp_state, empty_init, ROT0, "Southern Systems & Assembly", "Southern Systems Joker Poker",      0,                          layout_noraut10 )
 GAMEL( 198?, fastdrwp,  0,        dphl,      fastdrwp,  norautp_state, empty_init, ROT0, "Stern Electronics",           "Fast Draw (poker conversion kit)",  0,                          layout_noraut10 )
 GAMEL( 1983, sureshoto, 0,        dphl,      sureshoto, norautp_state, init_unka,  ROT0, "SMS Manufacturing Corp.",     "Sure Shot (older, dphl hardware)",  MACHINE_IMPERFECT_COLORS,   layout_noraut09_sureshot )
 GAMEL( 198?, dphlunkb,  0,        dphl,      dphla,     norautp_state, empty_init, ROT0, "<unknown>",                   "Unknown Draw Poker HI-LO",          0,                          layout_noraut10 )
-GAME(  1989, pokplus,   0,        dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 1)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1989, pokplusa,  pokplus,  dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 2)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1989, pokplusb,  pokplus,  dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 3)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1984, krampcb3,  0,        krampcb4,  dphl,      norautp_state, empty_init, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 1)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1984, krampcb4,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 2)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1984, krampcb6,  0,        krampcb4,  dphl,      norautp_state, empty_init, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 3)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1984, krampcb7,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 4)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  1984, krampcb8,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 5)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  198?, krampcb9,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "unknown Kramer Poker (encrypted)",  MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  198?, topdraw,   0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 1)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  198?, topdrawa,  topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 2)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  198?, topdrawb,  topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 3)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
-GAME(  198?, topdrawba, topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 4)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encriypted
+GAME(  1989, pokplus,   0,        dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 1)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1989, pokplusa,  pokplus,  dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 2)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1989, pokplusb,  pokplus,  dphlxtnd,  norautp,   norautp_state, empty_init, ROT0, "LJF Corporation",             "Poker Plus 6 Cards (set 3)",        MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1984, krampcb3,  0,        krampcb4,  dphl,      norautp_state, empty_init, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 1)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1984, krampcb4,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 2)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1984, krampcb6,  0,        krampcb4,  dphl,      norautp_state, empty_init, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 3)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1984, krampcb7,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 4)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  1984, krampcb8,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "System 3000 Kramergame Poker (encrypted set 5)", MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  198?, krampcb9,  0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "M.Kramer Manufacturing.",     "unknown Kramer Poker (encrypted)",  MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  198?, topdraw,   0,        krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 1)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  198?, topdrawa,  topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 2)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  198?, topdrawb,  topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 3)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
+GAME(  198?, topdrawba, topdraw,  krampcb4,  dphl,      norautp_state, init_kram4, ROT0, "SMS Manufacturing Corp.",     "Top Draw (encrypted, set 4)",       MACHINE_UNEMULATED_PROTECTION | MACHINE_NOT_WORKING )  // encrypted
 
 // The following ones also have a custom 68705 MCU
 
