@@ -420,6 +420,7 @@ void upd765_family_device::tc_w(bool _tc)
 	if(tc != _tc && _tc) {
 		live_sync();
 		tc_done = true;
+		disable_transfer();
 		tc = _tc;
 		if(cur_live.fi)
 			general_continue(*cur_live.fi);
@@ -787,7 +788,6 @@ void upd765_family_device::fifo_push(uint8_t data, bool internal)
 		disable_transfer();
 }
 
-
 uint8_t upd765_family_device::fifo_pop(bool internal)
 {
 	if(!fifo_pos) {
@@ -813,7 +813,7 @@ void upd765_family_device::fifo_expect(int size, bool write)
 {
 	fifo_expected = size;
 	fifo_write = write;
-	if(fifo_write)
+	if(fifo_write && !tc_done)
 		enable_transfer();
 }
 
@@ -1197,6 +1197,7 @@ void upd765_family_device::live_run(attotime limit)
 			return;
 
 		case WRITE_SECTOR_DATA:
+			cur_live.pll.start_writing(cur_live.tm, cur_live.fi->dev);
 			if(mfm) {
 				if(cur_live.byte_counter < 12)
 					live_write_mfm(0x00);
@@ -1506,6 +1507,11 @@ void upd765_family_device::start_command(int cmd)
 	result_pos = 0;
 	main_phase = PHASE_EXEC;
 	tc_done = false;
+	fifo_pos = 0;
+	if(internal_drq) {
+		internal_drq = false;
+		check_irq();
+	}
 
 	execute_command(cmd);
 }
@@ -1710,7 +1716,7 @@ void upd765_family_device::recalibrate_start(floppy_info &fi)
 	fi.dir = 1;
 	fi.counter = recalibrate_steps;
 	fi.ready = get_ready(command[1] & 3);
-	fi.st0 = command[1] & 7;
+	fi.st0 = command[1] & 3;
 	if(fi.ready) {
 		seek_continue(fi);
 	} else {
@@ -1726,7 +1732,7 @@ void upd765_family_device::seek_start(floppy_info &fi)
 	fi.sub_state = SEEK_WAIT_STEP_TIME_DONE;
 	fi.dir = fi.pcn > command[2] ? 1 : 0;
 	fi.ready = get_ready(command[1] & 3);
-	fi.st0 = command[1] & 7;
+	fi.st0 = command[1] & 3;
 	if(fi.ready) {
 		seek_continue(fi);
 	} else {
@@ -2495,9 +2501,9 @@ void upd765_family_device::format_track_continue(floppy_info &fi)
 		case WAIT_INDEX_DONE:
 			LOGSTATE("WAIT_INDEX_DONE\n");
 			fi.sub_state = TRACK_DONE;
-			cur_live.pll.start_writing(machine().time());
 			LOGSTATE("WRITE_TRACK_PRE_SECTORS\n");
 			live_start(fi, WRITE_TRACK_PRE_SECTORS);
+			cur_live.pll.start_writing(machine().time(), cur_live.fi->dev);
 			return;
 
 		case TRACK_DONE:

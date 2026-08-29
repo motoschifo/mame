@@ -2560,7 +2560,7 @@ void towns_state::machine_reset()
 	m_rtc_busy = false;
 	m_vram_mask_addr = 0;
 	m_towns_pcm_channel_flag = 0;
-	m_towns_pcm_channel_mask = 0xff;
+	m_towns_pcm_channel_mask = 0;
 	m_towns_pcm_irq_flag = 0;
 	m_towns_fm_irq_flag = 0;
 	m_dma_msb[0] = m_dma_msb[1] = 0;
@@ -2626,7 +2626,7 @@ void towns_state::towns_base(machine_config &config)
 	MSX_GENERAL_PURPOSE_PORT(config, m_pad_ports[1], msx_general_purpose_port_devices, "mouse");
 
 	/* video hardware */
-	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+	SCREEN(config, m_screen);
 	m_screen->set_refresh_hz(60);
 	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC(2500)); /* not accurate */
 	m_screen->set_size(768,512);

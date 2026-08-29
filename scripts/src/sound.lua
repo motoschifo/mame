@@ -12,6 +12,8 @@
 files {
 	MAME_DIR .. "src/devices/sound/bbd.cpp",
 	MAME_DIR .. "src/devices/sound/bbd.h",
+	MAME_DIR .. "src/devices/sound/drivesound.cpp",
+	MAME_DIR .. "src/devices/sound/drivesound.h",
 	MAME_DIR .. "src/devices/sound/flt_biquad.cpp",
 	MAME_DIR .. "src/devices/sound/flt_biquad.h",
 	MAME_DIR .. "src/devices/sound/flt_vol.cpp",
@@ -256,6 +258,18 @@ if SOUNDS["CEM3394"] then
 end
 
 
+
+---------------------------------------------------
+-- Creative Labs CT1741 SB16 DSP
+--@src/devices/sound/ct1741.h,SOUNDS["CT1741"] = true
+---------------------------------------------------
+
+if SOUNDS["CT1741"] then
+	files {
+		MAME_DIR .. "src/devices/sound/ct1741.cpp",
+		MAME_DIR .. "src/devices/sound/ct1741.h",
+	}
+end
 
 ---------------------------------------------------
 -- Creative Labs CT1745 SB16 Mixer
@@ -1616,6 +1630,18 @@ if SOUNDS["TA7630"] then
 end
 
 ---------------------------------------------------
+-- STmicroelectronics TDA7433
+--@src/devices/sound/tda7433.h,SOUNDS["TDA7433"] = true
+---------------------------------------------------
+
+if SOUNDS["TDA7433"] then
+	files {
+		MAME_DIR .. "src/devices/sound/tda7433.cpp",
+		MAME_DIR .. "src/devices/sound/tda7433.h",
+	}
+end
+
+---------------------------------------------------
 -- Sanyo LC7535
 --@src/devices/sound/lc7535.h,SOUNDS["LC7535"] = true
 ---------------------------------------------------
@@ -1928,6 +1954,18 @@ if SOUNDS["GT155"] then
 end
 
 ---------------------------------------------------
+-- Nintendo DS Sound
+--@src/devices/sound/nds_sound.h,SOUNDS["NDS_SOUND"] = true
+---------------------------------------------------
+
+if SOUNDS["NDS_SOUND"] then
+	files {
+		MAME_DIR .. "src/devices/sound/nds_sound.cpp",
+		MAME_DIR .. "src/devices/sound/nds_sound.h",
+	}
+end
+
+---------------------------------------------------
 -- Nintendo MMC5 Sound
 --@src/devices/sound/mmc5.h,SOUNDS["MMC5"] = true
 ---------------------------------------------------
@@ -1960,5 +1998,29 @@ if SOUNDS["FZ_PCM"] then
 	files {
 		MAME_DIR .. "src/devices/sound/fz_pcm.cpp",
 		MAME_DIR .. "src/devices/sound/fz_pcm.h",
+	}
+end
+
+---------------------------------------------------
+-- Akai L6009
+--@src/devices/sound/l6009.h,SOUNDS["L6009"] = true
+---------------------------------------------------
+
+if SOUNDS["L6009"] then
+	files {
+		MAME_DIR .. "src/devices/sound/l6009.cpp",
+		MAME_DIR .. "src/devices/sound/l6009.h",
+	}
+end
+
+---------------------------------------------------
+--
+--@src/devices/sound/gt913.h,SOUNDS["GT913"] = true
+---------------------------------------------------
+
+if SOUNDS["GT913"] then
+	files {
+		MAME_DIR .. "src/devices/sound/gt913.cpp",
+		MAME_DIR .. "src/devices/sound/gt913.h",
 	}
 end

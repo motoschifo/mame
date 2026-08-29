@@ -19,6 +19,10 @@ project "formats"
 		"ArchiveSplit",
 	}
 
+	defines {
+		"ZLIB_CONST",
+	}
+
 	includedirs {
 		MAME_DIR .. "src/osd",
 		MAME_DIR .. "src/lib",
@@ -84,6 +88,7 @@ project "formats"
 		MAME_DIR .. "src/lib/formats/fsmgr.cpp",
 		MAME_DIR .. "src/lib/formats/fsblk.h",
 		MAME_DIR .. "src/lib/formats/fsblk.cpp",
+		MAME_DIR .. "src/lib/formats/fsblk_multi.h",
 		MAME_DIR .. "src/lib/formats/fsblk_vec.h",
 		MAME_DIR .. "src/lib/formats/fsblk_vec.cpp",
 		MAME_DIR .. "src/lib/formats/fs_unformatted.h",
@@ -497,6 +502,18 @@ if opt_tool(FORMATS, "C3040_DSK") then
 	files {
 		MAME_DIR.. "src/lib/formats/c3040_dsk.cpp",
 		MAME_DIR.. "src/lib/formats/c3040_dsk.h",
+	}
+end
+
+--------------------------------------------------
+--
+--@src/lib/formats/c1571_dsk.h,FORMATS["C1571_DSK"] = true
+--------------------------------------------------
+
+if opt_tool(FORMATS, "C1571_DSK") then
+	files {
+		MAME_DIR.. "src/lib/formats/c1571_dsk.cpp",
+		MAME_DIR.. "src/lib/formats/c1571_dsk.h",
 	}
 end
 
@@ -1616,19 +1633,6 @@ if opt_tool(FORMATS, "P2000T_CAS") then
 	}
 end
 
-
---------------------------------------------------
---
---@src/lib/formats/p6001_cas.h,FORMATS["P6001_CAS"] = true
---------------------------------------------------
-
-if opt_tool(FORMATS, "P6001_CAS") then
-	files {
-		MAME_DIR.. "src/lib/formats/p6001_cas.cpp",
-		MAME_DIR.. "src/lib/formats/p6001_cas.h",
-	}
-end
-
 --------------------------------------------------
 --
 --@src/lib/formats/pasti_dsk.h,FORMATS["PASTI_DSK"] = true
@@ -2454,6 +2458,18 @@ if opt_tool(FORMATS, "FS_HP98X5") then
 	files {
 		MAME_DIR.. "src/lib/formats/fs_hp98x5.cpp",
 		MAME_DIR.. "src/lib/formats/fs_hp98x5.h",
+	}
+end
+
+--------------------------------------------------
+--
+--@src/lib/formats/fs_adam_eos.h,FORMATS["FS_ADAM_EOS"] = true
+--------------------------------------------------
+
+if opt_tool(FORMATS, "FS_ADAM_EOS") then
+	files {
+		MAME_DIR.. "src/lib/formats/fs_adam_eos.cpp",
+		MAME_DIR.. "src/lib/formats/fs_adam_eos.h",
 	}
 end
 

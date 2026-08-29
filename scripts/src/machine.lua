@@ -307,6 +307,18 @@ end
 
 ---------------------------------------------------
 --
+--@src/devices/machine/neo_zmc.h,MACHINES["NEO_ZMC"] = true
+---------------------------------------------------
+
+if MACHINES["NEO_ZMC"] then
+	files {
+		MAME_DIR .. "src/devices/machine/neo_zmc.cpp",
+		MAME_DIR .. "src/devices/machine/neo_zmc.h",
+	}
+end
+
+---------------------------------------------------
+--
 --@src/devices/machine/53c810.h,MACHINES["LSI53C810"] = true
 ---------------------------------------------------
 
@@ -1515,19 +1527,13 @@ end
 
 ---------------------------------------------------
 --
---@src/devices/machine/gt913_io.h,MACHINES["GT913"] = true
---@src/devices/machine/gt913_kbd.h,MACHINES["GT913"] = true
---@src/devices/machine/gt913_snd.h,MACHINES["GT913"] = true
+--@src/devices/machine/gt913_kbd.h,MACHINES["GT913_KBD"] = true
 ---------------------------------------------------
 
-if MACHINES["GT913"] then
+if MACHINES["GT913_KBD"] then
 	files {
-		MAME_DIR .. "src/devices/machine/gt913_io.cpp",
-		MAME_DIR .. "src/devices/machine/gt913_io.h",
 		MAME_DIR .. "src/devices/machine/gt913_kbd.cpp",
 		MAME_DIR .. "src/devices/machine/gt913_kbd.h",
-		MAME_DIR .. "src/devices/machine/gt913_snd.cpp",
-		MAME_DIR .. "src/devices/machine/gt913_snd.h",
 	}
 end
 
@@ -2416,6 +2422,18 @@ end
 
 ---------------------------------------------------
 --
+--@src/devices/machine/mc14529.h,MACHINES["MC14529"] = true
+---------------------------------------------------
+
+if MACHINES["MC14529"] then
+	files {
+		MAME_DIR .. "src/devices/machine/mc14529.cpp",
+		MAME_DIR .. "src/devices/machine/mc14529.h",
+	}
+end
+
+---------------------------------------------------
+--
 --@src/devices/machine/mc6843.h,MACHINES["MC6843"] = true
 ---------------------------------------------------
 
@@ -2822,18 +2840,6 @@ if MACHINES["NANDFLASH"] then
 	files {
 		MAME_DIR .. "src/devices/machine/nandflash.cpp",
 		MAME_DIR .. "src/devices/machine/nandflash.h",
-	}
-end
-
----------------------------------------------------
---
---@src/devices/machine/nmc9306.h,MACHINES["NMC9306"] = true
----------------------------------------------------
-
-if MACHINES["NMC9306"] then
-	files {
-		MAME_DIR .. "src/devices/machine/nmc9306.cpp",
-		MAME_DIR .. "src/devices/machine/nmc9306.h",
 	}
 end
 
@@ -3370,6 +3376,18 @@ end
 
 ---------------------------------------------------
 --
+--@src/devices/machine/s35180.h,MACHINES["S35180"] = true
+---------------------------------------------------
+
+if MACHINES["S35180"] then
+	files {
+		MAME_DIR .. "src/devices/machine/s35180.cpp",
+		MAME_DIR .. "src/devices/machine/s35180.h",
+	}
+end
+
+---------------------------------------------------
+--
 --@src/devices/machine/s3520cf.h,MACHINES["S3520CF"] = true
 ---------------------------------------------------
 
@@ -3410,6 +3428,28 @@ if MACHINES["S3C44B0"] then
 	files {
 		MAME_DIR .. "src/devices/machine/s3c44b0.cpp",
 		MAME_DIR .. "src/devices/machine/s3c44b0.h",
+	}
+end
+
+---------------------------------------------------
+--
+--@src/devices/machine/s97801.h,MACHINES["S97801"] = true
+---------------------------------------------------
+
+if MACHINES["S97801"] then
+	files {
+		MAME_DIR .. "src/devices/machine/s97801.cpp",
+		MAME_DIR .. "src/devices/machine/s97801.h",
+		MAME_DIR .. "src/devices/machine/s97801_kbd.cpp",
+		MAME_DIR .. "src/devices/machine/s97801_kbd.h",
+	}
+
+	dependency {
+		{ MAME_DIR .. "src/devices/machine/s97801.cpp", GEN_DIR .. "emu/layout/s97801.lh" },
+	}
+
+	custombuildtask {
+		layoutbuildtask("emu/layout", "s97801"),
 	}
 end
 
@@ -3584,7 +3624,7 @@ end
 --@src/devices/machine/spg2xx.h,MACHINES["SPG2XX"] = true
 --@src/devices/machine/spg110.h,MACHINES["SPG2XX"] = true
 --@src/devices/machine/generalplus_gpl162xx_soc.h,MACHINES["SPG2XX"] = true
---@src/devices/machine/generalplus_gpl1625x_soc.h,MACHINES["SPG2XX"] = true
+--@src/devices/machine/generalplus_gpl162xx_b_soc.h,MACHINES["SPG2XX"] = true
 --@src/devices/machine/generalplus_gpl951xx_soc.h,MACHINES["SPG2XX"] = true
 --@src/devices/machine/generalplus_gpce4_soc.h,MACHINES["SPG2XX"] = true
 ---------------------------------------------------
@@ -3607,8 +3647,8 @@ if MACHINES["SPG2XX"] then
 		MAME_DIR .. "src/devices/machine/spg110_video.h",
 		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_soc.cpp",
 		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_soc.h",
-		MAME_DIR .. "src/devices/machine/generalplus_gpl1625x_soc.cpp",
-		MAME_DIR .. "src/devices/machine/generalplus_gpl1625x_soc.h",
+		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_b_soc.cpp",
+		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_b_soc.h",
 		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_soc_video.cpp",
 		MAME_DIR .. "src/devices/machine/generalplus_gpl162xx_soc_video.h",
 		MAME_DIR .. "src/devices/machine/generalplus_gpl951xx_soc.cpp",
@@ -5686,5 +5726,17 @@ if MACHINES["QUADMOUSE"] then
 	files {
 		MAME_DIR .. "src/devices/machine/quadmouse.cpp",
 		MAME_DIR .. "src/devices/machine/quadmouse.h",
+	}
+end
+
+---------------------------------------------------
+--
+--@src/devices/machine/at_ssrt.h,MACHINES["AT_SSRT"] = true
+---------------------------------------------------
+
+if MACHINES["AT_SSRT"] then
+	files {
+		MAME_DIR .. "src/devices/machine/at_ssrt.cpp",
+		MAME_DIR .. "src/devices/machine/at_ssrt.h",
 	}
 end
